@@ -342,6 +342,10 @@ def _init_state():
         # Small Scope pack (short, brief-driven response pack) -- one more option within
         # the same pipeline, not a separate app. See PROPOSAL_FORMAT_LABELS above.
         "proposal_format": "formal",
+        # Which proposal_format st.session_state.sections was actually built under --
+        # see _structure_format_stale(). None until Proposal Structure (tab 4) is
+        # generated at least once.
+        "_sections_built_format": None,
         # Sign-off details only -- the cover page/footer already carry project, client,
         # and bidder details, so no separate recipient/ref/date/subject fields are needed.
         "letter_sender_name": "", "letter_sender_title": "",
@@ -444,6 +448,26 @@ def _rebuild_structure():
     st.session_state.allocations = allocations
     st.session_state.sections = sections
     st.session_state.guidance_notes = guidance_generator.generate_all_guidance_notes(sections)
+    # Remember which format these sections were built for -- see
+    # _structure_format_stale() below. Without this, switching the Proposal
+    # format selector (tab 1) after already generating structure leaves
+    # st.session_state.sections holding the OLD format's section titles
+    # (e.g. "Executive Summary"/"Relevant Experience" instead of "Project
+    # Understanding"/"Methodology and Deliverables"), so _draftable_sections()
+    # silently matches nothing -- drafting "succeeds" against an empty list
+    # and the user sees "Draft generation complete" with nothing to show for
+    # it, no error anywhere.
+    st.session_state["_sections_built_format"] = st.session_state.proposal_format
+
+
+def _structure_format_stale() -> bool:
+    """True when sections exist but were generated under a different Proposal
+    format than the one currently selected -- see the comment in
+    _rebuild_structure() above for why this matters."""
+    return (
+        st.session_state.sections is not None
+        and st.session_state.get("_sections_built_format") != st.session_state.proposal_format
+    )
 
 
 def _is_letter() -> bool:
@@ -1533,6 +1557,14 @@ with tabs[3]:
         _rebuild_structure()
         st.success(f"Generated {len(st.session_state.sections)} section(s).")
 
+    if _structure_format_stale():
+        st.warning(
+            "You changed the Proposal format (tab 1) after these sections were generated, so "
+            "the list below is still built for the *previous* format and won't match what "
+            "drafting/export expect (e.g. no 'Project Understanding' section for a Small Scope "
+            "pack). Click **Generate Proposal Structure** above again to refresh it."
+        )
+
     sections = st.session_state.sections
     if sections:
         st.dataframe(
@@ -1658,8 +1690,23 @@ with tabs[5]:
     if not ready:
         st.info("Generate the Proposal Structure (tab 4) and configure an AI provider in the sidebar first.")
 
+    if _structure_format_stale():
+        st.warning(
+            "The Proposal format (tab 1) was changed after the current sections were generated. "
+            "Go to tab 4 and click **Generate Proposal Structure** again before drafting, or "
+            "this will silently draft nothing for the sections that only exist in this format."
+        )
+
     if st.button("Generate First-Pass Drafts", type="primary", disabled=not ready):
         targets = _draftable_sections(st.session_state.sections)
+        if not targets:
+            st.error(
+                "Nothing to draft -- the current sections don't match any of this format's "
+                "AI-drafted section titles. This usually means the Proposal format (tab 1) was "
+                "changed after Proposal Structure was generated. Go to tab 4 and click "
+                "**Generate Proposal Structure** again, then retry this."
+            )
+            st.stop()
         progress = st.progress(0.0, text="Drafting...")
 
         def _progress_cb(done, total, title):
@@ -3208,6 +3255,14 @@ with tabs[9]:
         if not ready:
             st.info("Generate the Proposal Structure (tab 4) first.")
 
+        if _structure_format_stale():
+            st.warning(
+                "The Proposal format (tab 1) was changed after these sections were generated -- "
+                "go to tab 4 and click **Generate Proposal Structure** again first, or the "
+                "exported pack will be missing the Introduction/Methodology drafts even if you "
+                "already ran drafting."
+            )
+
         if st.button("Generate Small Scope Pack DOCX", type="primary", disabled=not ready):
             with st.spinner("Assembling document..."):
                 cover_image = st.session_state.project_photo_bytes[0] if st.session_state.project_photo_bytes else None
@@ -3264,6 +3319,13 @@ with tabs[9]:
         ready = st.session_state.sections is not None and st.session_state.guidance_notes is not None
         if not ready:
             st.info("Generate the Proposal Structure (tab 4) first. Drafts, graphics, and fee estimate are optional but recommended before exporting.")
+
+        if _structure_format_stale():
+            st.warning(
+                "The Proposal format (tab 1) was changed after these sections were generated -- "
+                "go to tab 4 and click **Generate Proposal Structure** again first, or the "
+                "exported pack may not match what you drafted."
+            )
 
         if st.button("Generate DOCX", type="primary", disabled=not ready):
             with st.spinner("Assembling document..."):
