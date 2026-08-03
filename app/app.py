@@ -81,6 +81,7 @@ from modules import (
     program_schedule,
     project_store,
     local_project_store,
+    cloud_project_store,
     resourcing,
     org_chart,
     org_chart_pptx,
@@ -621,7 +622,15 @@ def _maybe_autosave() -> None:
     including every single data_editor cell edit in the Fees & Program tab --
     writing a multi-MB zip to disk that often would be wasteful and could lag
     the UI). Silently skipped if there's no project name yet, so a blank
-    session doesn't create a stray 'untitled_project' file."""
+    session doesn't create a stray 'untitled_project' file.
+
+    In SAAS_MODE, saves to the database under the logged-in user's account
+    (cloud_project_store) instead of the server's local disk -- otherwise
+    every user's in-progress work (uploaded briefs, drafts, team CVs) exists
+    ONLY in that one browser tab's live session, and is lost outright on any
+    page refresh, dropped connection, or redeploy, with no way to recover it
+    (see the "My projects" sidebar section, which reads from the same
+    table). local_project_store is kept for the non-SaaS local prototype."""
     if not st.session_state._autosave_enabled:
         return
     project_id = _project_identifier()
@@ -631,13 +640,18 @@ def _maybe_autosave() -> None:
     if now - st.session_state._last_autosave_ts < AUTOSAVE_INTERVAL_SECONDS:
         return
     try:
-        path = local_project_store.save_local(st.session_state, project_id)
-        st.session_state._last_autosave_ts = now
-        st.session_state._last_autosave_path = path
+        if IS_SAAS_MODE and current_user:
+            slug = cloud_project_store.save_cloud(current_user.id, st.session_state, project_id)
+            st.session_state._last_autosave_ts = now
+            st.session_state._last_autosave_path = slug
+        else:
+            path = local_project_store.save_local(st.session_state, project_id)
+            st.session_state._last_autosave_ts = now
+            st.session_state._last_autosave_path = path
     except Exception:
         # Auto-save is a convenience, not a step the user is waiting on -- a failure here
-        # (e.g. disk full, folder permissions) shouldn't interrupt whatever they were doing.
-        # The manual Save Project button remains available regardless.
+        # (e.g. disk full, folder permissions, a transient DB hiccup) shouldn't interrupt
+        # whatever they were doing. The manual Save Project button remains available regardless.
         pass
 
 
@@ -712,14 +726,13 @@ with st.sidebar:
     )
 
     if not IS_SAAS_MODE:
-        # Disabled in SAAS_MODE on purpose: this writes to a 'projects/'
-        # folder on the *server's* local disk, which in a hosted, multi-
-        # tenant deployment would be shared across every logged-in user's
-        # browser sessions (and wiped on every redeploy) -- a real data
-        # leak, not just a rough edge. Persisted per-account autosave
-        # backed by the database (db.py) is a good follow-up; for now,
-        # SaaS users rely on the DB-backed Proposal Library (Export Pack
-        # tab) plus manual "Export / import a file" below.
+        # Local-disk autosave -- only correct for the original single-user
+        # desktop prototype. In SAAS_MODE this is replaced by the DB-backed
+        # "My projects" branch below (see cloud_project_store.py): writing
+        # to a 'projects/' folder on the *server's* disk in a hosted,
+        # multi-tenant deployment would be shared across every logged-in
+        # user's browser sessions (a real data leak, not just a rough edge),
+        # and Railway's container disk is wiped on every redeploy regardless.
         st.markdown("**This computer**")
         st.checkbox(
             "Auto-save as I work", key="_autosave_enabled",
@@ -750,6 +763,45 @@ with st.sidebar:
                     st.rerun()
         else:
             st.caption("No local saves yet.")
+
+    elif current_user:
+        # DB-backed equivalent of "This computer" above, scoped to this
+        # user's account (see cloud_project_store.py) -- so uploads, brief
+        # analysis, drafts, and team assignments survive a page refresh, a
+        # dropped connection, or the app being redeployed, instead of living
+        # only in this one browser tab's live session.
+        st.markdown("**My projects**")
+        st.checkbox(
+            "Auto-save as I work", key="_autosave_enabled",
+            help=f"Saves to your account, at most every {AUTOSAVE_INTERVAL_SECONDS}s of activity -- "
+                 "only once a project name is entered (tab 1). Lets you pick back up later, even "
+                 "after closing the tab or a refresh.",
+        )
+        if st.session_state._last_autosave_path:
+            st.caption(f"Last saved {datetime.fromtimestamp(st.session_state._last_autosave_ts).strftime('%H:%M:%S')}")
+        elif not _project_identifier():
+            st.caption("Enter a project or tender name (tab 1) to enable auto-save.")
+
+        cloud_projects = cloud_project_store.list_cloud_projects(current_user.id)
+        if cloud_projects:
+            options = [p["display_name"] for p in cloud_projects]
+            chosen = st.selectbox("Recent projects", options, key="_cloud_project_pick")
+            chosen_entry = next(p for p in cloud_projects if p["display_name"] == chosen)
+            lcol1, lcol2 = st.columns(2)
+            with lcol1:
+                if st.button("Open", key="_open_cloud_project"):
+                    try:
+                        loaded_state = cloud_project_store.load_cloud(current_user.id, chosen_entry["id"])
+                        _apply_loaded_project(loaded_state, f"'{chosen_entry['display_name']}'")
+                    except project_store.ProjectLoadError as exc:
+                        st.error(str(exc))
+            with lcol2:
+                if st.button("Delete", key="_delete_cloud_project"):
+                    cloud_project_store.delete_cloud(current_user.id, chosen_entry["id"])
+                    st.rerun()
+        else:
+            st.caption("No saved projects yet -- one will appear here shortly after you start "
+                       "one (auto-save kicks in once you enter a project name on tab 1).")
 
     st.markdown("**Export / import a file**")
     st.caption("For sharing a project or keeping a backup outside this computer.")

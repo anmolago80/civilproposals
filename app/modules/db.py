@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     create_engine, Column, String, Integer, DateTime, Boolean, LargeBinary,
-    ForeignKey, Text, select, func,
+    ForeignKey, Text, select, func, UniqueConstraint,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
@@ -92,6 +92,7 @@ class User(Base):
 
     library_entries = relationship("LibraryEntry", back_populates="user", cascade="all, delete-orphan")
     proposal_usage = relationship("ProposalUsage", back_populates="user", cascade="all, delete-orphan")
+    saved_projects = relationship("SavedProject", back_populates="user", cascade="all, delete-orphan")
 
 
 class ProposalUsage(Base):
@@ -131,6 +132,30 @@ class LibraryEntry(Base):
     docx_bytes = Column(LargeBinary, nullable=False)
 
     user = relationship("User", back_populates="library_entries")
+
+
+class SavedProject(Base):
+    """DB-backed replacement for local_project_store.py's local-disk
+    autosave/"Recent projects" -- one row per in-progress project per user,
+    reusing the same slug (derived from the project name) overwrites it, same
+    "current state only, not version history" behaviour as the local version.
+    project_bytes is exactly what project_store.save_project() produces (a
+    .tenderproj.zip's bytes): every session_state field except AI
+    credentials, so this is safe to store per-user rather than per-server-disk.
+    See modules/cloud_project_store.py, which app.py actually calls."""
+    __tablename__ = "saved_projects"
+    __table_args__ = (UniqueConstraint("user_id", "slug", name="uq_saved_project_user_slug"),)
+
+    id = Column(String, primary_key=True, default=_uid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+
+    name = Column(String, nullable=False)   # display name, e.g. "Jindabyne Barrier"
+    slug = Column(String, nullable=False, index=True)
+    project_bytes = Column(LargeBinary, nullable=False)
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+    user = relationship("User", back_populates="saved_projects")
 
 
 def init_db() -> None:
