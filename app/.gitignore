@@ -1,0 +1,12 @@
+# Never commit your real .env -- it holds your actual API key(s).
+# .env.example (checked in) is the safe template to share instead.
+.env
+
+__pycache__/
+*.pyc
+venv/
+outputs/
+projects/
+library/
+civilproposals_local.db
+.streamlit/secrets.toml

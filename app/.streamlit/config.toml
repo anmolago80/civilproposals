@@ -1,0 +1,18 @@
+[theme]
+# CivilProposals brand palette -- steel blue (professional, engineering-adjacent
+# without leaning on any single firm's colors) with a clean white canvas.
+# Change these to match your final logo/brand colors any time -- no code
+# change needed elsewhere, Streamlit re-themes every widget from here.
+primaryColor = "#1E5B94"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F3F7"
+textColor = "#1A2733"
+font = "sans serif"
+
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false

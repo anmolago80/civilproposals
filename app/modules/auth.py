@@ -1,0 +1,295 @@
+"""
+auth.py
+
+Account signup/login, session persistence (via a signed browser cookie), and
+free-trial / subscription access gating for the CivilProposals SaaS build.
+
+Design notes:
+  - Passwords are hashed with bcrypt, never stored or logged in plain text.
+  - "Logged in" is proven by a signed, timestamped token (itsdangerous)
+    stored in a browser cookie via extra_streamlit_components.CookieManager
+    -- Streamlit has no built-in multi-user session concept, so without a
+    cookie every browser refresh would log the user out.
+  - The trial is usage-based (N distinct proposals), not time-based, per
+    product decision: 3 free proposals, then a $200/month subscription
+    (see billing.py) that also covers AI usage -- the app no longer asks
+    each user for their own AI provider key in SAAS_MODE (see app.py).
+  - Nothing in this module trusts st.session_state alone for "is this user
+    allowed in" -- session_state is rebuilt from the verified cookie token
+    on every rerun, so a user can't fake being logged in by manipulating
+    client-side state.
+"""
+
+from __future__ import annotations
+
+import os
+import time
+
+import bcrypt
+import streamlit as st
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+
+from modules import db
+
+APP_SECRET_KEY = os.environ.get("APP_SECRET_KEY", "").strip()
+if not APP_SECRET_KEY:
+    # Fine for local dev (sessions just won't survive a process restart);
+    # Railway deployment MUST set a real APP_SECRET_KEY env var, or every
+    # deploy invalidates every logged-in user's cookie.
+    APP_SECRET_KEY = "dev-only-insecure-secret-change-me"
+
+COOKIE_NAME = "civilproposals_session"
+COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60  # 30 days
+
+_serializer = URLSafeTimedSerializer(APP_SECRET_KEY, salt="civilproposals-auth")
+
+
+# ---------------------------------------------------------------------------
+# Password hashing
+# ---------------------------------------------------------------------------
+
+def hash_password(plain_password: str) -> str:
+    return bcrypt.hashpw(plain_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(plain_password: str, password_hash: str) -> bool:
+    try:
+        return bcrypt.checkpw(plain_password.encode("utf-8"), password_hash.encode("utf-8"))
+    except (ValueError, TypeError):
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Signed session tokens
+# ---------------------------------------------------------------------------
+
+def make_token(user_id: str) -> str:
+    return _serializer.dumps({"uid": user_id})
+
+
+def verify_token(token: str) -> str | None:
+    """Returns the user_id if the token is valid and not expired, else None."""
+    if not token:
+        return None
+    try:
+        data = _serializer.loads(token, max_age=COOKIE_MAX_AGE_SECONDS)
+        return data.get("uid")
+    except (BadSignature, SignatureExpired, Exception):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Cookie manager (one instance per session, cached in session_state)
+# ---------------------------------------------------------------------------
+
+def _cookie_manager():
+    import extra_streamlit_components as stx
+    if "_cookie_manager" not in st.session_state:
+        st.session_state["_cookie_manager"] = stx.CookieManager(key="cp_cookie_manager")
+    return st.session_state["_cookie_manager"]
+
+
+def _get_cookie_token() -> str | None:
+    cm = _cookie_manager()
+    return cm.get(COOKIE_NAME)
+
+
+def _set_cookie_token(token: str) -> None:
+    cm = _cookie_manager()
+    expires_at = time.time() + COOKIE_MAX_AGE_SECONDS
+    cm.set(COOKIE_NAME, token, expires_at=expires_at, key="cp_cookie_set")
+
+
+def _clear_cookie_token() -> None:
+    cm = _cookie_manager()
+    try:
+        cm.delete(COOKIE_NAME, key="cp_cookie_delete")
+    except KeyError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# User lookup / creation
+# ---------------------------------------------------------------------------
+
+def get_user_by_email(email: str) -> db.User | None:
+    email = (email or "").strip().lower()
+    with db.get_session() as s:
+        return s.query(db.User).filter(db.User.email == email).first()
+
+
+def get_user_by_id(user_id: str) -> db.User | None:
+    with db.get_session() as s:
+        return s.query(db.User).filter(db.User.id == user_id).first()
+
+
+def create_user(email: str, password: str, name: str = "", firm_name: str = "") -> db.User:
+    email = (email or "").strip().lower()
+    if not email or "@" not in email:
+        raise ValueError("Enter a valid email address.")
+    if len(password or "") < 8:
+        raise ValueError("Password must be at least 8 characters.")
+    if get_user_by_email(email):
+        raise ValueError("An account with that email already exists. Try logging in instead.")
+
+    user = db.User(
+        email=email,
+        password_hash=hash_password(password),
+        name=(name or "").strip(),
+        firm_name=(firm_name or "").strip(),
+    )
+    with db.get_session() as s:
+        s.add(user)
+        s.commit()
+        s.refresh(user)
+        return user
+
+
+def authenticate(email: str, password: str) -> db.User | None:
+    user = get_user_by_email(email)
+    if not user:
+        return None
+    if not verify_password(password, user.password_hash):
+        return None
+    return user
+
+
+# ---------------------------------------------------------------------------
+# Login-required gate -- call once near the top of app.py
+# ---------------------------------------------------------------------------
+
+def current_user() -> db.User | None:
+    """Returns the logged-in user for this script run, resolving from the
+    signed cookie if session_state doesn't already have it cached."""
+    if st.session_state.get("_auth_user_id"):
+        return get_user_by_id(st.session_state["_auth_user_id"])
+
+    token = _get_cookie_token()
+    user_id = verify_token(token) if token else None
+    if not user_id:
+        return None
+    user = get_user_by_id(user_id)
+    if user:
+        st.session_state["_auth_user_id"] = user.id
+    return user
+
+
+def log_in(user: db.User) -> None:
+    st.session_state["_auth_user_id"] = user.id
+    _set_cookie_token(make_token(user.id))
+
+
+def log_out() -> None:
+    st.session_state.pop("_auth_user_id", None)
+    _clear_cookie_token()
+
+
+def require_login() -> db.User:
+    """Renders a login/signup screen and st.stop()s if nobody's logged in.
+    Returns the logged-in User otherwise. Call this before rendering any of
+    the app's real tabs."""
+    user = current_user()
+    if user:
+        return user
+
+    st.title("📐 CivilProposals 🧪 Beta")
+    st.caption("AI-assisted tender & proposal drafting for civil engineering firms")
+    st.info(
+        "**This product is in Beta.** Features, pricing, and behaviour may still change, and "
+        "you may run into rough edges -- always review AI-drafted content before it goes into "
+        "a real submission. We'd genuinely appreciate feedback on anything that breaks or feels off.",
+        icon="🧪",
+    )
+
+    tab_login, tab_signup = st.tabs(["Log in", "Create account"])
+
+    with tab_login:
+        with st.form("login_form"):
+            email = st.text_input("Email")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Log in", type="primary")
+        if submitted:
+            user = authenticate(email, password)
+            if user:
+                log_in(user)
+                st.rerun()
+            else:
+                st.error("Incorrect email or password.")
+
+    with tab_signup:
+        with st.form("signup_form"):
+            name = st.text_input("Your name")
+            firm_name = st.text_input("Firm name")
+            email = st.text_input("Work email", key="signup_email")
+            password = st.text_input("Password", type="password", key="signup_password",
+                                      help="At least 8 characters.")
+            st.caption(f"Free trial: {DEFAULT_TRIAL_LIMIT} full proposals, no card required. "
+                       f"Then $200/month, cancel anytime.")
+            submitted = st.form_submit_button("Create account", type="primary")
+        if submitted:
+            try:
+                user = create_user(email, password, name, firm_name)
+                log_in(user)
+                st.rerun()
+            except ValueError as e:
+                st.error(str(e))
+
+    st.stop()
+
+
+DEFAULT_TRIAL_LIMIT = 3
+
+
+# ---------------------------------------------------------------------------
+# Trial / subscription access
+# ---------------------------------------------------------------------------
+
+def get_access_status(user: db.User) -> dict:
+    """
+    Returns {"allowed": bool, "reason": str, "trial_remaining": int,
+    "subscribed": bool} -- the single source of truth app.py uses to decide
+    whether to show the paywall instead of the tabs, and whether to count a
+    new proposal against the trial.
+    """
+    subscribed = user.subscription_status in ("active", "past_due")  # grace period on past_due
+    trial_remaining = max(0, (user.trial_proposals_limit or 0) - (user.trial_proposals_used or 0))
+    allowed = subscribed or trial_remaining > 0
+    return {
+        "allowed": allowed,
+        "subscribed": user.subscription_status == "active",
+        "past_due": user.subscription_status == "past_due",
+        "trial_remaining": trial_remaining,
+        "trial_limit": user.trial_proposals_limit or 0,
+    }
+
+
+def record_proposal_usage(user: db.User, project_key: str, project_name: str = "") -> bool:
+    """
+    Call this once, the first time a user runs Tender Analysis for a given
+    project (project_key should be a stable identifier for that project --
+    e.g. project name + tender name). If this project hasn't already been
+    counted and the user isn't on a paid subscription, increments
+    trial_proposals_used. Returns True if this call actually consumed a
+    trial credit (idempotent otherwise -- re-analysing the same project
+    never double-counts).
+    """
+    project_key = (project_key or "").strip().lower()
+    if not project_key:
+        return False
+
+    with db.get_session() as s:
+        db_user = s.query(db.User).filter(db.User.id == user.id).first()
+        if not db_user:
+            return False
+        already = s.query(db.ProposalUsage).filter(
+            db.ProposalUsage.user_id == db_user.id,
+            db.ProposalUsage.project_key == project_key,
+        ).first()
+        if already:
+            return False
+
+        s.add(db.ProposalUsage(user_id=db_user.id, project_key=project_key, project_name=project_name))
+        if db_user.subscription_status != "active":
+            db_user.trial_proposals_used = (db_user.trial_proposals_used or 0) + 1
+        s.commit()
+        return True
