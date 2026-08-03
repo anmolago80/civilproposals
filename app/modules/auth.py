@@ -23,7 +23,7 @@ Design notes:
 from __future__ import annotations
 
 import os
-import time
+from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import streamlit as st
@@ -96,7 +96,11 @@ def _get_cookie_token() -> str | None:
 
 def _set_cookie_token(token: str) -> None:
     cm = _cookie_manager()
-    expires_at = time.time() + COOKIE_MAX_AGE_SECONDS
+    # extra_streamlit_components.CookieManager.set() calls .isoformat() on
+    # expires_at internally, so this must be a real datetime -- a Unix
+    # timestamp (time.time()) crashes with "float object has no attribute
+    # isoformat".
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=COOKIE_MAX_AGE_SECONDS)
     cm.set(COOKIE_NAME, token, expires_at=expires_at, key="cp_cookie_set")
 
 
@@ -192,47 +196,77 @@ def require_login() -> db.User:
     if user:
         return user
 
-    st.title("📐 CivilProposals 🧪 Beta")
-    st.caption("AI-assisted tender & proposal drafting for civil engineering firms")
-    st.info(
-        "**This product is in Beta.** Features, pricing, and behaviour may still change, and "
-        "you may run into rough edges -- always review AI-drafted content before it goes into "
-        "a real submission. We'd genuinely appreciate feedback on anything that breaks or feels off.",
-        icon="🧪",
+    from modules import branding  # imported here to avoid a circular import at module load time
+
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stForm"] {
+            border: 1px solid #E2E8F0;
+            border-radius: 14px;
+            padding: 1.75rem 1.75rem 1rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
 
-    tab_login, tab_signup = st.tabs(["Log in", "Create account"])
+    left, right = st.columns([1.15, 1], gap="large")
 
-    with tab_login:
-        with st.form("login_form"):
-            email = st.text_input("Email")
-            password = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Log in", type="primary")
-        if submitted:
-            user = authenticate(email, password)
-            if user:
-                log_in(user)
-                st.rerun()
-            else:
-                st.error("Incorrect email or password.")
+    with left:
+        # Built as single-line, unindented HTML strings on purpose -- see
+        # the comment in branding.brand_html() about st.markdown() treating
+        # indented multi-line blocks as literal Markdown code blocks even
+        # with unsafe_allow_html=True.
+        headline_html = (
+            branding.brand_html(logo_size=52, wordmark_size="1.9rem", show_beta=True)
+            + '<div style="margin-top:22px;font-size:2rem;font-weight:800;letter-spacing:-0.02em;color:#0F172A;line-height:1.2;">Turn a tender brief into a first-pass proposal in minutes</div>'
+            + '<div style="margin-top:12px;color:#5A6B7A;font-size:1.02rem;line-height:1.55;max-width:480px;">Compliance matrix, weighted structure, first-pass drafts, and a designed Word export -- built specifically for civil engineering firms.</div>'
+        )
+        st.markdown(headline_html, unsafe_allow_html=True)
 
-    with tab_signup:
-        with st.form("signup_form"):
-            name = st.text_input("Your name")
-            firm_name = st.text_input("Firm name")
-            email = st.text_input("Work email", key="signup_email")
-            password = st.text_input("Password", type="password", key="signup_password",
-                                      help="At least 8 characters.")
-            st.caption(f"Free trial: {DEFAULT_TRIAL_LIMIT} full proposals, no card required. "
-                       f"Then $200/month, cancel anytime.")
-            submitted = st.form_submit_button("Create account", type="primary")
-        if submitted:
-            try:
-                user = create_user(email, password, name, firm_name)
-                log_in(user)
-                st.rerun()
-            except ValueError as e:
-                st.error(str(e))
+        beta_html = (
+            '<div style="margin-top:26px;padding:16px 18px;background:#FFF8EE;border:1px solid #F3D9AE;border-radius:12px;font-size:.88rem;color:#7A4A0A;">'
+            "🧪 <strong>This product is in Beta.</strong> Features, pricing, and behaviour may still change, "
+            "and you may run into rough edges -- always review AI-drafted content before it goes into a real "
+            "submission. We'd genuinely appreciate feedback on anything that breaks or feels off."
+            "</div>"
+        )
+        st.markdown(beta_html, unsafe_allow_html=True)
+
+    with right:
+        tab_login, tab_signup = st.tabs(["Log in", "Create account"])
+
+        with tab_login:
+            with st.form("login_form"):
+                email = st.text_input("Email")
+                password = st.text_input("Password", type="password")
+                submitted = st.form_submit_button("Log in", type="primary", use_container_width=True)
+            if submitted:
+                user = authenticate(email, password)
+                if user:
+                    log_in(user)
+                    st.rerun()
+                else:
+                    st.error("Incorrect email or password.")
+
+        with tab_signup:
+            with st.form("signup_form"):
+                name = st.text_input("Your name")
+                firm_name = st.text_input("Firm name")
+                email = st.text_input("Work email", key="signup_email")
+                password = st.text_input("Password", type="password", key="signup_password",
+                                          help="At least 8 characters.")
+                st.caption(f"Free trial: {DEFAULT_TRIAL_LIMIT} full proposals, no card required. "
+                           f"Then $200/month, cancel anytime.")
+                submitted = st.form_submit_button("Create account", type="primary", use_container_width=True)
+            if submitted:
+                try:
+                    user = create_user(email, password, name, firm_name)
+                    log_in(user)
+                    st.rerun()
+                except ValueError as e:
+                    st.error(str(e))
 
     st.stop()
 

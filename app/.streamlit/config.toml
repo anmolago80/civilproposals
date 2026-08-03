@@ -1,12 +1,13 @@
 [theme]
-# CivilProposals brand palette -- steel blue (professional, engineering-adjacent
-# without leaning on any single firm's colors) with a clean white canvas.
-# Change these to match your final logo/brand colors any time -- no code
-# change needed elsewhere, Streamlit re-themes every widget from here.
-primaryColor = "#1E5B94"
+# CivilProposals brand palette -- "modern & confident": a vivid, saturated
+# blue (not the muted steel-blue of a first pass) with a high-contrast near-
+# black ink color and an orange accent used sparingly for CTAs/highlights.
+# Kept in sync with modules/branding.py and landing/index.html -- update all
+# three together if the brand colors ever change.
+primaryColor = "#1D4ED8"
 backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F0F3F7"
-textColor = "#1A2733"
+secondaryBackgroundColor = "#F8FAFC"
+textColor = "#0F172A"
 font = "sans serif"
 
 [server]

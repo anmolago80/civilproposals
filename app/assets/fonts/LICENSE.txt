@@ -1,0 +1,8 @@
+DejaVu Sans (Regular, Bold, Oblique)
+
+Bundled here so divider/cover graphics render identically on any machine,
+regardless of what fonts happen to be installed locally.
+
+DejaVu fonts are based on Bitstream Vera and are free for any use, including
+commercial use, modification, and redistribution, without a royalty or
+attribution requirement. Full license text: https://dejavu-fonts.github.io/License.html

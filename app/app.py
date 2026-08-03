@@ -91,11 +91,17 @@ from modules import (
     db,
     auth,
     billing,
+    branding,
 )
 
 AUTOSAVE_INTERVAL_SECONDS = 20
 
-st.set_page_config(page_title="CivilProposals (Beta)", page_icon="📐", layout="wide")
+_PAGE_ICON_PATH = Path(__file__).resolve().parent / "assets" / "brand" / "logo_mark_32.png"
+st.set_page_config(
+    page_title="CivilProposals (Beta)",
+    page_icon=str(_PAGE_ICON_PATH) if _PAGE_ICON_PATH.exists() else "📐",
+    layout="wide",
+)
 
 # ---------------------------------------------------------------------------
 # SaaS gate: login, trial/subscription access, Stripe checkout redirect.
@@ -106,9 +112,13 @@ st.set_page_config(page_title="CivilProposals (Beta)", page_icon="📐", layout=
 # ---------------------------------------------------------------------------
 IS_SAAS_MODE = os.environ.get("SAAS_MODE", "true").strip().lower() != "false"
 
-# Hide Streamlit's default chrome (hamburger menu, "Deploy" button, footer)
-# so the app reads as a branded product rather than an obviously-Streamlit
-# page -- purely cosmetic, has no effect on functionality.
+# Design pass: hide Streamlit's default chrome (hamburger menu, "Deploy"
+# button, footer) so the app reads as a branded product, then layer on a
+# "modern & confident" visual language -- bolder headings, a punchier
+# primary button treatment, a cleaner sidebar, and tabs that read as real
+# navigation rather than the Streamlit default. Uses data-testid selectors
+# where possible since those are more stable across Streamlit versions than
+# internal class names. Purely cosmetic -- no effect on functionality.
 st.markdown(
     """
     <style>
@@ -116,6 +126,60 @@ st.markdown(
     footer {visibility: hidden;}
     header [data-testid="stToolbar"] {visibility: hidden;}
     .stDeployButton {display: none;}
+
+    /* Bolder, tighter headings across the app */
+    h1, h2, h3 {
+        font-weight: 800 !important;
+        letter-spacing: -0.01em;
+        color: #0F172A;
+    }
+    h3 { font-size: 1.3rem !important; }
+
+    /* Sidebar: subtle separation from the main canvas */
+    [data-testid="stSidebar"] {
+        border-right: 1px solid #E2E8F0;
+    }
+    [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2 {
+        font-size: 1.05rem !important;
+    }
+
+    /* Buttons: bolder weight, confident rounded corners, a real hover lift
+       on primary actions so CTAs (Upgrade, Run Analysis, Export) feel
+       tappable rather than flat. */
+    .stButton button, .stDownloadButton button, .stLinkButton a {
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        transition: transform .12s ease, box-shadow .12s ease;
+    }
+    button[kind="primary"], [data-testid="stBaseButton-primary"] {
+        box-shadow: 0 2px 10px rgba(29, 78, 216, 0.25);
+    }
+    button[kind="primary"]:hover, [data-testid="stBaseButton-primary"]:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 14px rgba(29, 78, 216, 0.32);
+    }
+
+    /* Tabs: bolder labels and a clearer active state so the 11-tab
+       workflow reads as real navigation, not a muted default widget. */
+    [data-testid="stTabs"] button[role="tab"] {
+        font-weight: 600;
+        font-size: 0.95rem;
+    }
+    [data-testid="stTabs"] button[aria-selected="true"] {
+        font-weight: 800;
+        color: #1D4ED8;
+    }
+
+    /* Rounder, calmer alert/info/success boxes */
+    div[data-testid="stAlert"] {
+        border-radius: 10px;
+    }
+
+    /* Metric-style callouts (used for the trial/plan status) get a touch
+       more breathing room */
+    [data-testid="stSidebar"] div[data-testid="stAlert"] {
+        padding: 0.6rem 0.9rem;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -581,9 +645,10 @@ _init_state()
 # ---------------------------------------------------------------------------
 
 with st.sidebar:
-    st.header("📐 CivilProposals")
+    st.markdown(branding.brand_html(logo_size=34, wordmark_size="1.15rem", show_beta=IS_SAAS_MODE),
+                unsafe_allow_html=True)
     if IS_SAAS_MODE:
-        st.caption("🧪 **Beta** -- still actively evolving. Please report anything broken or confusing.")
+        st.caption("Still actively evolving -- please report anything broken or confusing.")
     st.caption("A first-pass proposal preparation assistant -- not a replacement for your proposal writers.")
 
     if IS_SAAS_MODE and current_user:
