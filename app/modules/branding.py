@@ -82,6 +82,64 @@ def brand_html(logo_size: int = 40, wordmark_size: str = "1.5rem", show_beta: bo
     )
 
 
+GREEN = "#16A34A"
+GREEN_SOFT = "#DCFCE7"
+
+
+def vertical_steps_html(steps: list[dict]) -> str:
+    """Renders a compact vertical progress list -- a checkmark/number circle
+    plus a label per row, connected by a thin line -- meant to live at the
+    top of the sidebar in place of workflow_stepper_html()'s horizontal
+    version above the tabs. Same "done vs. not-done only, never current"
+    rule and same reasoning applies (see workflow_stepper_html()'s
+    docstring): Streamlit's st.tabs() never tells the Python side which tab
+    is visually active, so this can't highlight a "current" step.
+
+    `steps`: [{"label": str, "done": bool}, ...], in display order.
+
+    Built as single-line, unindented HTML for the same reason as
+    brand_html() -- st.markdown() treats indented multi-line blocks as a
+    Markdown code block even with unsafe_allow_html=True."""
+    if not steps:
+        return ""
+
+    n = len(steps)
+    rows = []
+    for i, step in enumerate(steps):
+        done = bool(step.get("done"))
+        label = step.get("label", "")
+        is_last = i == n - 1
+
+        if done:
+            marker = (
+                f'<div style="width:20px;height:20px;border-radius:50%;background:{GREEN};'
+                f'color:#fff;display:flex;align-items:center;justify-content:center;'
+                f'font-size:.66rem;font-weight:800;flex-shrink:0;z-index:1;">&#10003;</div>'
+            )
+            label_html = f'<span style="font-size:.8rem;font-weight:650;color:{GREEN};">{label}</span>'
+        else:
+            marker = (
+                f'<div style="width:20px;height:20px;border-radius:50%;background:{SURFACE};'
+                f'border:1.5px solid {BORDER};flex-shrink:0;z-index:1;"></div>'
+            )
+            label_html = f'<span style="font-size:.8rem;font-weight:500;color:#94A3B8;">{label}</span>'
+
+        connector = "" if is_last else (
+            f'<div style="position:absolute;left:9.5px;top:20px;width:2px;height:100%;'
+            f'background:{GREEN if done and steps[i + 1].get("done") else BORDER};"></div>'
+        )
+
+        rows.append(
+            '<div style="position:relative;display:flex;align-items:center;gap:10px;'
+            f'padding:5px 0;{"" if is_last else ""}">'
+            f'{connector}{marker}{label_html}'
+            '</div>'
+        )
+
+    inner = "".join(rows)
+    return f'<div style="padding:2px 2px 6px;">{inner}</div>'
+
+
 def workflow_stepper_html(steps: list[dict]) -> str:
     """Renders a horizontal progress stepper across the top of the main
     workflow -- a numbered/checkmarked circle per step, connected by a line,

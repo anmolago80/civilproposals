@@ -89,7 +89,13 @@ def _cookie_manager():
     return st.session_state["_cookie_manager"]
 
 
-def _get_cookie_token() -> str | None:
+# Sentinel returned by _get_cookie_token() when the browser-side cookie
+# component hasn't reported back yet -- distinct from a real "no session
+# cookie", which current_user() treats as "not logged in".
+_COOKIES_LOADING = object()
+
+
+def _get_cookie_token():
     cm = _cookie_manager()
     # Deliberately cm.get_all() here, not cm.get(COOKIE_NAME). extra_
     # streamlit_components' CookieManager only populates self.cookies once,
@@ -110,9 +116,26 @@ def _get_cookie_token() -> str | None:
     # re-queries the component fresh on every call (via its own default
     # key, "get_all", distinct from the "cp_cookie_manager" construction
     # key above, so it can't collide with it), which correctly picks up
-    # the real cookie value as soon as the browser has reported it --
-    # normally the very next rerun after a page load.
+    # the real cookie value as soon as the browser has reported it.
+    #
+    # That fix alone still leaves one gap under real network latency
+    # (custom domain, TLS handshake, slower than the near-instant round
+    # trip on localhost): the very first script run after every fresh page
+    # load still gets an empty read back, because the component genuinely
+    # hasn't had time to report anything yet. Locally that self-corrects
+    # via Streamlit's automatic rerun so fast it's invisible; over a real
+    # network it can be slow enough that a returning user briefly sees the
+    # login screen before it corrects itself -- exactly what "checked
+    # immediately, it was instant" described. An entirely empty cookies
+    # dict is the tell: Streamlit itself always sets at least an XSRF
+    # cookie on the very first HTTP response, before any client-side JS
+    # (including this component) even runs, so a real completed read is
+    # never truly empty -- only "hasn't loaded yet" is. Returning a
+    # sentinel here instead of None lets current_user() wait for the next
+    # rerun rather than concluding "logged out" from an incomplete read.
     cookies = cm.get_all()
+    if not cookies:
+        return _COOKIES_LOADING
     return cookies.get(COOKIE_NAME)
 
 
@@ -191,6 +214,19 @@ def current_user() -> db.User | None:
         return get_user_by_id(st.session_state["_auth_user_id"])
 
     token = _get_cookie_token()
+    if token is _COOKIES_LOADING:
+        # The browser hasn't reported its cookies back yet -- true for at
+        # least the very first script run after every fresh page load, and
+        # potentially a couple more under real network latency. Don't
+        # decide "not logged in" from an incomplete read: wait for the
+        # rerun that fires automatically once the cookie component
+        # actually reports a value (same mechanism as any other Streamlit
+        # widget picking up its real value after the frontend responds).
+        # A user who's genuinely never logged in also passes through here
+        # once or twice before landing on the login screen -- one brief,
+        # unlabelled instant is a fair trade for not bouncing a returning
+        # user's session on every refresh.
+        st.stop()
     user_id = verify_token(token) if token else None
     if not user_id:
         return None
