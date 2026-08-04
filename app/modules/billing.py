@@ -42,6 +42,41 @@ def is_configured() -> bool:
     return bool(stripe.api_key and STRIPE_PRICE_ID)
 
 
+def debug_key_info() -> str:
+    """A masked, safe-to-display summary of what's actually loaded into this
+    running process for STRIPE_SECRET_KEY / STRIPE_PRICE_ID -- never the full
+    secret. Meant to be shown next to a checkout error so a copy-paste or
+    stale-deploy problem can be diagnosed from a single screenshot instead of
+    several rounds of guessing. Two things this catches that "check Railway's
+    variable value" alone won't: (1) stripe.api_key is read from the
+    environment once, at module import time (see top of this file) -- if
+    Railway saved the variable but the service never actually redeployed/
+    restarted, the *running* process is still holding the old value, and this
+    will show that old value's shape; (2) a bad paste (extra characters,
+    only a fragment copied, wrong field entirely)."""
+    key = stripe.api_key or ""
+    price = STRIPE_PRICE_ID or ""
+
+    if not key:
+        key_desc = "NOT SET (empty)"
+    else:
+        prefix = key[:8]
+        suffix = key[-4:] if len(key) > 12 else ""
+        looks_valid = key.startswith("sk_test_") or key.startswith("sk_live_")
+        key_desc = f"len={len(key)}, starts with `{prefix}`, ends with `{suffix}`"
+        if not looks_valid:
+            key_desc += " -- does NOT start with sk_test_ or sk_live_, so this is not a valid Stripe secret key"
+
+    if not price:
+        price_desc = "NOT SET (empty)"
+    else:
+        price_desc = f"`{price[:10]}...` (len={len(price)})"
+        if not price.startswith("price_"):
+            price_desc += " -- does NOT start with price_, so this is not a valid Stripe Price ID"
+
+    return f"STRIPE_SECRET_KEY: {key_desc} | STRIPE_PRICE_ID: {price_desc}"
+
+
 def create_checkout_session(user: db.User) -> str:
     """Creates a Stripe Checkout session for a new subscription and returns
     the URL to redirect the user to. client_reference_id carries our user

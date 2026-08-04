@@ -732,6 +732,7 @@ with st.sidebar:
                         st.link_button("Continue to payment →", url, type="primary")
                     except Exception as exc:
                         st.error(f"Couldn't start checkout: {exc}")
+                        st.caption(billing.debug_key_info())
             else:
                 portal_url = billing.create_customer_portal_session(current_user)
                 if portal_url:
@@ -1594,6 +1595,7 @@ with tabs[2]:
                 st.link_button("Continue to payment →", url, type="primary")
             except Exception as exc:
                 st.error(f"Couldn't start checkout: {exc}")
+                st.caption(billing.debug_key_info())
 
     if st.button("Run Tender Analysis", type="primary", disabled=not ready or _trial_blocked):
         extracted = st.session_state.tender_extracted
