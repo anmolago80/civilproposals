@@ -123,10 +123,19 @@ IS_SAAS_MODE = os.environ.get("SAAS_MODE", "true").strip().lower() != "false"
 st.markdown(
     """
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
+
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header [data-testid="stToolbar"] {visibility: hidden;}
     .stDeployButton {display: none;}
+
+    /* Same typeface as the landing page (landing/index.html), so the
+       marketing site and the product read as one consistent brand instead
+       of two different fonts stitched together. */
+    html, body, [class*="css"] {
+        font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
 
     /* Bolder, tighter headings across the app */
     h1, h2, h3 {
@@ -160,15 +169,31 @@ st.markdown(
         box-shadow: 0 4px 14px rgba(29, 78, 216, 0.32);
     }
 
-    /* Tabs: bolder labels and a clearer active state so the 11-tab
-       workflow reads as real navigation, not a muted default widget. */
+    /* Tabs: bolder labels and a clearer active state so the 10-tab
+       workflow reads as real navigation, not a muted default widget --
+       styled to sit visually as one continuous piece with the progress
+       stepper rendered just above it (see branding.workflow_stepper_html). */
     [data-testid="stTabs"] button[role="tab"] {
         font-weight: 600;
         font-size: 0.95rem;
+        border-radius: 8px 8px 0 0;
+        transition: background-color .12s ease, color .12s ease;
+    }
+    [data-testid="stTabs"] button[role="tab"]:hover {
+        background: #F8FAFC;
+        color: #1D4ED8;
     }
     [data-testid="stTabs"] button[aria-selected="true"] {
         font-weight: 800;
         color: #1D4ED8;
+        background: #EFF4FF;
+    }
+    [data-testid="stTabs"] [data-baseweb="tab-highlight"] {
+        background-color: #1D4ED8 !important;
+        height: 3px !important;
+    }
+    [data-testid="stTabs"] [data-baseweb="tab-border"] {
+        background-color: #E2E8F0 !important;
     }
 
     /* Rounder, calmer alert/info/success boxes */
@@ -1040,6 +1065,49 @@ with st.sidebar:
         "not a guess."
     )
 
+
+# Workflow progress stepper -- a horizontal row of numbered/checkmarked
+# circles above the tabs, in the landing page's palette (see
+# branding.workflow_stepper_html()). Purely a "what's been done so far"
+# indicator: Streamlit's st.tabs() never tells the Python side which tab is
+# currently being viewed (every tab's content runs on every rerun regardless
+# of which one is visually active), so this can't highlight a "current"
+# step -- only done vs. not-yet-done, computed from session_state below.
+_stepper_steps = [
+    {"label": "Project Setup", "done": bool(_project_identifier())},
+    {"label": "Upload Docs", "done": st.session_state.tender_extracted is not None},
+    {"label": "Tender Analysis", "done": st.session_state.analysis is not None},
+    {"label": "Structure", "done": st.session_state.sections is not None},
+    {"label": "Page Allocation", "done": st.session_state.allocations is not None},
+    {"label": "Draft Responses", "done": bool(st.session_state.drafts)},
+    {"label": "Graphics & Design", "done": bool(st.session_state.divider_images) or bool(st.session_state.cover_hero_png)},
+    {"label": "Team & Resourcing", "done": any(
+        # Not a plain truthiness check on purpose: as soon as Tender Analysis
+        # runs, the Team & Resourcing tab's own code (which also runs every
+        # rerun regardless of which tab is visually open) auto-populates
+        # resource_plan with one empty slot per discipline detected in the
+        # brief -- before the user has assigned a single real person. Require
+        # an actual assigned name so this only lights up once someone's
+        # really been staffed.
+        (getattr(a, "person_name", "") or "").strip() for a in (st.session_state.resource_plan or [])
+    )},
+    {"label": "Fee Estimate", "done": (
+        # Not a plain truthiness check on purpose: the Fee Estimate tab's own
+        # reconcile-on-every-rerun logic (see _reconcile_estimates() further
+        # down) always leaves fee_estimates as a non-empty list of zero-value
+        # placeholder rows, one per discipline, even with zero user input --
+        # and since Streamlit runs every tab's code on every rerun regardless
+        # of which tab is visually open, that list is non-empty from the very
+        # first page load. Requiring an actual nonzero figure is what
+        # distinguishes "the user entered something" from "the tab merely
+        # rendered once".
+        any((getattr(e, "fee_percentage", 0) or 0) > 0 for e in (st.session_state.fee_estimates or []))
+        or any((getattr(l, "fee_amount", 0) or 0) > 0 for l in (st.session_state.discipline_fee_lines or []))
+        or any((getattr(f, "fee_amount", 0) or 0) > 0 for f in (st.session_state.scope_item_fees or []))
+    )},
+    {"label": "Export Pack", "done": bool(st.session_state.docx_buffer)},
+]
+st.markdown(branding.workflow_stepper_html(_stepper_steps), unsafe_allow_html=True)
 
 tabs = st.tabs([
     "1 · Project Setup", "2 · Upload Documents",
