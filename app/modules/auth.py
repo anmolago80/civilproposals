@@ -91,7 +91,29 @@ def _cookie_manager():
 
 def _get_cookie_token() -> str | None:
     cm = _cookie_manager()
-    return cm.get(COOKIE_NAME)
+    # Deliberately cm.get_all() here, not cm.get(COOKIE_NAME). extra_
+    # streamlit_components' CookieManager only populates self.cookies once,
+    # when its underlying browser component is first constructed, and
+    # .get() just reads that frozen snapshot forever after -- see its
+    # source (CookieManager.__init__ vs .get()). That very first read
+    # always happens before the browser-side component has had a chance to
+    # actually report back what's in document.cookie (it's a real round
+    # trip through an iframe), so the snapshot is reliably empty. Combined
+    # with the object above being cached in session_state across reruns
+    # (needed so logging in/out -- which reads the cookie, then writes it,
+    # in the same script run -- doesn't re-declare the component with the
+    # same key and crash), nothing was ever calling get_all() again to
+    # pick up the real value afterwards. That's what was logging returning
+    # users out on every single browser refresh: the cookie was sitting in
+    # the browser the whole time, this code just never looked again after
+    # its first (always-empty) look. Calling get_all() explicitly here
+    # re-queries the component fresh on every call (via its own default
+    # key, "get_all", distinct from the "cp_cookie_manager" construction
+    # key above, so it can't collide with it), which correctly picks up
+    # the real cookie value as soon as the browser has reported it --
+    # normally the very next rerun after a page load.
+    cookies = cm.get_all()
+    return cookies.get(COOKIE_NAME)
 
 
 def _set_cookie_token(token: str) -> None:
