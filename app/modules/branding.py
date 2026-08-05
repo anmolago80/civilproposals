@@ -140,9 +140,14 @@ def vertical_steps_component_html(steps: list[dict]) -> str:
         else:
             marker = (
                 f'<div style="width:20px;height:20px;border-radius:50%;background:{SURFACE};'
-                f'border:1.5px solid {BORDER};flex-shrink:0;z-index:1;"></div>'
+                f'border:1.5px solid #94A3B8;flex-shrink:0;z-index:1;"></div>'
             )
-            label_html = f'<span style="font-size:.8rem;font-weight:500;color:#94A3B8;">{label}</span>'
+            # Was #94A3B8 (slate-400) -- too light against the sidebar's
+            # off-white background per user feedback ("steps ... get lost
+            # with the background"). #334155 (slate-700) keeps not-done
+            # steps visually secondary to the green "done" state while
+            # staying clearly legible.
+            label_html = f'<span style="font-size:.8rem;font-weight:500;color:#334155;">{label}</span>'
 
         connector = "" if is_last else (
             f'<div style="position:absolute;left:9.5px;top:20px;width:2px;height:100%;'

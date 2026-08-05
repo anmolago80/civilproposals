@@ -786,7 +786,15 @@ with st.sidebar:
         height=max(1, len(_stepper_steps)) * 34 + 16,
     )
 
-    with st.popover("☰  Account, projects & settings", use_container_width=True):
+
+
+# Small top-right account/settings menu -- icon only, no label text,
+# in the same spot modern SaaS apps put an account/menu affordance.
+# Lives in the main content area (not the sidebar) so it stays pinned
+# to the top-right of the page regardless of sidebar width/scroll.
+_topbar_l, _topbar_r = st.columns([14, 1])
+with _topbar_r:
+    with st.popover("☰", use_container_width=True):
         with st.container(height=460):
             if IS_SAAS_MODE and current_user:
                 bcol1, bcol2 = st.columns(2)
