@@ -7,9 +7,22 @@ free-trial / subscription access gating for the CivilProposals SaaS build.
 Design notes:
   - Passwords are hashed with bcrypt, never stored or logged in plain text.
   - "Logged in" is proven by a signed, timestamped token (itsdangerous)
-    stored in a browser cookie via extra_streamlit_components.CookieManager
-    -- Streamlit has no built-in multi-user session concept, so without a
-    cookie every browser refresh would log the user out.
+    stored in a browser cookie -- Streamlit has no built-in multi-user
+    session concept, so without a cookie every browser refresh would log
+    the user out. The cookie is READ server-side via st.context.cookies
+    (the real HTTP request headers -- synchronous, no round trip) and
+    WRITTEN client-side via a tiny inline <script>document.cookie=...
+    injected through components.v1.html (see _write_cookie_js()) -- not
+    via a third-party custom component. That's not an arbitrary choice:
+    extra_streamlit_components.CookieManager was tried first and measured
+    to silently never write the cookie at all on any network with real
+    latency, because it has to fetch and boot a separate JS bundle in its
+    own iframe before it can do anything, and that fetch loses the race
+    against Streamlit's own next script rerun often enough to make
+    "signed in" not survive a single page refresh in production. The
+    inline-script approach has no separate bundle to fetch -- the script
+    is already part of the iframe's initial content -- so there's nothing
+    for a slow network to race.
   - The trial is usage-based (N distinct proposals), not time-based, per
     product decision: 3 free proposals, then a $200/month subscription
     (see billing.py) that also covers AI usage -- the app no longer asks
@@ -22,11 +35,13 @@ Design notes:
 
 from __future__ import annotations
 
+import json
 import os
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import streamlit as st
+import streamlit.components.v1 as components
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 from modules import db
@@ -79,82 +94,68 @@ def verify_token(token: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Cookie manager (one instance per session, cached in session_state)
+# Cookie read/write
 # ---------------------------------------------------------------------------
 
-def _cookie_manager():
-    import extra_streamlit_components as stx
-    if "_cookie_manager" not in st.session_state:
-        st.session_state["_cookie_manager"] = stx.CookieManager(key="cp_cookie_manager")
-    return st.session_state["_cookie_manager"]
-
-
-# Sentinel returned by _get_cookie_token() when the browser-side cookie
-# component hasn't reported back yet -- distinct from a real "no session
-# cookie", which current_user() treats as "not logged in".
-_COOKIES_LOADING = object()
-
-
 def _get_cookie_token():
-    cm = _cookie_manager()
-    # Deliberately cm.get_all() here, not cm.get(COOKIE_NAME). extra_
-    # streamlit_components' CookieManager only populates self.cookies once,
-    # when its underlying browser component is first constructed, and
-    # .get() just reads that frozen snapshot forever after -- see its
-    # source (CookieManager.__init__ vs .get()). That very first read
-    # always happens before the browser-side component has had a chance to
-    # actually report back what's in document.cookie (it's a real round
-    # trip through an iframe), so the snapshot is reliably empty. Combined
-    # with the object above being cached in session_state across reruns
-    # (needed so logging in/out -- which reads the cookie, then writes it,
-    # in the same script run -- doesn't re-declare the component with the
-    # same key and crash), nothing was ever calling get_all() again to
-    # pick up the real value afterwards. That's what was logging returning
-    # users out on every single browser refresh: the cookie was sitting in
-    # the browser the whole time, this code just never looked again after
-    # its first (always-empty) look. Calling get_all() explicitly here
-    # re-queries the component fresh on every call (via its own default
-    # key, "get_all", distinct from the "cp_cookie_manager" construction
-    # key above, so it can't collide with it), which correctly picks up
-    # the real cookie value as soon as the browser has reported it.
-    #
-    # That fix alone still leaves one gap under real network latency
-    # (custom domain, TLS handshake, slower than the near-instant round
-    # trip on localhost): the very first script run after every fresh page
-    # load still gets an empty read back, because the component genuinely
-    # hasn't had time to report anything yet. Locally that self-corrects
-    # via Streamlit's automatic rerun so fast it's invisible; over a real
-    # network it can be slow enough that a returning user briefly sees the
-    # login screen before it corrects itself -- exactly what "checked
-    # immediately, it was instant" described. An entirely empty cookies
-    # dict is the tell: Streamlit itself always sets at least an XSRF
-    # cookie on the very first HTTP response, before any client-side JS
-    # (including this component) even runs, so a real completed read is
-    # never truly empty -- only "hasn't loaded yet" is. Returning a
-    # sentinel here instead of None lets current_user() wait for the next
-    # rerun rather than concluding "logged out" from an incomplete read.
-    cookies = cm.get_all()
-    if not cookies:
-        return _COOKIES_LOADING
-    return cookies.get(COOKIE_NAME)
+    # st.context.cookies is the actual Cookie header Streamlit's server
+    # received on this request -- populated synchronously before any
+    # Python runs, on every full page load. No component, no iframe, no
+    # round trip, so no "hasn't reported back yet" state to handle.
+    # Available since Streamlit 1.35, confirmed present in the 1.60.0
+    # build this app runs.
+    return st.context.cookies.get(COOKIE_NAME)
+
+
+def _is_secure_request() -> bool:
+    """True if this request reached us over HTTPS -- determines whether the
+    cookie can carry the Secure flag. Railway (and any standard reverse
+    proxy) terminates TLS and forwards X-Forwarded-Proto, so the Python
+    process itself always sees plain HTTP; this header is the only way to
+    tell. Defaults to False (no Secure flag) when the header is missing,
+    which is what local dev over http://localhost needs -- a Secure cookie
+    is silently refused by the browser on a non-HTTPS origin."""
+    try:
+        return (st.context.headers.get("X-Forwarded-Proto", "") or "").lower() == "https"
+    except Exception:
+        return False
+
+
+def _write_cookie_js(cookie_str: str) -> None:
+    # A minimal, dependency-free inline script, delivered as part of the
+    # iframe's own initial content (components.v1.html's srcdoc) -- nothing
+    # extra to fetch over the network before it can run. This replaces an
+    # earlier approach built on extra_streamlit_components.CookieManager,
+    # a full custom Streamlit component with its own separate JS bundle:
+    # measured directly (browser cookie jar inspected before/after, with
+    # Chrome DevTools Protocol network throttling standing in for a slow or
+    # high-latency real connection) to simply never write the cookie at all
+    # once any real network latency was involved -- not delayed, never.
+    # That bundle has to be fetched and booted inside its own iframe before
+    # any of its JS can run, and that fetch reliably lost the race against
+    # Streamlit's own next script rerun (the login flow's rerun right after
+    # log_in(), which tears down not-yet-mounted components) on anything
+    # slower than localhost. This inline script has no separate bundle to
+    # race for -- it's already sitting in the iframe's srcdoc the instant
+    # the iframe exists -- so there's nothing left for a slow network to
+    # lose.
+    components.html(f"<script>document.cookie = {json.dumps(cookie_str)};</script>", height=0)
 
 
 def _set_cookie_token(token: str) -> None:
-    cm = _cookie_manager()
-    # extra_streamlit_components.CookieManager.set() calls .isoformat() on
-    # expires_at internally, so this must be a real datetime -- a Unix
-    # timestamp (time.time()) crashes with "float object has no attribute
-    # isoformat".
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=COOKIE_MAX_AGE_SECONDS)
-    cm.set(COOKIE_NAME, token, expires_at=expires_at, key="cp_cookie_set")
+    expires_str = expires_at.strftime("%a, %d %b %Y %H:%M:%S GMT")
+    parts = [f"{COOKIE_NAME}={token}", f"expires={expires_str}", "path=/", "SameSite=Lax"]
+    if _is_secure_request():
+        parts.append("Secure")
+    _write_cookie_js("; ".join(parts))
 
 
 def _clear_cookie_token() -> None:
-    cm = _cookie_manager()
-    try:
-        cm.delete(COOKIE_NAME, key="cp_cookie_delete")
-    except KeyError:
-        pass
+    parts = [f"{COOKIE_NAME}=", "expires=Thu, 01 Jan 1970 00:00:00 GMT", "path=/", "SameSite=Lax"]
+    if _is_secure_request():
+        parts.append("Secure")
+    _write_cookie_js("; ".join(parts))
 
 
 # ---------------------------------------------------------------------------
@@ -210,23 +211,24 @@ def authenticate(email: str, password: str) -> db.User | None:
 def current_user() -> db.User | None:
     """Returns the logged-in user for this script run, resolving from the
     signed cookie if session_state doesn't already have it cached."""
+    # Flush any deferred cookie write/clear from a login/logout that just
+    # happened -- see log_in()/log_out() for why this can't happen directly
+    # in those functions. Doing it here means it fires on the very next
+    # call to current_user(), which in practice is the next script run
+    # (the one require_login()'s forced st.rerun() triggers) -- a normal
+    # run that isn't itself immediately followed by another forced rerun,
+    # so the browser-side cookie component this time actually gets to
+    # finish mounting and firing before anything cancels it.
+    if st.session_state.pop("_cookie_clear_pending", False):
+        _clear_cookie_token()
+
     if st.session_state.get("_auth_user_id"):
-        return get_user_by_id(st.session_state["_auth_user_id"])
+        user = get_user_by_id(st.session_state["_auth_user_id"])
+        if user and st.session_state.pop("_cookie_write_pending", False):
+            _set_cookie_token(make_token(user.id))
+        return user
 
     token = _get_cookie_token()
-    if token is _COOKIES_LOADING:
-        # The browser hasn't reported its cookies back yet -- true for at
-        # least the very first script run after every fresh page load, and
-        # potentially a couple more under real network latency. Don't
-        # decide "not logged in" from an incomplete read: wait for the
-        # rerun that fires automatically once the cookie component
-        # actually reports a value (same mechanism as any other Streamlit
-        # widget picking up its real value after the frontend responds).
-        # A user who's genuinely never logged in also passes through here
-        # once or twice before landing on the login screen -- one brief,
-        # unlabelled instant is a fair trade for not bouncing a returning
-        # user's session on every refresh.
-        st.stop()
     user_id = verify_token(token) if token else None
     if not user_id:
         return None
@@ -237,13 +239,33 @@ def current_user() -> db.User | None:
 
 
 def log_in(user: db.User) -> None:
+    # Deliberately NOT calling _set_cookie_token() here. log_in() is always
+    # called from a form-submit handler that immediately follows with
+    # st.rerun() (see require_login()) -- and that immediate rerun races
+    # the cookie-set browser component: Streamlit aborts the current script
+    # run (and, with it, whatever the not-yet-mounted component iframe was
+    # about to do) the instant st.rerun() fires, before the browser has had
+    # a chance to actually execute the "set this cookie" JS. Confirmed via
+    # direct browser-cookie-jar inspection: with the old immediate
+    # log_in()-then-set-cookie-then-rerun sequence, the session cookie
+    # never appeared in the browser at all -- not delayed, just never
+    # written -- which is why every previous round of "fix the read side"
+    # never actually fixed anything: there was nothing to read. Setting a
+    # flag here and writing the cookie on the *next* run (see
+    # current_user() above) sidesteps the race instead of racing it.
     st.session_state["_auth_user_id"] = user.id
-    _set_cookie_token(make_token(user.id))
+    st.session_state["_cookie_write_pending"] = True
 
 
 def log_out() -> None:
     st.session_state.pop("_auth_user_id", None)
-    _clear_cookie_token()
+    st.session_state.pop("_cookie_write_pending", None)
+    # Same reasoning as log_in() above, in reverse: log_out() is always
+    # followed immediately by st.rerun() at its call site, which would
+    # race out an immediate _clear_cookie_token() call just like it did
+    # the cookie write. Deferred so the actual browser-side delete happens
+    # on the next (unraced) run instead.
+    st.session_state["_cookie_clear_pending"] = True
 
 
 def require_login() -> db.User:

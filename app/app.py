@@ -21,6 +21,7 @@ from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 # Loads a local .env file (if one exists next to app.py) into the process's
 # environment variables -- this is how the AI Provider Settings tab can come
@@ -167,34 +168,6 @@ st.markdown(
     button[kind="primary"]:hover, [data-testid="stBaseButton-primary"]:hover {
         transform: translateY(-1px);
         box-shadow: 0 4px 14px rgba(29, 78, 216, 0.32);
-    }
-
-    /* Tabs: bolder labels and a clearer active state so the 10-tab
-       workflow reads as real navigation, not a muted default widget.
-       Progress is now shown as a vertical list in the sidebar instead
-       (see branding.vertical_steps_html) rather than a bar above these
-       tabs. */
-    [data-testid="stTabs"] button[role="tab"] {
-        font-weight: 600;
-        font-size: 0.95rem;
-        border-radius: 8px 8px 0 0;
-        transition: background-color .12s ease, color .12s ease;
-    }
-    [data-testid="stTabs"] button[role="tab"]:hover {
-        background: #F8FAFC;
-        color: #1D4ED8;
-    }
-    [data-testid="stTabs"] button[aria-selected="true"] {
-        font-weight: 800;
-        color: #1D4ED8;
-        background: #EFF4FF;
-    }
-    [data-testid="stTabs"] [data-baseweb="tab-highlight"] {
-        background-color: #1D4ED8 !important;
-        height: 3px !important;
-    }
-    [data-testid="stTabs"] [data-baseweb="tab-border"] {
-        background-color: #E2E8F0 !important;
     }
 
     /* Rounder, calmer alert/info/success boxes */
@@ -770,11 +743,26 @@ with st.sidebar:
             st.info(f"Free trial: {_access['trial_remaining']} of {_access['trial_limit']} proposals left")
 
     # Vertical progress list -- the sidebar's main focus now (see
-    # branding.vertical_steps_html()). Everything else that used to live
-    # directly in the sidebar (billing, saved projects, AI provider config,
-    # file import/export) is tucked behind the "More" popover right below
-    # it instead, so this list isn't competing with a wall of buttons.
-    st.markdown(branding.vertical_steps_html(_stepper_steps), unsafe_allow_html=True)
+    # branding.vertical_steps_component_html()). Everything else that used
+    # to live directly in the sidebar (billing, saved projects, AI provider
+    # config, file import/export) is tucked behind the "More" popover right
+    # below it instead, so this list isn't competing with a wall of
+    # buttons.
+    #
+    # It's also the app's real navigation now -- the native tab strip is
+    # hidden (see the [data-testid="stTabs"] [role="tablist"] rule further
+    # down, right before the tabs are created) and these rows take over
+    # clicking between sections. Rendered via components.html (a real
+    # iframe), not st.markdown -- see the docstring on
+    # vertical_steps_component_html() for why that distinction actually
+    # matters here (st.markdown() silently drops onclick handlers). Height
+    # is sized for the row count plus a little breathing room; it doesn't
+    # need to be exact -- a few px of empty space or an internal scrollbar
+    # is harmless.
+    components.html(
+        branding.vertical_steps_component_html(_stepper_steps),
+        height=max(1, len(_stepper_steps)) * 34 + 16,
+    )
 
     with st.popover("☰  Account, projects & settings", use_container_width=True):
         with st.container(height=460):
@@ -1091,6 +1079,42 @@ with st.sidebar:
                 "not a guess."
             )
 
+
+# This CSS is deliberately injected here -- after auth.require_login() has
+# already returned above, meaning a user is definitely signed in by this
+# point -- rather than in the unconditional page-wide <style> block near
+# the top of the file. require_login()'s own login/signup screen also uses
+# st.tabs() (the "Log in" / "Create account" pair), and both instances
+# share the exact same data-testid -- Streamlit has no way to distinguish
+# "the main workflow's tabs" from "some other tabs" in CSS. Injecting the
+# hide rule only from here means it's never even present in the page while
+# the login tabs are what's showing, so it can't accidentally hide those
+# too (confirmed the hard way: an earlier version of this rule in the
+# global block broke the "Create account" tab). The sidebar's own nav-row
+# styling (hover/active) lives inside vertical_steps_component_html()'s
+# iframe instead of here -- a components.html iframe can't see this
+# page's stylesheet, so that CSS has to travel with the HTML it styles.
+st.markdown(
+    """
+    <style>
+    /* The native tab strip is hidden -- navigation now happens entirely
+       through the vertical step list in the sidebar (see
+       branding.vertical_steps_component_html(), rendered above). The tabs
+       themselves are NOT removed from the underlying code: st.tabs()
+       still renders every section's content on every rerun exactly as
+       before (several tabs rely on that -- e.g. Team & Resourcing
+       auto-seeding, Fee Estimate reconciliation -- see the comments on
+       _stepper_steps above), so this is a purely visual change: the real
+       tab buttons still exist and still work, just hidden, and get
+       "clicked" programmatically by the sidebar's JS bridge instead of by
+       the user directly. */
+    [data-testid="stTabs"] [role="tablist"] {
+        display: none !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 tabs = st.tabs([
     "1 · Project Setup", "2 · Upload Documents",

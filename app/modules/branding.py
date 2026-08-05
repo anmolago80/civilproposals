@@ -86,20 +86,40 @@ GREEN = "#16A34A"
 GREEN_SOFT = "#DCFCE7"
 
 
-def vertical_steps_html(steps: list[dict]) -> str:
-    """Renders a compact vertical progress list -- a checkmark/number circle
-    plus a label per row, connected by a thin line -- meant to live at the
-    top of the sidebar in place of workflow_stepper_html()'s horizontal
-    version above the tabs. Same "done vs. not-done only, never current"
-    rule and same reasoning applies (see workflow_stepper_html()'s
-    docstring): Streamlit's st.tabs() never tells the Python side which tab
-    is visually active, so this can't highlight a "current" step.
+def vertical_steps_component_html(steps: list[dict]) -> str:
+    """Renders the sidebar's vertical progress list -- a checkmark/empty
+    circle plus a label per row, connected by a thin line -- and doubles as
+    the app's real navigation: each row is clickable and switches to that
+    section, entirely without touching st.tabs() or any of the ~10 tabs'
+    own code -- every tab's content still renders every rerun exactly as
+    before (several rely on that; see the comment above _stepper_steps in
+    app.py). Render via st.components.v1.html(vertical_steps_component_html(...),
+    height=...) -- NOT st.markdown(). That's not a style preference: this
+    used to be two pieces (a plain st.markdown() block for the rows, with
+    onclick="..." attributes, plus a separate injected <script> to define
+    the click handler) and it silently didn't work -- st.markdown() parses
+    HTML through React, and React drops any onclick attribute outright
+    (logs "Event handler property `onClick` must be a function, instead
+    got type string" and moves on), so the attribute was never actually in
+    the rendered DOM at all despite showing up fine in the Python string.
+    components.html() renders its content as real, separately-parsed HTML
+    inside an iframe -- genuine browser HTML parsing, not React -- so
+    onclick (attached here via addEventListener instead, cleaner than an
+    inline attribute) actually works. The tradeoff is everything the rows
+    need -- their own <style>, the click handler, and the active-tab-sync
+    poller below -- has to live inside this same returned document, since
+    an iframe can't see the outer page's stylesheet or globals.
 
-    `steps`: [{"label": str, "done": bool}, ...], in display order.
+    "Done" (green check, computed by the caller from session_state) and
+    "currently viewing" (a blue highlight) are two independent things:
+    done is baked into this HTML at render time, while active is
+    synced by the poller here, watching the real (hidden) tab strip's
+    aria-selected state -- something Python genuinely cannot compute
+    itself, since st.tabs() never tells the Python side which tab is
+    visually active (see workflow_stepper_html()'s docstring for the same
+    limitation).
 
-    Built as single-line, unindented HTML for the same reason as
-    brand_html() -- st.markdown() treats indented multi-line blocks as a
-    Markdown code block even with unsafe_allow_html=True."""
+    `steps`: [{"label": str, "done": bool}, ...], in display order."""
     if not steps:
         return ""
 
@@ -130,14 +150,50 @@ def vertical_steps_html(steps: list[dict]) -> str:
         )
 
         rows.append(
-            '<div style="position:relative;display:flex;align-items:center;gap:10px;'
-            f'padding:5px 0;{"" if is_last else ""}">'
+            f'<div class="cp-step-row" data-cp-step="{i}" '
+            'style="position:relative;display:flex;align-items:center;gap:10px;'
+            'padding:5px 8px;margin:0 -8px;border-radius:8px;cursor:pointer;">'
             f'{connector}{marker}{label_html}'
             '</div>'
         )
 
     inner = "".join(rows)
-    return f'<div style="padding:2px 2px 6px;">{inner}</div>'
+    return f"""<!DOCTYPE html><html><head><style>
+html, body {{ margin:0; padding:0; background:transparent; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }}
+.cp-step-row:hover {{ background:#F1F5F9; }}
+.cp-step-row.cp-step-active {{ background:#EFF4FF; }}
+</style></head><body>
+<div style="padding:2px 2px 6px;">{inner}</div>
+<script>
+(function(){{
+  var topDoc = window.parent.document;
+  function navStep(i) {{
+    var tabs = topDoc.querySelectorAll('[data-testid="stTabs"] [data-testid="stTab"]');
+    if (tabs[i]) {{ tabs[i].click(); }}
+  }}
+  document.querySelectorAll('.cp-step-row').forEach(function(row){{
+    row.addEventListener('click', function(){{
+      navStep(parseInt(row.getAttribute('data-cp-step'), 10));
+    }});
+  }});
+  function syncActive(){{
+    try {{
+      var tabs = topDoc.querySelectorAll('[data-testid="stTabs"] [data-testid="stTab"]');
+      var activeIdx = -1;
+      tabs.forEach(function(t, idx){{
+        if (t.getAttribute('aria-selected') === 'true') {{ activeIdx = idx; }}
+      }});
+      document.querySelectorAll('.cp-step-row').forEach(function(r){{
+        var idx = parseInt(r.getAttribute('data-cp-step'), 10);
+        r.classList.toggle('cp-step-active', idx === activeIdx);
+      }});
+    }} catch (e) {{ /* real tab strip not ready yet -- next poll picks it up */ }}
+  }}
+  syncActive();
+  setInterval(syncActive, 350);
+}})();
+</script>
+</body></html>"""
 
 
 def workflow_stepper_html(steps: list[dict]) -> str:
