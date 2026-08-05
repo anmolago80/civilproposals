@@ -752,6 +752,330 @@ _stepper_steps = [
 # ---------------------------------------------------------------------------
 
 with st.sidebar:
+    # A small icon-only account/settings menu, right-aligned on its own row
+    # above the brand logo -- kept in the sidebar's own top corner rather
+    # than the main page's, so it reads as part of the same nav rail as the
+    # step list right below it, instead of floating disconnected in the
+    # main content area above the tabs.
+    _sb_menu_l, _sb_menu_r = st.columns([5, 1])
+    with _sb_menu_r:
+        with st.popover("☰", use_container_width=True):
+            with st.container(height=460):
+                if IS_SAAS_MODE and current_user:
+                    bcol1, bcol2 = st.columns(2)
+                    with bcol1:
+                        if not _access["subscribed"]:
+                            if st.button("Upgrade", key="_sidebar_upgrade_btn"):
+                                try:
+                                    url = billing.create_checkout_session(current_user)
+                                    st.link_button("Continue to payment →", url, type="primary")
+                                except Exception as exc:
+                                    st.error(f"Couldn't start checkout: {exc}")
+                                    st.caption(billing.debug_key_info())
+                        else:
+                            portal_url = billing.create_customer_portal_session(current_user)
+                            if portal_url:
+                                st.link_button("Manage billing", portal_url)
+                    with bcol2:
+                        if st.button("Log out", key="_sidebar_logout_btn"):
+                            auth.log_out()
+                            st.rerun()
+                    st.divider()
+
+                st.subheader("Project file")
+                st.caption(
+                    "Your AI provider API key / Copilot sign-in are never saved as part of a project file -- "
+                    "re-enter those after loading a project, local or from a file. (You can have your Claude "
+                    "API key remembered on this computer, independent of any project -- see below.)"
+                )
+
+                if not IS_SAAS_MODE:
+                    # Local-disk autosave -- only correct for the original single-user
+                    # desktop prototype. In SAAS_MODE this is replaced by the DB-backed
+                    # "My projects" branch below (see cloud_project_store.py): writing
+                    # to a 'projects/' folder on the *server's* disk in a hosted,
+                    # multi-tenant deployment would be shared across every logged-in
+                    # user's browser sessions (a real data leak, not just a rough edge),
+                    # and Railway's container disk is wiped on every redeploy regardless.
+                    st.markdown("**This computer**")
+                    st.checkbox(
+                        "Auto-save as I work", key="_autosave_enabled",
+                        help=f"Saves to a 'projects' folder next to the app, at most every {AUTOSAVE_INTERVAL_SECONDS}s "
+                             "of activity -- only once a project name is entered (tab 1).",
+                    )
+                    if st.session_state._last_autosave_path:
+                        st.caption(f"Last saved {datetime.fromtimestamp(st.session_state._last_autosave_ts).strftime('%H:%M:%S')}")
+                    elif not _project_identifier():
+                        st.caption("Enter a project or tender name (tab 1) to enable auto-save.")
+
+                    local_projects = local_project_store.list_local_projects()
+                    if local_projects:
+                        options = [p["display_name"] for p in local_projects]
+                        chosen = st.selectbox("Recent projects", options, key="_local_project_pick")
+                        chosen_entry = next(p for p in local_projects if p["display_name"] == chosen)
+                        lcol1, lcol2 = st.columns(2)
+                        with lcol1:
+                            if st.button("Open", key="_open_local_project"):
+                                try:
+                                    loaded_state = local_project_store.load_local(chosen_entry["path"])
+                                    _apply_loaded_project(loaded_state, f"'{chosen_entry['display_name']}'")
+                                except project_store.ProjectLoadError as exc:
+                                    st.error(str(exc))
+                        with lcol2:
+                            if st.button("Delete", key="_delete_local_project"):
+                                local_project_store.delete_local(chosen_entry["path"])
+                                st.rerun()
+                    else:
+                        st.caption("No local saves yet.")
+
+                elif current_user:
+                    # DB-backed equivalent of "This computer" above, scoped to this
+                    # user's account (see cloud_project_store.py) -- so uploads, brief
+                    # analysis, drafts, and team assignments survive a page refresh, a
+                    # dropped connection, or the app being redeployed, instead of living
+                    # only in this one browser tab's live session.
+                    st.markdown("**My projects**")
+                    st.checkbox(
+                        "Auto-save as I work", key="_autosave_enabled",
+                        help=f"Saves to your account, at most every {AUTOSAVE_INTERVAL_SECONDS}s of activity -- "
+                             "only once a project name is entered (tab 1). Lets you pick back up later, even "
+                             "after closing the tab or a refresh.",
+                    )
+                    if st.session_state._last_autosave_error:
+                        st.warning(
+                            f"Auto-save failed: {st.session_state._last_autosave_error} -- your work in this "
+                            "tab is NOT saved to your account yet. Use \"💾 Download project file\" below as a "
+                            "backup, and let support know if this keeps happening."
+                        )
+                    elif st.session_state._last_autosave_path:
+                        st.caption(f"Last saved {datetime.fromtimestamp(st.session_state._last_autosave_ts).strftime('%H:%M:%S')}")
+                    elif not _project_identifier():
+                        st.caption("Enter a project or tender name (tab 1) to enable auto-save.")
+
+                    cloud_projects = cloud_project_store.list_cloud_projects(current_user.id)
+                    if cloud_projects:
+                        options = [p["display_name"] for p in cloud_projects]
+                        chosen = st.selectbox("Recent projects", options, key="_cloud_project_pick")
+                        chosen_entry = next(p for p in cloud_projects if p["display_name"] == chosen)
+                        lcol1, lcol2 = st.columns(2)
+                        with lcol1:
+                            if st.button("Open", key="_open_cloud_project"):
+                                try:
+                                    loaded_state = cloud_project_store.load_cloud(current_user.id, chosen_entry["id"])
+                                    _apply_loaded_project(loaded_state, f"'{chosen_entry['display_name']}'")
+                                except project_store.ProjectLoadError as exc:
+                                    st.error(str(exc))
+                        with lcol2:
+                            if st.button("Delete", key="_delete_cloud_project"):
+                                cloud_project_store.delete_cloud(current_user.id, chosen_entry["id"])
+                                st.rerun()
+                    else:
+                        st.caption("No saved projects yet -- one will appear here shortly after you start "
+                                   "one (auto-save kicks in once you enter a project name on tab 1).")
+
+                st.markdown("**Export / import a file**")
+                st.caption("For sharing a project or keeping a backup outside this computer.")
+                loaded_file = st.file_uploader("Load a project file", type=["zip"], key="project_loader")
+                if loaded_file is not None and st.session_state._last_loaded_project_name != loaded_file.name:
+                    try:
+                        loaded_state = project_store.load_project(loaded_file.getvalue())
+                        st.session_state._last_loaded_project_name = loaded_file.name
+                        _apply_loaded_project(loaded_state, f"'{loaded_file.name}'")
+                    except project_store.ProjectLoadError as exc:
+                        st.error(str(exc))
+
+                if st.button("Prepare project save file"):
+                    st.session_state._project_save_bytes = project_store.save_project(st.session_state)
+                if st.session_state._project_save_bytes:
+                    save_filename = (st.session_state.tender_name or "untitled_project").replace(" ", "_")
+                    st.download_button(
+                        "💾 Download project file", data=st.session_state._project_save_bytes,
+                        file_name=f"{save_filename}.tenderproj.zip", mime="application/zip",
+                    )
+
+                if not IS_SAAS_MODE:
+                    st.markdown("**Claude API key**")
+                    _current_claude_key = (
+                        st.session_state.ai_config.get("api_key", "")
+                        if st.session_state.ai_config.get("provider") == "Anthropic Claude" else ""
+                    )
+                    sidebar_claude_key = st.text_input(
+                        "Anthropic API key", type="password", key="_sidebar_claude_key",
+                        value=_current_claude_key,
+                        help="Same key used everywhere in the app -- this is just a shortcut to the field on the "
+                             "AI Provider Settings tab.",
+                    )
+                    st.checkbox(
+                        "Remember this key on this computer", key="_remember_claude_key",
+                        help="Saves the key to a local .env file next to the app so it's already filled in next "
+                             "time you launch it. Left unticked, it's only kept for this session, like before.",
+                    )
+                    if sidebar_claude_key:
+                        prev_model = st.session_state.ai_config.get("model") \
+                            if st.session_state.ai_config.get("provider") == "Anthropic Claude" else None
+                        st.session_state.ai_config = {
+                            "provider": "Anthropic Claude",
+                            "api_key": sidebar_claude_key,
+                            "model": prev_model or ai_interface.get_default_model("Anthropic Claude"),
+                            "endpoint": "",
+                        }
+                        if st.session_state._remember_claude_key:
+                            _save_anthropic_key_to_env(sidebar_claude_key)
+                            st.caption("Remembered -- this key will be pre-filled automatically next time you open the app.")
+                    else:
+                        st.caption("Paste your Anthropic Claude API key here to enable AI-powered steps across the app.")
+
+                    with st.expander("Other AI providers (OpenAI, Azure, Gemini, Microsoft 365 Copilot)"):
+                        st.caption(
+                            "Only needed if you're not using Anthropic Claude. Picking a provider here replaces "
+                            "the key above for the rest of this session. Sign-in tokens are never written to disk."
+                        )
+                        _other_providers = [p for p in ai_interface.PROVIDERS if p != "Anthropic Claude"]
+                        _current_other_provider = st.session_state.ai_config.get("provider", "")
+                        # "Anthropic Claude" is deliberately not one of the choices in THIS dropdown (it has its
+                        # own field above) -- but that means whenever Claude is the active provider, none of
+                        # these options match it, so the widget has to default its on-screen selection to
+                        # _other_providers[0] just to render something. That default must stay purely cosmetic:
+                        # picking up this section (even collapsed -- Streamlit still executes this code every
+                        # rerun) must NEVER by itself switch the active provider away from a working Claude
+                        # config. Only an api_key the user actually typed below (or a completed Copilot
+                        # sign-in) may overwrite st.session_state.ai_config -- see the two branches below,
+                        # both gated on real user input, never on this selectbox's mere current value.
+                        _other_provider_index = (
+                            _other_providers.index(_current_other_provider) if _current_other_provider in _other_providers else 0
+                        )
+                        provider = st.selectbox("AI provider", _other_providers, key="provider_select", index=_other_provider_index)
+                        # Only pre-fill the fields below from session state when THIS provider is already the
+                        # active one -- otherwise show blank fields, both so a provider you haven't switched to
+                        # doesn't silently inherit another provider's secret key into its text box, and so an
+                        # empty field here can't be mistaken for "this provider is configured".
+                        _other_provider_is_active = _current_other_provider == provider
+
+                        if provider.startswith("Microsoft 365 Copilot"):
+                            with st.expander("Before you sign in -- one-time setup your organisation's Entra admin needs to do", expanded=not st.session_state.copilot_client_id):
+                                st.markdown(
+                                    "Copilot doesn't take a pasted API key -- it authenticates the signed-in user "
+                                    "through your organisation's Microsoft Entra ID, and it requests broad delegated "
+                                    "read access (mail, Teams chats/channels, meeting transcripts, SharePoint sites), "
+                                    "not just proposal drafting. Someone with Entra admin rights needs to, once:\n\n"
+                                    "1. Go to **entra.microsoft.com** → App registrations → New registration.\n"
+                                    "2. Under **Redirect URI**, choose platform **Mobile and desktop applications** "
+                                    "and add `http://localhost` exactly as written (no port number).\n"
+                                    "3. Under **API permissions** → Add a permission → Microsoft Graph → **Delegated "
+                                    "permissions**, add all seven: `Sites.Read.All`, `Mail.Read`, `People.Read.All`, "
+                                    "`OnlineMeetingTranscript.Read.All`, `Chat.Read`, `ChannelMessage.Read.All`, "
+                                    "`ExternalItem.Read.All`.\n"
+                                    "4. Click **Grant admin consent** for your organisation (a tenant admin has to do "
+                                    "this step -- individual users can't self-consent to these scopes).\n"
+                                    "5. Copy the **Application (client) ID** and **Directory (tenant) ID** from the "
+                                    "app's Overview page into the two fields below.\n\n"
+                                    "Every user who signs in also needs their own Microsoft 365 Copilot add-on licence. "
+                                    "Sign-in opens your system browser -- it needs a real display, so it won't work "
+                                    "over a headless/remote connection."
+                                )
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.text_input("Application (client) ID", key="copilot_client_id")
+                            with col2:
+                                st.text_input("Directory (tenant) ID", key="copilot_tenant_id")
+
+                            # Access tokens expire in roughly an hour; try a silent refresh from the cached
+                            # refresh token on every rerun rather than making the user re-click "Sign in"
+                            # mid-session. Never prompts/opens a browser -- silently does nothing if it can't.
+                            if st.session_state.copilot_token_cache and st.session_state.copilot_client_id:
+                                from modules.copilot_client import get_token_silent
+                                refreshed = get_token_silent(
+                                    st.session_state.copilot_client_id, st.session_state.copilot_tenant_id,
+                                    st.session_state.copilot_token_cache,
+                                )
+                                if refreshed:
+                                    st.session_state.copilot_access_token = refreshed
+
+                            sign_in_ready = bool(st.session_state.copilot_client_id and st.session_state.copilot_tenant_id)
+                            if st.session_state.copilot_access_token:
+                                st.success(f"Signed in as {st.session_state.copilot_username}.")
+                                if st.button("Sign out"):
+                                    st.session_state.copilot_access_token = ""
+                                    st.session_state.copilot_token_cache = ""
+                                    st.session_state.copilot_username = ""
+                                    st.rerun()
+                            else:
+                                if st.button("Sign in with Microsoft", type="primary", disabled=not sign_in_ready):
+                                    from modules.copilot_client import sign_in_interactive, CopilotAuthError
+                                    with st.spinner("Opening your browser to sign in and consent..."):
+                                        try:
+                                            result = sign_in_interactive(st.session_state.copilot_client_id, st.session_state.copilot_tenant_id)
+                                            st.session_state.copilot_access_token = result["access_token"]
+                                            st.session_state.copilot_token_cache = result["cache"]
+                                            st.session_state.copilot_username = result["username"]
+                                            st.success(f"Signed in as {result['username']}.")
+                                        except CopilotAuthError as exc:
+                                            st.error(str(exc))
+                                if not sign_in_ready:
+                                    st.info("Enter the Application (client) ID and Directory (tenant) ID above to enable sign-in.")
+
+                            # Only switch the active provider to Copilot once sign-in has actually completed --
+                            # never just because this branch happened to render (see the note above the
+                            # selectbox for why that would otherwise silently clobber a working Claude config).
+                            if st.session_state.copilot_access_token:
+                                st.session_state.ai_config = {
+                                    "provider": provider, "api_key": "", "model": "", "endpoint": "",
+                                    "access_token": st.session_state.copilot_access_token,
+                                }
+                            st.warning(
+                                "Even once signed in: Microsoft's own docs describe this API as grounded chat, not a "
+                                "general completion endpoint -- text-only replies, no guaranteed structured output, "
+                                "and prone to timeouts on long requests. This app's Tender Analysis and Draft "
+                                "Responses steps send large, strict-JSON-expecting prompts, which is exactly the kind "
+                                "of request that API is documented to struggle with. If a step fails or times out, "
+                                "switch providers for that step rather than assuming something else is broken."
+                            )
+                        else:
+                            has_key_already = bool(st.session_state.ai_config.get("api_key")) and _other_provider_is_active
+                            with st.expander(f"How to get an API key from {provider}", expanded=not has_key_already):
+                                st.markdown(PROVIDER_SETUP_STEPS.get(provider, "Steps not available for this provider."))
+
+                            api_key = st.text_input(
+                                "API key", type="password", key="api_key_input",
+                                value=st.session_state.ai_config.get("api_key", "") if _other_provider_is_active else "",
+                            )
+                            default_model = ai_interface.get_default_model(provider)
+                            model = st.text_input(
+                                "Model" + (" / deployment name" if provider == "Azure OpenAI" else ""),
+                                value=(st.session_state.ai_config.get("model") if _other_provider_is_active else "") or default_model,
+                                key="model_input",
+                            )
+                            endpoint = ""
+                            if provider == "Azure OpenAI":
+                                endpoint = st.text_input(
+                                    "Azure endpoint URL", key="endpoint_input",
+                                    value=st.session_state.ai_config.get("endpoint", "") if _other_provider_is_active else "",
+                                    placeholder="https://your-resource.openai.azure.com",
+                                )
+                            # Only switch the active provider once the user has actually typed a key for THIS
+                            # provider -- rendering this section (even just by expanding it) must never by
+                            # itself replace a working Claude (or other provider's) config with an empty one.
+                            if api_key:
+                                st.session_state.ai_config = {"provider": provider, "api_key": api_key, "model": model, "endpoint": endpoint}
+                                st.success(f"{provider} configured for this session.")
+                            elif _other_provider_is_active:
+                                st.warning(f"{provider} API key cleared -- enter it again to keep using {provider} this session.")
+                            else:
+                                st.caption(f"Enter an API key above to switch this session to {provider}.")
+                # In SAAS_MODE, nothing renders here at all -- AI drafting runs on
+                # the account's own server-side ANTHROPIC_API_KEY (see the module
+                # docstring at the top of this file), so there's no API key
+                # concept to surface to a subscriber. This used to show a "no API
+                # key needed" note; removed at the user's request as unnecessary
+                # noise in the popover.
+
+                st.divider()
+                st.caption(
+                    "This tool never invents project experience, staff, certifications, insurances, "
+                    "or commercial terms. Missing information becomes a clearly marked placeholder, "
+                    "not a guess."
+                )
+
     st.markdown(branding.brand_html(logo_size=30, wordmark_size="1.05rem", show_beta=IS_SAAS_MODE),
                 unsafe_allow_html=True)
 
@@ -785,333 +1109,6 @@ with st.sidebar:
         branding.vertical_steps_component_html(_stepper_steps),
         height=max(1, len(_stepper_steps)) * 34 + 16,
     )
-
-
-
-# Small top-right account/settings menu -- icon only, no label text,
-# in the same spot modern SaaS apps put an account/menu affordance.
-# Lives in the main content area (not the sidebar) so it stays pinned
-# to the top-right of the page regardless of sidebar width/scroll.
-_topbar_l, _topbar_r = st.columns([14, 1])
-with _topbar_r:
-    with st.popover("☰", use_container_width=True):
-        with st.container(height=460):
-            if IS_SAAS_MODE and current_user:
-                bcol1, bcol2 = st.columns(2)
-                with bcol1:
-                    if not _access["subscribed"]:
-                        if st.button("Upgrade", key="_sidebar_upgrade_btn"):
-                            try:
-                                url = billing.create_checkout_session(current_user)
-                                st.link_button("Continue to payment →", url, type="primary")
-                            except Exception as exc:
-                                st.error(f"Couldn't start checkout: {exc}")
-                                st.caption(billing.debug_key_info())
-                    else:
-                        portal_url = billing.create_customer_portal_session(current_user)
-                        if portal_url:
-                            st.link_button("Manage billing", portal_url)
-                with bcol2:
-                    if st.button("Log out", key="_sidebar_logout_btn"):
-                        auth.log_out()
-                        st.rerun()
-                st.divider()
-
-            st.subheader("Project file")
-            st.caption(
-                "Your AI provider API key / Copilot sign-in are never saved as part of a project file -- "
-                "re-enter those after loading a project, local or from a file. (You can have your Claude "
-                "API key remembered on this computer, independent of any project -- see below.)"
-            )
-
-            if not IS_SAAS_MODE:
-                # Local-disk autosave -- only correct for the original single-user
-                # desktop prototype. In SAAS_MODE this is replaced by the DB-backed
-                # "My projects" branch below (see cloud_project_store.py): writing
-                # to a 'projects/' folder on the *server's* disk in a hosted,
-                # multi-tenant deployment would be shared across every logged-in
-                # user's browser sessions (a real data leak, not just a rough edge),
-                # and Railway's container disk is wiped on every redeploy regardless.
-                st.markdown("**This computer**")
-                st.checkbox(
-                    "Auto-save as I work", key="_autosave_enabled",
-                    help=f"Saves to a 'projects' folder next to the app, at most every {AUTOSAVE_INTERVAL_SECONDS}s "
-                         "of activity -- only once a project name is entered (tab 1).",
-                )
-                if st.session_state._last_autosave_path:
-                    st.caption(f"Last saved {datetime.fromtimestamp(st.session_state._last_autosave_ts).strftime('%H:%M:%S')}")
-                elif not _project_identifier():
-                    st.caption("Enter a project or tender name (tab 1) to enable auto-save.")
-
-                local_projects = local_project_store.list_local_projects()
-                if local_projects:
-                    options = [p["display_name"] for p in local_projects]
-                    chosen = st.selectbox("Recent projects", options, key="_local_project_pick")
-                    chosen_entry = next(p for p in local_projects if p["display_name"] == chosen)
-                    lcol1, lcol2 = st.columns(2)
-                    with lcol1:
-                        if st.button("Open", key="_open_local_project"):
-                            try:
-                                loaded_state = local_project_store.load_local(chosen_entry["path"])
-                                _apply_loaded_project(loaded_state, f"'{chosen_entry['display_name']}'")
-                            except project_store.ProjectLoadError as exc:
-                                st.error(str(exc))
-                    with lcol2:
-                        if st.button("Delete", key="_delete_local_project"):
-                            local_project_store.delete_local(chosen_entry["path"])
-                            st.rerun()
-                else:
-                    st.caption("No local saves yet.")
-
-            elif current_user:
-                # DB-backed equivalent of "This computer" above, scoped to this
-                # user's account (see cloud_project_store.py) -- so uploads, brief
-                # analysis, drafts, and team assignments survive a page refresh, a
-                # dropped connection, or the app being redeployed, instead of living
-                # only in this one browser tab's live session.
-                st.markdown("**My projects**")
-                st.checkbox(
-                    "Auto-save as I work", key="_autosave_enabled",
-                    help=f"Saves to your account, at most every {AUTOSAVE_INTERVAL_SECONDS}s of activity -- "
-                         "only once a project name is entered (tab 1). Lets you pick back up later, even "
-                         "after closing the tab or a refresh.",
-                )
-                if st.session_state._last_autosave_error:
-                    st.warning(
-                        f"Auto-save failed: {st.session_state._last_autosave_error} -- your work in this "
-                        "tab is NOT saved to your account yet. Use \"💾 Download project file\" below as a "
-                        "backup, and let support know if this keeps happening."
-                    )
-                elif st.session_state._last_autosave_path:
-                    st.caption(f"Last saved {datetime.fromtimestamp(st.session_state._last_autosave_ts).strftime('%H:%M:%S')}")
-                elif not _project_identifier():
-                    st.caption("Enter a project or tender name (tab 1) to enable auto-save.")
-
-                cloud_projects = cloud_project_store.list_cloud_projects(current_user.id)
-                if cloud_projects:
-                    options = [p["display_name"] for p in cloud_projects]
-                    chosen = st.selectbox("Recent projects", options, key="_cloud_project_pick")
-                    chosen_entry = next(p for p in cloud_projects if p["display_name"] == chosen)
-                    lcol1, lcol2 = st.columns(2)
-                    with lcol1:
-                        if st.button("Open", key="_open_cloud_project"):
-                            try:
-                                loaded_state = cloud_project_store.load_cloud(current_user.id, chosen_entry["id"])
-                                _apply_loaded_project(loaded_state, f"'{chosen_entry['display_name']}'")
-                            except project_store.ProjectLoadError as exc:
-                                st.error(str(exc))
-                    with lcol2:
-                        if st.button("Delete", key="_delete_cloud_project"):
-                            cloud_project_store.delete_cloud(current_user.id, chosen_entry["id"])
-                            st.rerun()
-                else:
-                    st.caption("No saved projects yet -- one will appear here shortly after you start "
-                               "one (auto-save kicks in once you enter a project name on tab 1).")
-
-            st.markdown("**Export / import a file**")
-            st.caption("For sharing a project or keeping a backup outside this computer.")
-            loaded_file = st.file_uploader("Load a project file", type=["zip"], key="project_loader")
-            if loaded_file is not None and st.session_state._last_loaded_project_name != loaded_file.name:
-                try:
-                    loaded_state = project_store.load_project(loaded_file.getvalue())
-                    st.session_state._last_loaded_project_name = loaded_file.name
-                    _apply_loaded_project(loaded_state, f"'{loaded_file.name}'")
-                except project_store.ProjectLoadError as exc:
-                    st.error(str(exc))
-
-            if st.button("Prepare project save file"):
-                st.session_state._project_save_bytes = project_store.save_project(st.session_state)
-            if st.session_state._project_save_bytes:
-                save_filename = (st.session_state.tender_name or "untitled_project").replace(" ", "_")
-                st.download_button(
-                    "💾 Download project file", data=st.session_state._project_save_bytes,
-                    file_name=f"{save_filename}.tenderproj.zip", mime="application/zip",
-                )
-
-            if not IS_SAAS_MODE:
-                st.markdown("**Claude API key**")
-                _current_claude_key = (
-                    st.session_state.ai_config.get("api_key", "")
-                    if st.session_state.ai_config.get("provider") == "Anthropic Claude" else ""
-                )
-                sidebar_claude_key = st.text_input(
-                    "Anthropic API key", type="password", key="_sidebar_claude_key",
-                    value=_current_claude_key,
-                    help="Same key used everywhere in the app -- this is just a shortcut to the field on the "
-                         "AI Provider Settings tab.",
-                )
-                st.checkbox(
-                    "Remember this key on this computer", key="_remember_claude_key",
-                    help="Saves the key to a local .env file next to the app so it's already filled in next "
-                         "time you launch it. Left unticked, it's only kept for this session, like before.",
-                )
-                if sidebar_claude_key:
-                    prev_model = st.session_state.ai_config.get("model") \
-                        if st.session_state.ai_config.get("provider") == "Anthropic Claude" else None
-                    st.session_state.ai_config = {
-                        "provider": "Anthropic Claude",
-                        "api_key": sidebar_claude_key,
-                        "model": prev_model or ai_interface.get_default_model("Anthropic Claude"),
-                        "endpoint": "",
-                    }
-                    if st.session_state._remember_claude_key:
-                        _save_anthropic_key_to_env(sidebar_claude_key)
-                        st.caption("Remembered -- this key will be pre-filled automatically next time you open the app.")
-                else:
-                    st.caption("Paste your Anthropic Claude API key here to enable AI-powered steps across the app.")
-
-                with st.expander("Other AI providers (OpenAI, Azure, Gemini, Microsoft 365 Copilot)"):
-                    st.caption(
-                        "Only needed if you're not using Anthropic Claude. Picking a provider here replaces "
-                        "the key above for the rest of this session. Sign-in tokens are never written to disk."
-                    )
-                    _other_providers = [p for p in ai_interface.PROVIDERS if p != "Anthropic Claude"]
-                    _current_other_provider = st.session_state.ai_config.get("provider", "")
-                    # "Anthropic Claude" is deliberately not one of the choices in THIS dropdown (it has its
-                    # own field above) -- but that means whenever Claude is the active provider, none of
-                    # these options match it, so the widget has to default its on-screen selection to
-                    # _other_providers[0] just to render something. That default must stay purely cosmetic:
-                    # picking up this section (even collapsed -- Streamlit still executes this code every
-                    # rerun) must NEVER by itself switch the active provider away from a working Claude
-                    # config. Only an api_key the user actually typed below (or a completed Copilot
-                    # sign-in) may overwrite st.session_state.ai_config -- see the two branches below,
-                    # both gated on real user input, never on this selectbox's mere current value.
-                    _other_provider_index = (
-                        _other_providers.index(_current_other_provider) if _current_other_provider in _other_providers else 0
-                    )
-                    provider = st.selectbox("AI provider", _other_providers, key="provider_select", index=_other_provider_index)
-                    # Only pre-fill the fields below from session state when THIS provider is already the
-                    # active one -- otherwise show blank fields, both so a provider you haven't switched to
-                    # doesn't silently inherit another provider's secret key into its text box, and so an
-                    # empty field here can't be mistaken for "this provider is configured".
-                    _other_provider_is_active = _current_other_provider == provider
-
-                    if provider.startswith("Microsoft 365 Copilot"):
-                        with st.expander("Before you sign in -- one-time setup your organisation's Entra admin needs to do", expanded=not st.session_state.copilot_client_id):
-                            st.markdown(
-                                "Copilot doesn't take a pasted API key -- it authenticates the signed-in user "
-                                "through your organisation's Microsoft Entra ID, and it requests broad delegated "
-                                "read access (mail, Teams chats/channels, meeting transcripts, SharePoint sites), "
-                                "not just proposal drafting. Someone with Entra admin rights needs to, once:\n\n"
-                                "1. Go to **entra.microsoft.com** → App registrations → New registration.\n"
-                                "2. Under **Redirect URI**, choose platform **Mobile and desktop applications** "
-                                "and add `http://localhost` exactly as written (no port number).\n"
-                                "3. Under **API permissions** → Add a permission → Microsoft Graph → **Delegated "
-                                "permissions**, add all seven: `Sites.Read.All`, `Mail.Read`, `People.Read.All`, "
-                                "`OnlineMeetingTranscript.Read.All`, `Chat.Read`, `ChannelMessage.Read.All`, "
-                                "`ExternalItem.Read.All`.\n"
-                                "4. Click **Grant admin consent** for your organisation (a tenant admin has to do "
-                                "this step -- individual users can't self-consent to these scopes).\n"
-                                "5. Copy the **Application (client) ID** and **Directory (tenant) ID** from the "
-                                "app's Overview page into the two fields below.\n\n"
-                                "Every user who signs in also needs their own Microsoft 365 Copilot add-on licence. "
-                                "Sign-in opens your system browser -- it needs a real display, so it won't work "
-                                "over a headless/remote connection."
-                            )
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.text_input("Application (client) ID", key="copilot_client_id")
-                        with col2:
-                            st.text_input("Directory (tenant) ID", key="copilot_tenant_id")
-
-                        # Access tokens expire in roughly an hour; try a silent refresh from the cached
-                        # refresh token on every rerun rather than making the user re-click "Sign in"
-                        # mid-session. Never prompts/opens a browser -- silently does nothing if it can't.
-                        if st.session_state.copilot_token_cache and st.session_state.copilot_client_id:
-                            from modules.copilot_client import get_token_silent
-                            refreshed = get_token_silent(
-                                st.session_state.copilot_client_id, st.session_state.copilot_tenant_id,
-                                st.session_state.copilot_token_cache,
-                            )
-                            if refreshed:
-                                st.session_state.copilot_access_token = refreshed
-
-                        sign_in_ready = bool(st.session_state.copilot_client_id and st.session_state.copilot_tenant_id)
-                        if st.session_state.copilot_access_token:
-                            st.success(f"Signed in as {st.session_state.copilot_username}.")
-                            if st.button("Sign out"):
-                                st.session_state.copilot_access_token = ""
-                                st.session_state.copilot_token_cache = ""
-                                st.session_state.copilot_username = ""
-                                st.rerun()
-                        else:
-                            if st.button("Sign in with Microsoft", type="primary", disabled=not sign_in_ready):
-                                from modules.copilot_client import sign_in_interactive, CopilotAuthError
-                                with st.spinner("Opening your browser to sign in and consent..."):
-                                    try:
-                                        result = sign_in_interactive(st.session_state.copilot_client_id, st.session_state.copilot_tenant_id)
-                                        st.session_state.copilot_access_token = result["access_token"]
-                                        st.session_state.copilot_token_cache = result["cache"]
-                                        st.session_state.copilot_username = result["username"]
-                                        st.success(f"Signed in as {result['username']}.")
-                                    except CopilotAuthError as exc:
-                                        st.error(str(exc))
-                            if not sign_in_ready:
-                                st.info("Enter the Application (client) ID and Directory (tenant) ID above to enable sign-in.")
-
-                        # Only switch the active provider to Copilot once sign-in has actually completed --
-                        # never just because this branch happened to render (see the note above the
-                        # selectbox for why that would otherwise silently clobber a working Claude config).
-                        if st.session_state.copilot_access_token:
-                            st.session_state.ai_config = {
-                                "provider": provider, "api_key": "", "model": "", "endpoint": "",
-                                "access_token": st.session_state.copilot_access_token,
-                            }
-                        st.warning(
-                            "Even once signed in: Microsoft's own docs describe this API as grounded chat, not a "
-                            "general completion endpoint -- text-only replies, no guaranteed structured output, "
-                            "and prone to timeouts on long requests. This app's Tender Analysis and Draft "
-                            "Responses steps send large, strict-JSON-expecting prompts, which is exactly the kind "
-                            "of request that API is documented to struggle with. If a step fails or times out, "
-                            "switch providers for that step rather than assuming something else is broken."
-                        )
-                    else:
-                        has_key_already = bool(st.session_state.ai_config.get("api_key")) and _other_provider_is_active
-                        with st.expander(f"How to get an API key from {provider}", expanded=not has_key_already):
-                            st.markdown(PROVIDER_SETUP_STEPS.get(provider, "Steps not available for this provider."))
-
-                        api_key = st.text_input(
-                            "API key", type="password", key="api_key_input",
-                            value=st.session_state.ai_config.get("api_key", "") if _other_provider_is_active else "",
-                        )
-                        default_model = ai_interface.get_default_model(provider)
-                        model = st.text_input(
-                            "Model" + (" / deployment name" if provider == "Azure OpenAI" else ""),
-                            value=(st.session_state.ai_config.get("model") if _other_provider_is_active else "") or default_model,
-                            key="model_input",
-                        )
-                        endpoint = ""
-                        if provider == "Azure OpenAI":
-                            endpoint = st.text_input(
-                                "Azure endpoint URL", key="endpoint_input",
-                                value=st.session_state.ai_config.get("endpoint", "") if _other_provider_is_active else "",
-                                placeholder="https://your-resource.openai.azure.com",
-                            )
-                        # Only switch the active provider once the user has actually typed a key for THIS
-                        # provider -- rendering this section (even just by expanding it) must never by
-                        # itself replace a working Claude (or other provider's) config with an empty one.
-                        if api_key:
-                            st.session_state.ai_config = {"provider": provider, "api_key": api_key, "model": model, "endpoint": endpoint}
-                            st.success(f"{provider} configured for this session.")
-                        elif _other_provider_is_active:
-                            st.warning(f"{provider} API key cleared -- enter it again to keep using {provider} this session.")
-                        else:
-                            st.caption(f"Enter an API key above to switch this session to {provider}.")
-            # In SAAS_MODE, nothing renders here at all -- AI drafting runs on
-            # the account's own server-side ANTHROPIC_API_KEY (see the module
-            # docstring at the top of this file), so there's no API key
-            # concept to surface to a subscriber. This used to show a "no API
-            # key needed" note; removed at the user's request as unnecessary
-            # noise in the popover.
-
-            st.divider()
-            st.caption(
-                "This tool never invents project experience, staff, certifications, insurances, "
-                "or commercial terms. Missing information becomes a clearly marked placeholder, "
-                "not a guess."
-            )
-
-
 # This CSS is deliberately injected here -- after auth.require_login() has
 # already returned above, meaning a user is definitely signed in by this
 # point -- rather than in the unconditional page-wide <style> block near
