@@ -172,30 +172,81 @@ html, body {{ margin:0; padding:0; background:transparent; font-family:-apple-sy
 <script>
 (function(){{
   var topDoc = window.parent.document;
-  function navStep(i) {{
-    var tabs = topDoc.querySelectorAll('[data-testid="stTabs"] [data-testid="stTab"]');
-    if (tabs[i]) {{ tabs[i].click(); }}
+  // Real Streamlit tab strip is hidden via CSS (see the docstring above) but
+  // still live in the DOM -- this is the only thing that actually switches
+  // which tab's content is showing.
+  var STORAGE_KEY = 'cp_active_step_index';
+
+  function getTabs() {{
+    return topDoc.querySelectorAll('[data-testid="stTabs"] [data-testid="stTab"]');
   }}
+
+  function currentActiveIndex() {{
+    var tabs = getTabs();
+    var activeIdx = -1;
+    tabs.forEach(function(t, idx){{
+      if (t.getAttribute('aria-selected') === 'true') {{ activeIdx = idx; }}
+    }});
+    return activeIdx;
+  }}
+
+  function navStep(i) {{
+    var tabs = getTabs();
+    if (tabs[i]) {{
+      try {{ window.parent.sessionStorage.setItem(STORAGE_KEY, String(i)); }} catch (e) {{}}
+      tabs[i].click();
+    }}
+  }}
+
   document.querySelectorAll('.cp-step-row').forEach(function(row){{
     row.addEventListener('click', function(){{
       navStep(parseInt(row.getAttribute('data-cp-step'), 10));
     }});
   }});
+
+  // Streamlit's real tab strip occasionally resets itself to the FIRST tab
+  // on a rerun it had no business touching -- most reliably reproduced by
+  // uploading a file anywhere in the app. From the user's side that looks
+  // like "I uploaded my file and got bounced back to Project Setup with no
+  // confirmation," which is exactly the kind of thing that makes a working
+  // upload look broken. This component is recreated fresh on every rerun
+  // (a brand new iframe), so on each (re)mount we compare the real tab
+  // strip's current selection against the step the user actually last
+  // navigated to (persisted in the parent window's sessionStorage, updated
+  // both here and in navStep() above) and silently click it back if a stray
+  // reset snuck in. The only way to change the real tab selection at all is
+  // through navStep() above (the real tabs are invisible/unclickable by the
+  // user directly), so any mismatch here can only be one of these
+  // unintended resets, never a legitimate navigation we'd be fighting.
+  function restoreIfNeeded(){{
+    try {{
+      var saved = window.parent.sessionStorage.getItem(STORAGE_KEY);
+      if (saved === null) return;
+      var savedIdx = parseInt(saved, 10);
+      var activeIdx = currentActiveIndex();
+      if (activeIdx !== -1 && activeIdx !== savedIdx) {{
+        var tabs = getTabs();
+        if (tabs[savedIdx]) {{ tabs[savedIdx].click(); }}
+      }}
+    }} catch (e) {{ /* real tab strip not ready yet -- next poll picks it up */ }}
+  }}
+
   function syncActive(){{
     try {{
-      var tabs = topDoc.querySelectorAll('[data-testid="stTabs"] [data-testid="stTab"]');
-      var activeIdx = -1;
-      tabs.forEach(function(t, idx){{
-        if (t.getAttribute('aria-selected') === 'true') {{ activeIdx = idx; }}
-      }});
+      var activeIdx = currentActiveIndex();
       document.querySelectorAll('.cp-step-row').forEach(function(r){{
         var idx = parseInt(r.getAttribute('data-cp-step'), 10);
         r.classList.toggle('cp-step-active', idx === activeIdx);
       }});
+      if (activeIdx !== -1) {{
+        try {{ window.parent.sessionStorage.setItem(STORAGE_KEY, String(activeIdx)); }} catch (e) {{}}
+      }}
     }} catch (e) {{ /* real tab strip not ready yet -- next poll picks it up */ }}
   }}
+
+  restoreIfNeeded();
   syncActive();
-  setInterval(syncActive, 350);
+  setInterval(function(){{ restoreIfNeeded(); syncActive(); }}, 350);
 }})();
 </script>
 </body></html>"""
