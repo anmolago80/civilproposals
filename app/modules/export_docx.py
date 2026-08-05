@@ -1429,7 +1429,7 @@ def _build_sc1_project_experience_compact(
             desc_p.add_run(description).font.size = Pt(11)
         else:
             r = desc_p.add_run(
-                "[NO DESCRIPTION DRAFTED -- draft/review this reference project in Upload Documents (tab 2)]"
+                "[NO DESCRIPTION DRAFTED -- draft/review this reference project in Upload Docs]"
             )
             r.font.color.rgb = RED
             r.italic = True
@@ -1445,7 +1445,7 @@ def _build_sc1_project_experience_compact(
             rel_p.add_run(relevance).font.size = Pt(11)
         else:
             r = rel_p.add_run(
-                "[NO RELEVANCE DRAFTED -- draft/review this reference project in Upload Documents (tab 2)]"
+                "[NO RELEVANCE DRAFTED -- draft/review this reference project in Upload Docs]"
             )
             r.font.color.rgb = RED
             r.italic = True
@@ -1471,8 +1471,8 @@ def _build_reference_experience(
     theme = theme or _theme_colours(None)
     if not reference_projects:
         _add_placeholder_paragraph(
-            doc, "[NO REFERENCE PROJECTS ENTERED -- add project references in Upload Documents "
-                 "(tab 2), then draft/review them there before export]",
+            doc, "[NO REFERENCE PROJECTS ENTERED -- add project references in Upload Docs, "
+                 "then draft/review them there before export]",
         )
         return
 
@@ -1518,7 +1518,7 @@ def _fill_reference_project_cell(cell, project, photos: dict[str, bytes], theme:
     if description:
         desc_p.add_run(description)
     else:
-        r = desc_p.add_run("[NO DESCRIPTION DRAFTED -- draft/review this reference project in Upload Documents (tab 2)]")
+        r = desc_p.add_run("[NO DESCRIPTION DRAFTED -- draft/review this reference project in Upload Docs]")
         r.font.color.rgb = RED
         r.italic = True
 

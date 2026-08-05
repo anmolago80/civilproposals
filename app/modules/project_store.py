@@ -74,6 +74,15 @@ PLAIN_KEYS = [
     "resource_extra_names", "cv_library_filenames", "cv_extracted_names", "dismissed_disciplines",
     "body_font", "reference_project_warnings", "dismissed_fee_disciplines",
     "fee_estimate_manual_total", "project_differentiator", "project_sales_pitch",
+    # Bookkeeping app.py uses to detect a stale Proposal Structure (see
+    # _structure_format_stale() there) -- MUST travel with "sections" and
+    # "proposal_format" or a reopened project falsely looks stale: without
+    # this, reloading resets it to None (via _init_state()'s default) while
+    # "proposal_format" and "sections" both restore correctly, so the two
+    # values never match and the "format changed" warning fires even though
+    # nothing was actually changed. Confirmed this exact false positive from
+    # a user report before adding this key.
+    "_sections_built_format",
 ]
 
 # key -> model class, for a single optional pydantic instance (None means "not run yet").

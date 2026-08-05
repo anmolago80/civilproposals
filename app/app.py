@@ -157,6 +157,15 @@ st.markdown(
     [data-testid="stSidebarCollapseButton"], [data-testid="stExpandSidebarButton"] {
         display: none !important;
     }
+    /* stSidebarHeader is the ~60px strip that normally holds the collapse
+       button and a logo spacer -- with the collapse button hidden above,
+       nothing else uses it, and it was leaving a dead gap that pushed the
+       menu icon/logo down from the sidebar's top edge. Hiding it lets
+       stSidebarUserContent (the menu icon, logo, and step list) sit flush
+       at the very top instead. */
+    [data-testid="stSidebarHeader"] {
+        display: none !important;
+    }
     [data-testid="stSidebar"] {
         border-right: 1px solid #E2E8F0;
     }
@@ -801,12 +810,12 @@ with st.sidebar:
                     st.checkbox(
                         "Auto-save as I work", key="_autosave_enabled",
                         help=f"Saves to a 'projects' folder next to the app, at most every {AUTOSAVE_INTERVAL_SECONDS}s "
-                             "of activity -- only once a project name is entered (tab 1).",
+                             "of activity -- only once a project name is entered (Project Setup).",
                     )
                     if st.session_state._last_autosave_path:
                         st.caption(f"Last saved {datetime.fromtimestamp(st.session_state._last_autosave_ts).strftime('%H:%M:%S')}")
                     elif not _project_identifier():
-                        st.caption("Enter a project or tender name (tab 1) to enable auto-save.")
+                        st.caption("Enter a project or tender name (Project Setup) to enable auto-save.")
 
                     local_projects = local_project_store.list_local_projects()
                     if local_projects:
@@ -838,7 +847,7 @@ with st.sidebar:
                     st.checkbox(
                         "Auto-save as I work", key="_autosave_enabled",
                         help=f"Saves to your account, at most every {AUTOSAVE_INTERVAL_SECONDS}s of activity -- "
-                             "only once a project name is entered (tab 1). Lets you pick back up later, even "
+                             "only once a project name is entered (Project Setup). Lets you pick back up later, even "
                              "after closing the tab or a refresh.",
                     )
                     if st.session_state._last_autosave_error:
@@ -850,7 +859,7 @@ with st.sidebar:
                     elif st.session_state._last_autosave_path:
                         st.caption(f"Last saved {datetime.fromtimestamp(st.session_state._last_autosave_ts).strftime('%H:%M:%S')}")
                     elif not _project_identifier():
-                        st.caption("Enter a project or tender name (tab 1) to enable auto-save.")
+                        st.caption("Enter a project or tender name (Project Setup) to enable auto-save.")
 
                     cloud_projects = cloud_project_store.list_cloud_projects(current_user.id)
                     if cloud_projects:
@@ -871,7 +880,7 @@ with st.sidebar:
                                 st.rerun()
                     else:
                         st.caption("No saved projects yet -- one will appear here shortly after you start "
-                                   "one (auto-save kicks in once you enter a project name on tab 1).")
+                                   "one (auto-save kicks in once you enter a project name on Project Setup).")
 
                 st.markdown("**Export / import a file**")
                 st.caption("For sharing a project or keeping a backup outside this computer.")
@@ -1521,6 +1530,19 @@ with tabs[1]:
     raw_refs_text = (st.session_state.company_material_text.get("project_references") or "").strip()
     if not raw_refs_text:
         st.info("Upload 'Project references' material above to draft reference projects from it, or add one manually below.")
+    elif not st.session_state.reference_projects:
+        # Uploading the raw material only extracts its text -- it does NOT
+        # automatically turn into reference project entries. That second
+        # step (the button right below) is easy to miss, since the upload
+        # widget itself shows a reassuring green "X file(s) stored"
+        # confirmation that looks like the whole job is done. Called out
+        # explicitly here so "I uploaded my references but nothing's
+        # happening" has an obvious next step instead of looking broken.
+        st.info(
+            "Material uploaded and read. Click **Draft reference projects from uploaded material** "
+            "below to have the AI turn it into the individual project entries shown further down -- "
+            "uploading alone doesn't create them yet."
+        )
 
     refs_ai_ready = bool(st.session_state.ai_config.get("api_key")) and bool(raw_refs_text)
     if st.button("Draft reference projects from uploaded material", disabled=not refs_ai_ready,
@@ -1538,7 +1560,7 @@ with tabs[1]:
                 st.session_state.reference_project_warnings = warnings
                 st.success(f"Drafted {len(drafted)} reference project(s). Review and edit every field below before export.")
                 if not analysis_for_context:
-                    st.info("Tender Analysis (tab 3) hasn't run yet -- re-run this once it has, so relevance can be tailored to the actual brief.")
+                    st.info("Tender Analysis hasn't run yet -- re-run this once it has, so relevance can be tailored to the actual brief.")
             except Exception as exc:
                 st.error(f"Reference project drafting failed: {exc}")
 
@@ -1601,7 +1623,7 @@ with tabs[2]:
 
     ready = st.session_state.tender_extracted is not None and bool(st.session_state.ai_config.get("api_key"))
     if not ready:
-        st.info("Upload a tender brief (tab 2) and configure an AI provider in the sidebar to run analysis.")
+        st.info("Upload a tender brief (Upload Docs) and configure an AI provider in the sidebar to run analysis.")
 
     # This is the metered action: the first time a given project runs Tender
     # Analysis, it consumes one of the 3 free trial proposals (see
@@ -1708,7 +1730,7 @@ with tabs[3]:
 
     ready = st.session_state.analysis is not None
     if not ready:
-        st.info("Run Tender Analysis (tab 3) first.")
+        st.info("Run Tender Analysis first.")
 
     if st.button("Generate Proposal Structure", type="primary", disabled=not ready):
         _rebuild_structure()
@@ -1716,7 +1738,7 @@ with tabs[3]:
 
     if _structure_format_stale():
         st.warning(
-            "You changed the Proposal format (tab 1) after these sections were generated, so "
+            "You changed the Proposal format (Project Setup) after these sections were generated, so "
             "the list below is still built for the *previous* format and won't match what "
             "drafting/export expect (e.g. no 'Project Understanding' section for a Small Scope "
             "pack). Click **Generate Proposal Structure** above again to refresh it."
@@ -1800,7 +1822,7 @@ with tabs[4]:
 
     allocations = st.session_state.allocations
     if not allocations:
-        st.info("Generate the Proposal Structure (tab 4) first.")
+        st.info("Generate the Proposal Structure first.")
     else:
         st.dataframe(
             [{
@@ -1836,21 +1858,21 @@ with tabs[5]:
         st.caption(
             "The Small Scope pack has two sections that are genuinely free text -- Introduction "
             "and Methodology and Deliverables, both drafted below. Scope of Work comes straight "
-            "from the brief, Project Team/Fees/Program have their own dedicated steps (tabs "
-            "8-9), and Terms of Engagement further down is always your own wording, never "
-            "AI-drafted."
+            "from the brief, Project Team/Fees/Program have their own dedicated steps "
+            "(Team & Resourcing / Fee Estimate), and Terms of Engagement further down is "
+            "always your own wording, never AI-drafted."
         )
     else:
         st.caption("First-pass draft content per section, with red guidance notes and a list of what still needs real user input.")
 
     ready = st.session_state.sections is not None and bool(st.session_state.ai_config.get("api_key"))
     if not ready:
-        st.info("Generate the Proposal Structure (tab 4) and configure an AI provider in the sidebar first.")
+        st.info("Generate the Proposal Structure and configure an AI provider in the sidebar first.")
 
     if _structure_format_stale():
         st.warning(
-            "The Proposal format (tab 1) was changed after the current sections were generated. "
-            "Go to tab 4 and click **Generate Proposal Structure** again before drafting, or "
+            "The Proposal format (Project Setup) was changed after the current sections were generated. "
+            "Go to Structure and click **Generate Proposal Structure** again before drafting, or "
             "this will silently draft nothing for the sections that only exist in this format."
         )
 
@@ -1859,15 +1881,21 @@ with tabs[5]:
         if not targets:
             st.error(
                 "Nothing to draft -- the current sections don't match any of this format's "
-                "AI-drafted section titles. This usually means the Proposal format (tab 1) was "
-                "changed after Proposal Structure was generated. Go to tab 4 and click "
+                "AI-drafted section titles. This usually means the Proposal format (Project Setup) was "
+                "changed after Proposal Structure was generated. Go to Structure and click "
                 "**Generate Proposal Structure** again, then retry this."
             )
             st.stop()
         progress = st.progress(0.0, text="Drafting...")
 
         def _progress_cb(done, total, title):
-            progress.progress((done + 1) / max(total, 1), text=f"Drafting '{title}' ({done + 1}/{total})...")
+            # generate_all_drafts() now runs sections concurrently and calls
+            # this AFTER each one finishes (done is already a 1-indexed
+            # completed-count, not "about to start section done+1" like the
+            # old sequential version) -- sections may complete out of their
+            # original order, so `title` here is whichever one just finished,
+            # not necessarily done'th in the list.
+            progress.progress(done / max(total, 1), text=f"Drafted '{title}' ({done}/{total})...")
 
         try:
             # Keep excluded personnel (unticked via "Include in proposal" on the
@@ -2041,10 +2069,11 @@ with tabs[5]:
             "names the strongest 2-4 comparable reference projects and states plainly why "
             "they prove this firm can deliver the brief, replacing the generic 'selected "
             "past projects' note. Grounded entirely in the real reference projects entered "
-            "and drafted in Upload Documents (tab 2) -- never invented."
+            "and drafted in Upload Docs -- never invented."
         )
         _experience_ready = ready and bool(st.session_state.reference_projects)
-        if st.button("Generate Project Experience Introduction (AI)", disabled=not _experience_ready):
+        if st.button("Generate Project Experience Introduction (AI)", disabled=not _experience_ready,
+                     help=None if _experience_ready else "Needs at least one drafted reference project -- see below."):
             with st.spinner("Drafting project experience introduction..."):
                 try:
                     st.session_state.experience_intro = experience_intro_module.draft_experience_intro(
@@ -2055,7 +2084,16 @@ with tabs[5]:
                 except Exception as exc:
                     st.error(f"Project experience introduction generation failed: {exc}")
         if not st.session_state.reference_projects:
-            st.caption("Add at least one reference project in Upload Documents (tab 2) first.")
+            # Uploading reference material (Upload Docs) only extracts its text --
+            # it still needs "Draft reference projects from uploaded material"
+            # clicked there before any entries exist for this button to use. A
+            # bare "add a reference project" caption reads as if uploading alone
+            # should have been enough, which is exactly the confusing part.
+            st.caption(
+                "No drafted reference projects yet. Go to Upload Docs, upload 'Project references' "
+                "material if you haven't, then click **Draft reference projects from uploaded "
+                "material** there -- or add one manually on that same step."
+            )
 
         if st.session_state.experience_intro:
             with st.expander("Project experience introduction", expanded=False):
@@ -2129,7 +2167,7 @@ with tabs[6]:
 
     ready = st.session_state.sections is not None
     if not ready:
-        st.info("Generate the Proposal Structure (tab 4) first.")
+        st.info("Generate the Proposal Structure first.")
     elif _is_letter():
         pass  # Project Team preview above already covers this pack size -- nothing else to render here.
     else:
@@ -2162,7 +2200,7 @@ with tabs[6]:
         st.divider()
         st.markdown("#### 2. Divider design per section")
         if not photos:
-            st.info("No project photos uploaded (tab 2) -- sections default to the 'Solid colour' layout. Upload photos there to unlock photo-based layouts.")
+            st.info("No project photos uploaded (Upload Docs) -- sections default to the 'Solid colour' layout. Upload photos there to unlock photo-based layouts.")
 
         available_layouts = ["Solid colour"] + (["Photo + gradient", "Photo + quote", "Split (colour + photo)"] if photos else [])
         config = st.session_state.section_divider_config
@@ -2268,7 +2306,7 @@ with tabs[7]:
     )
 
     if st.session_state.analysis is None:
-        st.info("Run the Tender Analysis (tab 3) first -- the required disciplines come from the brief.")
+        st.info("Run the Tender Analysis first -- the required disciplines come from the brief.")
     else:
         for _k in ("resource_extra_names", "cv_library_filenames", "cv_extracted_names", "dismissed_disciplines"):
             if st.session_state.get(_k) is None:
@@ -2319,7 +2357,7 @@ with tabs[7]:
         ncol1, ncol2 = st.columns([2, 3])
         with ncol1:
             if st.button("Load names from CV library", disabled=not ai_ready,
-                         help=None if ai_ready else "Upload a CV library (tab 2) and set an AI provider in the sidebar first."):
+                         help=None if ai_ready else "Upload a CV library (Upload Docs) and set an AI provider in the sidebar first."):
                 with st.spinner("Reading the whole CV library for names (a few seconds per batch)..."):
                     try:
                         names, warns = team_bios.extract_person_names(cv_text, st.session_state.ai_config)
@@ -2343,7 +2381,7 @@ with tabs[7]:
         if cv_text.strip() and not st.session_state.cv_library_filenames:
             st.caption(
                 "💡 Tip: for the most complete and accurate list, re-upload your CV library files "
-                "in tab 2 (Upload Documents) -- each filename gives one person's full name instantly, "
+                "in Upload Docs -- each filename gives one person's full name instantly, "
                 "with no AI guesswork. (Your loaded project kept the CV text but not the filenames.)"
             )
 
@@ -2368,7 +2406,7 @@ with tabs[7]:
         rcol1, rcol2 = st.columns([2, 3])
         with rcol1:
             if st.button("Re-scan brief for disciplines", disabled=not rescan_ready,
-                         help=None if rescan_ready else "Needs the tender brief (tab 2) and an AI provider in the sidebar."):
+                         help=None if rescan_ready else "Needs the tender brief (Upload Docs) and an AI provider in the sidebar."):
                 with st.spinner("Re-reading the brief for every discipline the scope implies..."):
                     try:
                         detected = tender_analyser.detect_disciplines_from_text(brief_text, st.session_state.ai_config)
@@ -2459,7 +2497,7 @@ with tabs[7]:
         with pfcol1:
             if st.button(
                 "Fill profile fields from CVs", disabled=not _profile_fill_ready,
-                help=None if _profile_fill_ready else "Assign people to roles above, upload a CV library (tab 2), and set an AI provider in the sidebar first.",
+                help=None if _profile_fill_ready else "Assign people to roles above, upload a CV library (Upload Docs), and set an AI provider in the sidebar first.",
             ):
                 with st.spinner("Reading each person's CV for registration status, experience and relevance (a few seconds per batch)..."):
                     try:
@@ -2609,7 +2647,7 @@ with tabs[7]:
                 refresh_ready = bool(st.session_state.ai_config.get("api_key")) and bool(name) and bool(cv_text.strip())
                 if st.button(
                     "Refresh from CV", key=f"prof_refresh_{ekey}", disabled=not refresh_ready,
-                    help=None if refresh_ready else "Assign a name, upload a CV library (tab 2), and set an AI provider in the sidebar first.",
+                    help=None if refresh_ready else "Assign a name, upload a CV library (Upload Docs), and set an AI provider in the sidebar first.",
                 ):
                     messages = []  # [(level, text), ...] -- rendered after the rerun, see result_key above
                     with st.spinner(f"Re-reading {name}'s CV..."):
@@ -2657,13 +2695,13 @@ with tabs[7]:
                                     f"Read {name}'s CV file but found no details to fill in. This usually means the "
                                     f"text stored for their CV is incomplete (e.g. it was uploaded before a recent "
                                     f"extraction fix) rather than the CV genuinely being empty -- try re-uploading "
-                                    f"{name}'s CV file in tab 2 (Upload Documents), then refresh again."
+                                    f"{name}'s CV file in Upload Docs, then refresh again."
                                 ))
                             else:
                                 messages.append((
                                     "warning",
                                     f"Couldn't find/re-read {name}'s CV file -- check their filename "
-                                    "derives to this exact name, or that their CV is in the library (tab 2)."
+                                    "derives to this exact name, or that their CV is in the library (Upload Docs)."
                                 ))
                             for w in warns:
                                 messages.append(("warning", w))
@@ -2749,13 +2787,13 @@ with tabs[8]:
     if _is_letter():
         st.caption(
             "The discipline fee build-up ($ total) and discipline fee split (%) below, plus "
-            "the delivery program, go straight into the pack (tab 10). The scope-item fee "
+            "the delivery program, go straight into the pack (Export Pack). The scope-item fee "
             "table just below is for your own internal tracking only -- it is not exported."
         )
         analysis = st.session_state.analysis
         scope_items = analysis.scope_items if analysis else []
         if not scope_items:
-            st.info("Run Tender Analysis (tab 3) to extract scope items first.")
+            st.info("Run Tender Analysis to extract scope items first.")
         else:
             st.markdown("#### Scope item fees")
             st.caption(fee_estimation_engine.SCOPE_FEE_SEED_NOTE)
@@ -3410,12 +3448,12 @@ with tabs[9]:
         st.caption("Generates the first-pass Small Scope Proposal Response Pack. Review the checklist page inside before this goes anywhere near a real submission.")
         ready = st.session_state.sections is not None
         if not ready:
-            st.info("Generate the Proposal Structure (tab 4) first.")
+            st.info("Generate the Proposal Structure first.")
 
         if _structure_format_stale():
             st.warning(
-                "The Proposal format (tab 1) was changed after these sections were generated -- "
-                "go to tab 4 and click **Generate Proposal Structure** again first, or the "
+                "The Proposal format (Project Setup) was changed after these sections were generated -- "
+                "go to Structure and click **Generate Proposal Structure** again first, or the "
                 "exported pack will be missing the Introduction/Methodology drafts even if you "
                 "already ran drafting."
             )
@@ -3475,12 +3513,12 @@ with tabs[9]:
 
         ready = st.session_state.sections is not None and st.session_state.guidance_notes is not None
         if not ready:
-            st.info("Generate the Proposal Structure (tab 4) first. Drafts, graphics, and fee estimate are optional but recommended before exporting.")
+            st.info("Generate the Proposal Structure first. Drafts, graphics, and fee estimate are optional but recommended before exporting.")
 
         if _structure_format_stale():
             st.warning(
-                "The Proposal format (tab 1) was changed after these sections were generated -- "
-                "go to tab 4 and click **Generate Proposal Structure** again first, or the "
+                "The Proposal format (Project Setup) was changed after these sections were generated -- "
+                "go to Structure and click **Generate Proposal Structure** again first, or the "
                 "exported pack may not match what you drafted."
             )
 
@@ -3693,8 +3731,8 @@ with tabs[9]:
         st.caption(
             "Archive this generated proposal into the Proposal Library "
             f"(library/{st.session_state.project_type or '<project type>'}/) for reuse later -- "
-            "as a 'Previous proposals' reference in Upload Documents (tab 2), or to browse and "
-            "download from Project Setup (tab 1). Nothing is archived automatically; click below "
+            "as a 'Previous proposals' reference in Upload Docs, or to browse and "
+            "download from Project Setup. Nothing is archived automatically; click below "
             "whenever you're happy with this version. Only the proposal DOCX itself is archived, "
             "not the Tender Summary or the PowerPoint companions above."
         )

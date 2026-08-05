@@ -15,11 +15,19 @@ instead of a plausible-sounding guess.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from pydantic import BaseModel
 
 from modules.ai_interface import call_ai_json
 from modules.proposal_structure import ProposalSection
 from modules.tender_analyser import TenderAnalysis
+
+# Cap on simultaneous in-flight AI calls in generate_all_drafts() below --
+# high enough to turn a slow sequential wait into a short parallel one, low
+# enough that a large (12+ section) pack doesn't fire that many requests at
+# the AI provider at once and risk a rate limit.
+MAX_CONCURRENT_DRAFTS = 5
 
 PLACEHOLDER_EXAMPLES = [
     "[USER TO INSERT PROJECT-SPECIFIC DETAIL]",
@@ -148,13 +156,49 @@ def generate_all_drafts(
     progress_callback=None,
     team_context: str | None = None,
 ) -> dict[str, SectionDraft]:
-    drafts = {}
-    for i, section in enumerate(sections):
-        if progress_callback:
-            progress_callback(i, len(sections), section.title)
-        drafts[section.title] = generate_draft_section(
-            section, analysis, company_material_text, config, team_context=team_context,
-        )
+    """Drafts every section, one AI call each, run concurrently (up to
+    MAX_CONCURRENT_DRAFTS at a time) rather than one-at-a-time -- each
+    section's draft is fully independent of every other's (none of them
+    read another section's drafted output), so there was never a real
+    reason to make a 9-section pack wait through 9 sequential AI calls
+    back to back. Wall-clock time drops to roughly the slowest single
+    section's call instead of the sum of all of them.
+
+    Same all-or-nothing error behaviour as the old sequential version:
+    if any section's call raises, this raises too (app.py's call site
+    already wraps this in a try/except and expects a clean raise, not a
+    partial dict). progress_callback still fires once per completed
+    section with a running count, but since sections may finish in any
+    order now, the (i, total, title) it receives reflects completion
+    order, not each section's position in the original list."""
+    drafts: dict[str, SectionDraft] = {}
+    total = len(sections)
+    completed = 0
+
+    with ThreadPoolExecutor(max_workers=max(1, min(MAX_CONCURRENT_DRAFTS, total))) as pool:
+        future_to_section = {
+            pool.submit(
+                generate_draft_section, section, analysis, company_material_text, config,
+                team_context=team_context,
+            ): section
+            for section in sections
+        }
+        try:
+            for future in as_completed(future_to_section):
+                section = future_to_section[future]
+                drafts[section.title] = future.result()  # re-raises here if this section's call failed
+                completed += 1
+                if progress_callback:
+                    progress_callback(completed, total, section.title)
+        except Exception:
+            # Only unstarted futures can actually be cancelled -- anything
+            # already mid-request keeps running in its thread, but we stop
+            # waiting on it and re-raise immediately, matching the old
+            # sequential loop's "first failure aborts the batch" behaviour.
+            for f in future_to_section:
+                f.cancel()
+            raise
+
     return drafts
 
 

@@ -103,7 +103,7 @@ def draft_reference_projects(
     project_scope: str = "",
     disciplines: list[str] | None = None,
     config: dict | None = None,
-    max_chars: int = 24000,
+    max_chars: int = 60000,
 ) -> tuple[list[ReferenceProject], list[str]]:
     """
     Draft candidate ReferenceProject entries from the raw uploaded material.

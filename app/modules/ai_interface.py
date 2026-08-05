@@ -60,7 +60,7 @@ def call_ai(prompt: str, system_message: str | None = None, config: dict | None 
 
     if not config or not provider:
         raise AIConfigError(
-            "No AI provider is configured yet. Set one up in the 'AI Provider Settings' tab."
+            "No AI provider is configured yet. Set one up via the sidebar's ☰ menu."
         )
 
     if provider == "OpenAI":
@@ -141,7 +141,7 @@ def call_ai_json(prompt: str, system_message: str | None = None, config: dict | 
         "finished, or isn't reliably returning structured output. If you're using a newer "
         "'reasoning' model (e.g. an OpenAI o-series or GPT-5 model), it can spend most of its "
         "output budget on hidden internal reasoning and get truncated. Switch to a standard "
-        "model in AI Provider Settings (tab 3) -- the app's default, claude-sonnet-5, and "
+        "model in the sidebar's ☰ menu -- the app's default, claude-sonnet-5, and "
         "gpt-4o both work reliably here."
     )
 
@@ -242,7 +242,7 @@ def _call_copilot(prompt, system_message, config) -> str:
     Real call against the Microsoft 365 Copilot Chat API (Preview) via
     modules/copilot_client.py. Unlike the other four providers, this needs
     an access token obtained through an interactive OAuth sign-in (done in
-    app.py's AI Provider Settings tab, not here) rather than a pasted API
+    app.py's sidebar ☰ menu, not here) rather than a pasted API
     key -- `config["access_token"]` must already be populated by the time
     this is called.
 
@@ -257,7 +257,7 @@ def _call_copilot(prompt, system_message, config) -> str:
     if not access_token:
         raise AIConfigError(
             "Microsoft 365 Copilot is selected but you haven't signed in yet — "
-            "use the 'Sign in with Microsoft' button in AI Provider Settings."
+            "use the 'Sign in with Microsoft' button in the sidebar's ☰ menu."
         )
 
     full_prompt = f"{system_message.strip()}\n\n{prompt}" if system_message else prompt
@@ -365,7 +365,7 @@ def _call_with_resilience(create_and_extract_fn, temperature: float, max_tokens:
         "The model returned an empty response, even after retrying with a larger output "
         "budget. This is a known failure mode for some newer 'reasoning' models, which can "
         "spend their entire token budget on internal reasoning and leave nothing for the "
-        "actual answer. Try a different model in AI Provider Settings (tab 3) -- the app's "
+        "actual answer. Try a different model in the sidebar's ☰ menu -- the app's "
         "default (claude-sonnet-5) does not have this issue."
     )
 
