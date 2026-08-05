@@ -221,6 +221,20 @@ def current_user() -> db.User | None:
     # finish mounting and firing before anything cancels it.
     if st.session_state.pop("_cookie_clear_pending", False):
         _clear_cookie_token()
+        # This is why "Log out" silently didn't work for any returning user
+        # (i.e. anyone whose browser already had a valid session cookie from
+        # before this page load -- the common case, not the rare one): the
+        # JS just queued above only clears the browser's cookie jar; it
+        # can't retroactively change the Cookie header this request already
+        # arrived with. Falling through to the st.context.cookies read below
+        # would find that same still-valid, not-yet-cleared cookie and log
+        # the user straight back in on the very run that was supposed to log
+        # them out -- session_state's own record of who's logged in was
+        # already cleared by log_out(), but this fallback re-derived it from
+        # the stale cookie anyway. We know for certain a logout was just
+        # requested this run, so stop here instead of trusting a cookie
+        # we've already told the browser to delete.
+        return None
 
     if st.session_state.get("_auth_user_id"):
         user = get_user_by_id(st.session_state["_auth_user_id"])
