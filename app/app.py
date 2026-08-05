@@ -768,10 +768,9 @@ with st.sidebar:
     # commonly needed actions and made "how do I log out" a real support
     # question.)
     if IS_SAAS_MODE and current_user:
-        _sb_top_spacer, _sb_upg_col, _sb_out_col = st.columns([2, 3, 3])
-        with _sb_upg_col:
+        with st.container(key="_sb_top_actions"):
             if not _access["subscribed"]:
-                if st.button("Upgrade", key="_sidebar_upgrade_btn", use_container_width=True):
+                if st.button("Upgrade", key="_sidebar_upgrade_btn"):
                     try:
                         url = billing.create_checkout_session(current_user)
                         st.link_button("Continue to payment →", url, type="primary")
@@ -781,9 +780,8 @@ with st.sidebar:
             else:
                 portal_url = billing.create_customer_portal_session(current_user)
                 if portal_url:
-                    st.link_button("Manage", portal_url, use_container_width=True)
-        with _sb_out_col:
-            if st.button("Log out", key="_sidebar_logout_btn", use_container_width=True):
+                    st.link_button("Manage", portal_url)
+            if st.button("Log out", key="_sidebar_logout_btn"):
                 auth.log_out()
                 st.rerun()
         # Upgrade/Manage reads as the primary "go forward" action (brand
@@ -793,8 +791,26 @@ with st.sidebar:
         # (present as of the Streamlit version this app runs), not by
         # position, so this can't silently re-color the wrong button if
         # something else gets added to this row later.
+        #
+        # The row itself (.st-key-_sb_top_actions) is pinned to the top of
+        # the sidebar -- "static" per the user's request, so it stays
+        # visible while the step list and everything below it scrolls
+        # underneath. This is `position: fixed`, switched over from CSS
+        # `position: sticky` by the JS below (sidebar_topbar_pin_script_html)
+        # right after this block: sticky genuinely does not work for a
+        # descendant of Streamlit's 'stLayoutWrapper' div in this version
+        # (confirmed empirically), so the fix is JS-driven instead, kept in
+        # sync with the sidebar's real on-screen position/width. The height
+        # placeholder right after reserves the space this row no longer
+        # occupies in normal flow once it's fixed, so the brand logo below
+        # doesn't jump up underneath it.
         st.markdown(
             """<style>
+            .st-key-_sb_top_actions {
+                background: #F0F2F6; padding: 1rem 1rem 0.5rem;
+                display: flex !important; flex-direction: row !important;
+                justify-content: flex-end; gap: 8px;
+            }
             .st-key-_sidebar_upgrade_btn button, .st-key-_sidebar_upgrade_btn a {
                 background-color: #2563EB !important; color: #fff !important;
                 border-color: #2563EB !important;
@@ -812,6 +828,8 @@ with st.sidebar:
             </style>""",
             unsafe_allow_html=True,
         )
+        components.html(branding.sidebar_topbar_pin_script_html(), height=0)
+        st.markdown('<div style="height:66px;"></div>', unsafe_allow_html=True)
 
     st.markdown(branding.brand_html(logo_size=30, wordmark_size="1.05rem", show_beta=IS_SAAS_MODE),
                 unsafe_allow_html=True)
@@ -842,13 +860,6 @@ with st.sidebar:
         height=max(1, len(_stepper_steps)) * 34 + 16,
     )
     st.divider()
-
-    st.subheader("Project file")
-    st.caption(
-        "Your AI provider API key / Copilot sign-in are never saved as part of a project file -- "
-        "re-enter those after loading a project, local or from a file. (You can have your Claude "
-        "API key remembered on this computer, independent of any project -- see below.)"
-    )
 
     if not IS_SAAS_MODE:
         # Local-disk autosave -- only correct for the original single-user

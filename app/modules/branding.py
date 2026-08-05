@@ -252,6 +252,56 @@ html, body {{ margin:0; padding:0; background:transparent; font-family:-apple-sy
 </body></html>"""
 
 
+def sidebar_topbar_pin_script_html() -> str:
+    """Keeps the sidebar's top-right Upgrade/Log out row (the element with
+    CSS class 'st-key-_sb_top_actions' in app.py) visually pinned to the top
+    of the sidebar as its content scrolls -- "static" per the user's
+    request. This is a JS workaround, not plain CSS `position: sticky`,
+    because sticky genuinely does not work here: this Streamlit version
+    wraps every st.container() in its own 'stLayoutWrapper' div, and
+    empirically (confirmed by binary-searching which ancestor broke it) a
+    sticky descendant of that wrapper never sticks, even though every
+    ancestor reports overflow:visible -- something about stLayoutWrapper's
+    own layout breaks the containing-block chain sticky positioning needs.
+    A sibling of stLayoutWrapper sticks fine; a child of it never does.
+
+    Instead, this switches that row to `position: fixed` (set here, not in
+    app.py's CSS, since a *correct* left/width for a fixed element has to
+    track the sidebar's actual on-screen rect, which can change if the user
+    drags the sidebar wider/narrower -- something static CSS can't express)
+    and keeps it continuously synced to the real sidebar's bounding box via
+    the same window.parent.document poll-loop pattern already used by
+    vertical_steps_component_html() above for tab-strip syncing. Render via
+    st.components.v1.html(sidebar_topbar_pin_script_html(), height=0) once,
+    anywhere after the button row itself has been rendered."""
+    return """<!DOCTYPE html><html><body>
+<script>
+(function(){
+  var topDoc = window.parent.document;
+
+  function pin(){
+    try {
+      var bar = topDoc.querySelector('.st-key-_sb_top_actions');
+      var sidebar = topDoc.querySelector('[data-testid="stSidebar"]');
+      if (!bar || !sidebar) return;
+      var rect = sidebar.getBoundingClientRect();
+      bar.style.position = 'fixed';
+      bar.style.top = '0px';
+      bar.style.left = rect.left + 'px';
+      bar.style.width = rect.width + 'px';
+      bar.style.margin = '0';
+      bar.style.zIndex = '999';
+      bar.style.boxSizing = 'border-box';
+    } catch (e) { /* sidebar/bar not mounted yet -- next poll picks it up */ }
+  }
+
+  pin();
+  setInterval(pin, 350);
+})();
+</script>
+</body></html>"""
+
+
 def workflow_stepper_html(steps: list[dict]) -> str:
     """Renders a horizontal progress stepper across the top of the main
     workflow -- a numbered/checkmarked circle per step, connected by a line,
