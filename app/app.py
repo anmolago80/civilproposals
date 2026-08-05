@@ -146,7 +146,17 @@ st.markdown(
     }
     h3 { font-size: 1.3rem !important; }
 
-    /* Sidebar: subtle separation from the main canvas */
+    /* Sidebar: subtle separation from the main canvas, and fixed -- no
+       option to collapse it. Streamlit doesn't expose a config flag for
+       this, so it's CSS: hide the collapse arrow inside the sidebar
+       (stSidebarCollapseButton) and the "expand" arrow that appears in its
+       place if the sidebar is ever collapsed some other way
+       (stExpandSidebarButton, e.g. keyboard shortcut) -- so there's no
+       control left to collapse it with, and nothing to click back open
+       even if it somehow did. */
+    [data-testid="stSidebarCollapseButton"], [data-testid="stExpandSidebarButton"] {
+        display: none !important;
+    }
     [data-testid="stSidebar"] {
         border-right: 1px solid #E2E8F0;
     }
@@ -409,6 +419,7 @@ def _init_state():
         "_autosave_enabled": True,
         "_last_autosave_ts": 0.0,
         "_last_autosave_path": "",
+        "_last_autosave_error": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -643,15 +654,26 @@ def _maybe_autosave() -> None:
             slug = cloud_project_store.save_cloud(current_user.id, st.session_state, project_id)
             st.session_state._last_autosave_ts = now
             st.session_state._last_autosave_path = slug
+            st.session_state._last_autosave_error = ""
         else:
             path = local_project_store.save_local(st.session_state, project_id)
             st.session_state._last_autosave_ts = now
             st.session_state._last_autosave_path = path
-    except Exception:
+            st.session_state._last_autosave_error = ""
+    except Exception as exc:
         # Auto-save is a convenience, not a step the user is waiting on -- a failure here
         # (e.g. disk full, folder permissions, a transient DB hiccup) shouldn't interrupt
-        # whatever they were doing. The manual Save Project button remains available regardless.
-        pass
+        # whatever they were doing, so this still doesn't raise/stop the script. But it
+        # used to swallow the error completely (bare `except: pass`), which is exactly
+        # how a real problem -- like the DATABASE_URL misconfiguration found and fixed
+        # earlier -- could silently fail every single save with the user having no way
+        # to know, only discovering it later when a project they thought was saved
+        # wasn't there. Recording it here lets the "My projects" section surface a
+        # visible warning instead (see the sidebar code that reads
+        # _last_autosave_error), and _last_autosave_ts is deliberately NOT updated on
+        # failure, so the very next rerun retries immediately rather than waiting out
+        # the normal debounce interval.
+        st.session_state._last_autosave_error = str(exc) or exc.__class__.__name__
 
 
 def _ensure_divider_config(sections) -> None:
@@ -846,7 +868,13 @@ with st.sidebar:
                          "only once a project name is entered (tab 1). Lets you pick back up later, even "
                          "after closing the tab or a refresh.",
                 )
-                if st.session_state._last_autosave_path:
+                if st.session_state._last_autosave_error:
+                    st.warning(
+                        f"Auto-save failed: {st.session_state._last_autosave_error} -- your work in this "
+                        "tab is NOT saved to your account yet. Use \"💾 Download project file\" below as a "
+                        "backup, and let support know if this keeps happening."
+                    )
+                elif st.session_state._last_autosave_path:
                     st.caption(f"Last saved {datetime.fromtimestamp(st.session_state._last_autosave_ts).strftime('%H:%M:%S')}")
                 elif not _project_identifier():
                     st.caption("Enter a project or tender name (tab 1) to enable auto-save.")
@@ -1061,16 +1089,12 @@ with st.sidebar:
                             st.warning(f"{provider} API key cleared -- enter it again to keep using {provider} this session.")
                         else:
                             st.caption(f"Enter an API key above to switch this session to {provider}.")
-            else:
-                st.markdown("**AI drafting**")
-                st.success(
-                    "Included in your subscription -- AI drafting runs on our own account, "
-                    "no API key needed from you."
-                )
-                st.caption(
-                    "(Admins: the server-side key is set via the ANTHROPIC_API_KEY environment "
-                    "variable on Railway, not entered here.)"
-                )
+            # In SAAS_MODE, nothing renders here at all -- AI drafting runs on
+            # the account's own server-side ANTHROPIC_API_KEY (see the module
+            # docstring at the top of this file), so there's no API key
+            # concept to surface to a subscriber. This used to show a "no API
+            # key needed" note; removed at the user's request as unnecessary
+            # noise in the popover.
 
             st.divider()
             st.caption(
