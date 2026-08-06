@@ -421,6 +421,16 @@ def _init_state():
         "_discipline_fee_editor_version": 0,
         "_scope_fee_editor_version": 0,
         "_large_scope_fee_editor_version": 0,
+        # Cache for the discipline fee tables' Excel export + pie chart, so a
+        # fragment rerun that doesn't change the underlying hours/rates
+        # doesn't waste time (or widen the edit-commit race window) redoing
+        # that work -- see the discipline fee table fragments below.
+        "_disc_fee_cache_sig": None,
+        "_disc_fee_cache_xlsx": None,
+        "_disc_fee_cache_pie": None,
+        "_letter_disc_fee_cache_sig": None,
+        "_letter_disc_fee_cache_xlsx": None,
+        "_letter_disc_fee_cache_pie": None,
         "scope_item_fees": [],
         "fee_seed_total": 0.0,
         # Manually-entered total project fee for the indicative benchmark split
@@ -775,76 +785,12 @@ _stepper_steps = [
 # ---------------------------------------------------------------------------
 
 with st.sidebar:
-    # Upgrade/Manage billing and Log out sit right in the sidebar's own top
-    # corner, one click away -- no menu to open first. (This used to be
-    # tucked behind a "☰" popover along with everything else in this
-    # sidebar; removed at the user's request since it hid two of the most
-    # commonly needed actions and made "how do I log out" a real support
-    # question.)
-    if IS_SAAS_MODE and current_user:
-        with st.container(key="_sb_top_actions"):
-            if not _access["subscribed"]:
-                if st.button("Upgrade", key="_sidebar_upgrade_btn"):
-                    try:
-                        url = billing.create_checkout_session(current_user)
-                        st.link_button("Continue to payment →", url, type="primary")
-                    except Exception as exc:
-                        st.error(f"Couldn't start checkout: {exc}")
-                        st.caption(billing.debug_key_info())
-            else:
-                portal_url = billing.create_customer_portal_session(current_user)
-                if portal_url:
-                    st.link_button("Manage", portal_url)
-            if st.button("Log out", key="_sidebar_logout_btn"):
-                auth.log_out()
-                st.rerun()
-        # Upgrade/Manage reads as the primary "go forward" action (brand
-        # blue); Log out is deliberately a different color (red) so it's
-        # never mistaken for anything else up here. Targets each button via
-        # the 'st-key-<key>' class Streamlit adds to a widget's wrapping div
-        # (present as of the Streamlit version this app runs), not by
-        # position, so this can't silently re-color the wrong button if
-        # something else gets added to this row later.
-        #
-        # The row itself (.st-key-_sb_top_actions) is pinned to the top of
-        # the sidebar -- "static" per the user's request, so it stays
-        # visible while the step list and everything below it scrolls
-        # underneath. This is `position: fixed`, switched over from CSS
-        # `position: sticky` by the JS below (sidebar_topbar_pin_script_html)
-        # right after this block: sticky genuinely does not work for a
-        # descendant of Streamlit's 'stLayoutWrapper' div in this version
-        # (confirmed empirically), so the fix is JS-driven instead, kept in
-        # sync with the sidebar's real on-screen position/width. The height
-        # placeholder right after reserves the space this row no longer
-        # occupies in normal flow once it's fixed, so the brand logo below
-        # doesn't jump up underneath it.
-        st.markdown(
-            """<style>
-            .st-key-_sb_top_actions {
-                background: #F0F2F6; padding: 1rem 1rem 0.5rem;
-                display: flex !important; flex-direction: row !important;
-                justify-content: flex-end; gap: 8px;
-            }
-            .st-key-_sidebar_upgrade_btn button, .st-key-_sidebar_upgrade_btn a {
-                background-color: #2563EB !important; color: #fff !important;
-                border-color: #2563EB !important;
-            }
-            .st-key-_sidebar_upgrade_btn button:hover, .st-key-_sidebar_upgrade_btn a:hover {
-                background-color: #1D4ED8 !important; border-color: #1D4ED8 !important;
-            }
-            .st-key-_sidebar_logout_btn button {
-                background-color: #DC2626 !important; color: #fff !important;
-                border-color: #DC2626 !important;
-            }
-            .st-key-_sidebar_logout_btn button:hover {
-                background-color: #B91C1C !important; border-color: #B91C1C !important;
-            }
-            </style>""",
-            unsafe_allow_html=True,
-        )
-        components.html(branding.sidebar_topbar_pin_script_html(), height=0)
-        st.markdown('<div style="height:66px;"></div>', unsafe_allow_html=True)
-
+    # Upgrade/Manage billing and Log out used to live here, pinned to the
+    # sidebar's own top corner. Moved to a page-level fixed bar in the top
+    # right of the browser window instead (see "_topright_actions" below,
+    # rendered in the main content area right before the tabs) -- the user
+    # asked for these to be static in the window's top right, not just the
+    # top of the (left-hand) sidebar column.
     st.markdown(branding.brand_html(logo_size=30, wordmark_size="1.05rem", show_beta=IS_SAAS_MODE),
                 unsafe_allow_html=True)
 
@@ -1194,6 +1140,77 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+# Upgrade/Manage billing and Log out -- static in the browser window's top
+# right corner (per the user's request), not just the top of the left-hand
+# sidebar column. Rendered here in the MAIN content area (not inside `with
+# st.sidebar:`) specifically so `position: fixed` anchors to the whole
+# viewport rather than the sidebar's own stacking context -- no JS-driven
+# position syncing needed this time (unlike the old sidebar version), since
+# a viewport corner is a fixed target and doesn't move as content scrolls.
+# A little top padding is added to the tab content below so the fixed bar
+# never overlaps a tab's own heading.
+if IS_SAAS_MODE and current_user:
+    with st.container(key="_topright_actions"):
+        if not _access["subscribed"]:
+            if st.button("Upgrade", key="_topright_upgrade_btn"):
+                try:
+                    url = billing.create_checkout_session(current_user)
+                    st.link_button("Continue to payment →", url, type="primary")
+                except Exception as exc:
+                    st.error(f"Couldn't start checkout: {exc}")
+                    st.caption(billing.debug_key_info())
+        else:
+            portal_url = billing.create_customer_portal_session(current_user)
+            if portal_url:
+                st.link_button("Manage", portal_url)
+        if st.button("Log out", key="_topright_logout_btn"):
+            auth.log_out()
+            st.rerun()
+    st.markdown(
+        """<style>
+        .st-key-_topright_actions {
+            /* z-index has to clear Streamlit's own header/toolbar bar
+               (data-testid="stHeader"), which sits at z-index: 999990 --
+               invisible in this app (see the `header [data-testid="stToolbar"]
+               {visibility: hidden}` rule near the top of the file) but still
+               present and still stacked above ordinary page content, so
+               without this our fixed bar renders UNDER it and never appears. */
+            position: fixed !important; top: 0.75rem; right: 1.5rem; z-index: 1000000;
+            display: flex !important; flex-direction: row !important; gap: 8px;
+            justify-content: flex-end;
+            /* Streamlit's own emotion-cache classes on this container default
+               it to width: 100% (fine in normal flow, but once position:fixed
+               takes it out of flow that stretches it across the whole
+               viewport, pushing its flex-start-aligned children to the LEFT
+               edge instead of the right). Shrink it back to its content so
+               "right: 1.5rem" actually reads as "hug the right edge". */
+            width: fit-content !important; left: auto !important;
+            background: transparent;
+        }
+        .st-key-_topright_upgrade_btn button, .st-key-_topright_upgrade_btn a {
+            background-color: #2563EB !important; color: #fff !important;
+            border-color: #2563EB !important;
+        }
+        .st-key-_topright_upgrade_btn button:hover, .st-key-_topright_upgrade_btn a:hover {
+            background-color: #1D4ED8 !important; border-color: #1D4ED8 !important;
+        }
+        .st-key-_topright_logout_btn button {
+            background-color: #DC2626 !important; color: #fff !important;
+            border-color: #DC2626 !important;
+        }
+        .st-key-_topright_logout_btn button:hover {
+            background-color: #B91C1C !important; border-color: #B91C1C !important;
+        }
+        /* Reserve room up top so the fixed bar never sits over a tab's own
+           heading -- applied to the main content block specifically, not
+           the sidebar, which keeps its own normal top spacing. */
+        [data-testid="stAppViewContainer"] > .main [data-testid="stMainBlockContainer"] {
+            padding-top: 3.5rem;
+        }
+        </style>""",
+        unsafe_allow_html=True,
+    )
 
 tabs = st.tabs([
     "1 · Project Setup", "2 · Upload Documents",
@@ -2836,219 +2853,246 @@ with tabs[8]:
         if not scope_items:
             st.info("Run Tender Analysis to extract scope items first.")
         else:
-            st.markdown("#### Scope item fees")
-            st.caption(fee_estimation_engine.SCOPE_FEE_SEED_NOTE)
-            st.caption(
-                "How the starting figures are seeded: each scope item gets a weight of "
-                "1 + however many tasks it lists (so even a bare item with no tasks gets a "
-                "base share), then the ballpark total below is split across items in "
-                "proportion to that weight and rounded to the nearest $50. It's a rough "
-                "task-count proxy for effort, not a real estimate -- edit every row before "
-                "relying on it. This table is for your own internal tracking only; it is "
-                "**not** included in the exported pack -- the discipline fee split further "
-                "down (which mirrors the fee build-up table) is what's exported."
-            )
-            seed_col1, seed_col2 = st.columns([2, 1])
-            with seed_col1:
-                st.number_input("Ballpark total project value ($, excl. GST)", min_value=0.0, step=500.0, key="fee_seed_total")
-            with seed_col2:
-                st.write("")
-                if st.button("Seed fee table from total"):
-                    st.session_state.scope_item_fees = fee_estimation_engine.seed_scope_item_fees(
-                        scope_items, st.session_state.fee_seed_total,
-                    )
-
-            if not st.session_state.scope_item_fees:
-                st.session_state.scope_item_fees = fee_estimation_engine.ensure_project_management_present(
-                    fee_estimation_engine.seed_scope_item_fees(scope_items, None)
+            @st.fragment
+            def _render_letter_scope_fee_table():
+                # Same fragment-wrap rationale as the discipline table below -- see
+                # _render_large_discipline_fee_table(). scope_items/analysis are
+                # cheap to recompute here rather than relying on the outer
+                # script's locals, since this fragment can rerun independently.
+                analysis = st.session_state.analysis
+                scope_items = analysis.scope_items if analysis else []
+                st.markdown("#### Scope item fees")
+                st.caption(fee_estimation_engine.SCOPE_FEE_SEED_NOTE)
+                st.caption(
+                    "How the starting figures are seeded: each scope item gets a weight of "
+                    "1 + however many tasks it lists (so even a bare item with no tasks gets a "
+                    "base share), then the ballpark total below is split across items in "
+                    "proportion to that weight and rounded to the nearest $50. It's a rough "
+                    "task-count proxy for effort, not a real estimate -- edit every row before "
+                    "relying on it. This table is for your own internal tracking only; it is "
+                    "**not** included in the exported pack -- the discipline fee split further "
+                    "down (which mirrors the fee build-up table) is what's exported."
                 )
-                st.session_state._scope_fee_editor_version += 1
-            else:
-                # Add any newly-extracted scope items (e.g. after a Tender Analysis
-                # re-run) without wiping rows the user has already priced, added, or
-                # renamed -- same "merge in new, never clobber edits" pattern as the
-                # discipline fee table below.
-                existing_titles = {f.item_title.strip().lower() for f in st.session_state.scope_item_fees}
-                for item in scope_items:
-                    if item.title.strip().lower() not in existing_titles:
-                        st.session_state.scope_item_fees.append(
-                            fee_estimation_engine.ScopeItemFee(item_title=item.title, fee_amount=0.0,
-                                                               notes="Enter fee -- no estimate seeded")
+                seed_col1, seed_col2 = st.columns([2, 1])
+                with seed_col1:
+                    st.number_input("Ballpark total project value ($, excl. GST)", min_value=0.0, step=500.0, key="fee_seed_total")
+                with seed_col2:
+                    st.write("")
+                    if st.button("Seed fee table from total"):
+                        st.session_state.scope_item_fees = fee_estimation_engine.seed_scope_item_fees(
+                            scope_items, st.session_state.fee_seed_total,
                         )
-                        # Force the data_editor below to actually pick up this new row --
-                        # it ignores its `data` argument once its widget state already
-                        # exists under a given key, so a merge alone would silently never
-                        # show up until the key itself changes. See the state-defaults
-                        # comment for _scope_fee_editor_version.
-                        st.session_state._scope_fee_editor_version += 1
-                # Project Management is a fixed line item, additional to whatever
-                # deliverables Tender Analysis extracts -- re-add it if a fresh
-                # Tender Analysis run reset the list without it (first-time seed
-                # above already guarantees it; this covers older projects/state).
-                if not any(f.item_title.strip().lower() == fee_estimation_engine.ALWAYS_INCLUDED_ITEM.lower()
-                           for f in st.session_state.scope_item_fees):
+
+                if not st.session_state.scope_item_fees:
                     st.session_state.scope_item_fees = fee_estimation_engine.ensure_project_management_present(
-                        st.session_state.scope_item_fees
+                        fee_estimation_engine.seed_scope_item_fees(scope_items, None)
                     )
                     st.session_state._scope_fee_editor_version += 1
+                else:
+                    # Add any newly-extracted scope items (e.g. after a Tender Analysis
+                    # re-run) without wiping rows the user has already priced, added, or
+                    # renamed -- same "merge in new, never clobber edits" pattern as the
+                    # discipline fee table below.
+                    existing_titles = {f.item_title.strip().lower() for f in st.session_state.scope_item_fees}
+                    for item in scope_items:
+                        if item.title.strip().lower() not in existing_titles:
+                            st.session_state.scope_item_fees.append(
+                                fee_estimation_engine.ScopeItemFee(item_title=item.title, fee_amount=0.0,
+                                                                   notes="Enter fee -- no estimate seeded")
+                            )
+                            # Force the data_editor below to actually pick up this new row --
+                            # it ignores its `data` argument once its widget state already
+                            # exists under a given key, so a merge alone would silently never
+                            # show up until the key itself changes. See the state-defaults
+                            # comment for _scope_fee_editor_version.
+                            st.session_state._scope_fee_editor_version += 1
+                    # Project Management is a fixed line item, additional to whatever
+                    # deliverables Tender Analysis extracts -- re-add it if a fresh
+                    # Tender Analysis run reset the list without it (first-time seed
+                    # above already guarantees it; this covers older projects/state).
+                    if not any(f.item_title.strip().lower() == fee_estimation_engine.ALWAYS_INCLUDED_ITEM.lower()
+                               for f in st.session_state.scope_item_fees):
+                        st.session_state.scope_item_fees = fee_estimation_engine.ensure_project_management_present(
+                            st.session_state.scope_item_fees
+                        )
+                        st.session_state._scope_fee_editor_version += 1
 
-            # Built from st.session_state.scope_item_fees itself (not re-derived from
-            # scope_items every rerun) so rows the user adds, renames, or deletes via
-            # the editor below actually persist -- deliverables/activities aren't
-            # locked to exactly what Tender Analysis extracted.
-            fee_rows = [
-                {"item_title": f.item_title, "fee_amount": f.fee_amount, "notes": f.notes}
-                for f in st.session_state.scope_item_fees
-            ]
-            edited_fees = st.data_editor(
-                fee_rows, key=f"scope_fee_editor_v{st.session_state._scope_fee_editor_version}",
-                use_container_width=True, hide_index=True,
-                num_rows="dynamic",
-                column_config={
-                    "item_title": st.column_config.TextColumn("Scope item / deliverable", required=True),
-                    "fee_amount": st.column_config.NumberColumn("Fee ($, excl. GST)", min_value=0.0, step=50.0, format="$%.0f"),
-                    "notes": st.column_config.TextColumn("Notes"),
-                },
-            )
-            rebuilt_scope_fees = [
-                fee_estimation_engine.ScopeItemFee(
-                    item_title=str(r.get("item_title") or "").strip(),
-                    fee_amount=float(r.get("fee_amount") or 0), notes=str(r.get("notes") or ""),
+                # Built from st.session_state.scope_item_fees itself (not re-derived from
+                # scope_items every rerun) so rows the user adds, renames, or deletes via
+                # the editor below actually persist -- deliverables/activities aren't
+                # locked to exactly what Tender Analysis extracted.
+                fee_rows = [
+                    {"item_title": f.item_title, "fee_amount": f.fee_amount, "notes": f.notes}
+                    for f in st.session_state.scope_item_fees
+                ]
+                edited_fees = st.data_editor(
+                    fee_rows, key=f"scope_fee_editor_v{st.session_state._scope_fee_editor_version}",
+                    use_container_width=True, hide_index=True,
+                    num_rows="dynamic",
+                    column_config={
+                        "item_title": st.column_config.TextColumn("Scope item / deliverable", required=True),
+                        "fee_amount": st.column_config.NumberColumn("Fee ($, excl. GST)", min_value=0.0, step=50.0, format="$%.0f"),
+                        "notes": st.column_config.TextColumn("Notes"),
+                    },
                 )
-                for r in edited_fees
-                if str(r.get("item_title") or "").strip()
-            ]
-            # Project Management is a fixed line item -- if the user deleted it via
-            # the editor's own row-delete control, silently re-add it (mirrors the
-            # discipline fee table's "always re-add Project Management" behaviour).
-            _had_pm = any(f.item_title.strip().lower() == fee_estimation_engine.ALWAYS_INCLUDED_ITEM.lower()
-                          for f in rebuilt_scope_fees)
-            st.session_state.scope_item_fees = fee_estimation_engine.ensure_project_management_present(rebuilt_scope_fees)
-            if not _had_pm:
-                st.session_state._scope_fee_editor_version += 1
-                st.info("Project Management is a fixed line item and has been re-added.")
-            total = sum(f.fee_amount for f in st.session_state.scope_item_fees)
-            st.markdown(f"**Total: ${total:,.0f}**")
-            if any(f.fee_amount <= 0 for f in st.session_state.scope_item_fees):
-                st.warning("At least one scope item still has no fee entered -- the exported pack flags this in red until every row is priced.")
+                rebuilt_scope_fees = [
+                    fee_estimation_engine.ScopeItemFee(
+                        item_title=str(r.get("item_title") or "").strip(),
+                        fee_amount=float(r.get("fee_amount") or 0), notes=str(r.get("notes") or ""),
+                    )
+                    for r in edited_fees
+                    if str(r.get("item_title") or "").strip()
+                ]
+                # Project Management is a fixed line item -- if the user deleted it via
+                # the editor's own row-delete control, silently re-add it (mirrors the
+                # discipline fee table's "always re-add Project Management" behaviour).
+                _had_pm = any(f.item_title.strip().lower() == fee_estimation_engine.ALWAYS_INCLUDED_ITEM.lower()
+                              for f in rebuilt_scope_fees)
+                st.session_state.scope_item_fees = fee_estimation_engine.ensure_project_management_present(rebuilt_scope_fees)
+                if not _had_pm:
+                    st.session_state._scope_fee_editor_version += 1
+                    st.info("Project Management is a fixed line item and has been re-added.")
+                total = sum(f.fee_amount for f in st.session_state.scope_item_fees)
+                st.markdown(f"**Total: ${total:,.0f}**")
+                if any(f.fee_amount <= 0 for f in st.session_state.scope_item_fees):
+                    st.warning("At least one scope item still has no fee entered -- the exported pack flags this in red until every row is priced.")
+
+            _render_letter_scope_fee_table()
 
             st.divider()
-            st.markdown("#### First-pass discipline fee build-up")
-            st.caption(
-                "Your own first-pass fee per discipline, built from hours x rate -- the same "
-                "build-up as the Large Scope pack's Fee Estimate tab, and the same figures if "
-                "you switch a project between pack sizes. The table is seeded from the "
-                "disciplines the brief calls for, plus Project Management (always included). "
-                "Enter total hours and an hourly rate per discipline -- the Total column is "
-                "calculated automatically. A per-discipline total (not the hours/rates "
-                "themselves) is included in the exported pack's Fees section."
-            )
-            letter_brief_disc = st.session_state.analysis.disciplines_involved if st.session_state.analysis else []
-            if st.session_state.get("dismissed_fee_disciplines") is None:
-                st.session_state.dismissed_fee_disciplines = []
-            letter_dismissed_fee = {d.lower() for d in st.session_state.dismissed_fee_disciplines}
-
-            if not st.session_state.discipline_fee_lines:
-                st.session_state.discipline_fee_lines = resourcing.seed_discipline_fee_lines(letter_brief_disc)
-                st.session_state._discipline_fee_editor_version += 1
-            else:
-                existing_fee_discs = {resourcing.canonical_discipline(l.discipline) for l in st.session_state.discipline_fee_lines}
-                for disc in resourcing.required_disciplines(letter_brief_disc):
-                    if disc not in existing_fee_discs and disc.lower() not in letter_dismissed_fee:
-                        st.session_state.discipline_fee_lines.append(resourcing.DisciplineFeeLine(discipline=disc))
-                        # Force the data_editor below to re-seed from the underlying
-                        # data model -- it otherwise ignores its `data` argument once
-                        # its widget state already exists under a given key. See the
-                        # state-defaults comment for _discipline_fee_editor_version.
-                        st.session_state._discipline_fee_editor_version += 1
-
-            letter_disc_fee_rows = [
-                {
-                    "discipline": l.discipline,
-                    "total_hours": l.total_hours,
-                    "rate_per_hour": l.rate_per_hour,
-                    "total": l.fee_amount,
-                    "note": l.note,
-                }
-                for l in st.session_state.discipline_fee_lines
-            ]
-            letter_before_discs = {r["discipline"].strip() for r in letter_disc_fee_rows if r["discipline"].strip()}
-
-            letter_edited_disc_fees = st.data_editor(
-                letter_disc_fee_rows,
-                key=f"letter_discipline_fee_editor_v{st.session_state._discipline_fee_editor_version}",
-                use_container_width=True,
-                hide_index=True, num_rows="dynamic",
-                column_config={
-                    "discipline": st.column_config.TextColumn("Discipline", required=True),
-                    "total_hours": st.column_config.NumberColumn("Total hours", min_value=0.0, step=1.0, format="%.1f"),
-                    "rate_per_hour": st.column_config.NumberColumn("Rate per hour ($)", min_value=0.0, step=5.0, format="$%.0f"),
-                    "total": st.column_config.NumberColumn("Total ($, excl. GST)", format="$%.0f", disabled=True,
-                                                            help="Calculated automatically -- total hours x rate per hour."),
-                    "note": st.column_config.TextColumn("Note"),
-                },
-            )
-            letter_rebuilt = [
-                resourcing.DisciplineFeeLine(
-                    discipline=str(r.get("discipline") or "").strip(),
-                    total_hours=float(r.get("total_hours") or 0),
-                    rate_per_hour=float(r.get("rate_per_hour") or 0),
-                    note=str(r.get("note") or ""),
+            @st.fragment
+            def _render_letter_discipline_fee_table():
+                # Same fragment-wrap rationale as the Large Scope discipline
+                # table -- see _render_large_discipline_fee_table().
+                st.markdown("#### First-pass discipline fee build-up")
+                st.caption(
+                    "Your own first-pass fee per discipline, built from hours x rate -- the same "
+                    "build-up as the Large Scope pack's Fee Estimate tab, and the same figures if "
+                    "you switch a project between pack sizes. The table is seeded from the "
+                    "disciplines the brief calls for, plus Project Management (always included). "
+                    "Enter total hours and an hourly rate per discipline -- the Total column is "
+                    "calculated automatically. A per-discipline total (not the hours/rates "
+                    "themselves) is included in the exported pack's Fees section."
                 )
-                for r in letter_edited_disc_fees
-                if str(r.get("discipline") or "").strip()
-            ]
+                letter_brief_disc = st.session_state.analysis.disciplines_involved if st.session_state.analysis else []
+                if st.session_state.get("dismissed_fee_disciplines") is None:
+                    st.session_state.dismissed_fee_disciplines = []
+                letter_dismissed_fee = {d.lower() for d in st.session_state.dismissed_fee_disciplines}
 
-            letter_after_discs = {l.discipline for l in letter_rebuilt}
-            letter_removed_now = letter_before_discs - letter_after_discs
-            if letter_removed_now:
-                letter_newly_dismissed = {resourcing.canonical_discipline(d) for d in letter_removed_now if resourcing.canonical_discipline(d)}
-                st.session_state.dismissed_fee_disciplines = list(dict.fromkeys(
-                    list(st.session_state.dismissed_fee_disciplines) + list(letter_newly_dismissed)
-                ))
+                if not st.session_state.discipline_fee_lines:
+                    st.session_state.discipline_fee_lines = resourcing.seed_discipline_fee_lines(letter_brief_disc)
+                    st.session_state._discipline_fee_editor_version += 1
+                else:
+                    existing_fee_discs = {resourcing.canonical_discipline(l.discipline) for l in st.session_state.discipline_fee_lines}
+                    for disc in resourcing.required_disciplines(letter_brief_disc):
+                        if disc not in existing_fee_discs and disc.lower() not in letter_dismissed_fee:
+                            st.session_state.discipline_fee_lines.append(resourcing.DisciplineFeeLine(discipline=disc))
+                            # Force the data_editor below to re-seed from the underlying
+                            # data model -- it otherwise ignores its `data` argument once
+                            # its widget state already exists under a given key. See the
+                            # state-defaults comment for _discipline_fee_editor_version.
+                            st.session_state._discipline_fee_editor_version += 1
 
-            letter_present = [l.discipline for l in letter_rebuilt]
-            letter_missing_always = set(resourcing.ensure_project_management_present(letter_present)) - set(letter_present)
-            for missing in letter_missing_always:
-                letter_rebuilt.append(resourcing.DisciplineFeeLine(discipline=missing,
-                                                                    note="Always included -- re-added automatically"))
-            if letter_missing_always:
-                # The user deleted Project Management via the editor's row-delete
-                # control -- it's being silently re-added to the data model, but the
-                # editor widget itself won't show it again until its key changes.
-                st.session_state._discipline_fee_editor_version += 1
-            st.session_state.discipline_fee_lines = letter_rebuilt
+                letter_disc_fee_rows = [
+                    {
+                        "discipline": l.discipline,
+                        "total_hours": l.total_hours,
+                        "rate_per_hour": l.rate_per_hour,
+                        "total": l.fee_amount,
+                        "note": l.note,
+                    }
+                    for l in st.session_state.discipline_fee_lines
+                ]
+                letter_before_discs = {r["discipline"].strip() for r in letter_disc_fee_rows if r["discipline"].strip()}
 
-            letter_disc_total = sum(l.fee_amount for l in letter_rebuilt)
-            letter_total_hours_all = sum(l.total_hours for l in letter_rebuilt)
-            letter_avg_rate = (letter_disc_total / letter_total_hours_all) if letter_total_hours_all else None
-            bcol1, bcol2 = st.columns(2)
-            with bcol1:
-                st.markdown(f"**Discipline fee total: ${letter_disc_total:,.0f}**")
-            with bcol2:
-                st.markdown(f"**Average rate across project: {f'${letter_avg_rate:,.0f}/hr' if letter_avg_rate else '-- (enter hours to calculate)'}**")
-            if not any(resourcing.canonical_discipline(l.discipline) == resourcing.ALWAYS_INCLUDED_DISCIPLINE
-                       or l.discipline.strip().lower() == resourcing.ALWAYS_INCLUDED_DISCIPLINE.lower()
-                       for l in letter_rebuilt):
-                st.info("Project Management is always part of the fee build-up and has been re-added.")
-
-            letter_hours_xlsx = resourcing.discipline_fee_lines_to_excel(letter_rebuilt, theme_name=st.session_state.proposal_theme)
-            if letter_hours_xlsx:
-                st.download_button(
-                    "Export to Excel", data=letter_hours_xlsx, key="letter_download_hours_fee_xlsx",
-                    file_name="discipline_fee_build_up.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    help="Includes a Total row and the average rate across the project (total fee / total hours).",
+                letter_edited_disc_fees = st.data_editor(
+                    letter_disc_fee_rows,
+                    key=f"letter_discipline_fee_editor_v{st.session_state._discipline_fee_editor_version}",
+                    use_container_width=True,
+                    hide_index=True, num_rows="dynamic",
+                    column_config={
+                        "discipline": st.column_config.TextColumn("Discipline", required=True),
+                        "total_hours": st.column_config.NumberColumn("Total hours", min_value=0.0, step=1.0, format="%.1f"),
+                        "rate_per_hour": st.column_config.NumberColumn("Rate per hour ($)", min_value=0.0, step=5.0, format="$%.0f"),
+                        "total": st.column_config.NumberColumn("Total ($, excl. GST)", format="$%.0f", disabled=True,
+                                                                help="Calculated automatically -- total hours x rate per hour."),
+                        "note": st.column_config.TextColumn("Note"),
+                    },
                 )
-            else:
-                st.caption("Excel export needs the 'openpyxl' package -- run `pip install openpyxl` and reload.")
+                letter_rebuilt = [
+                    resourcing.DisciplineFeeLine(
+                        discipline=str(r.get("discipline") or "").strip(),
+                        total_hours=float(r.get("total_hours") or 0),
+                        rate_per_hour=float(r.get("rate_per_hour") or 0),
+                        note=str(r.get("note") or ""),
+                    )
+                    for r in letter_edited_disc_fees
+                    if str(r.get("discipline") or "").strip()
+                ]
 
-            letter_hours_pie_png = graphics_engine.generate_fee_distribution_pie(
-                [(l.discipline, l.fee_amount) for l in letter_rebuilt],
-                "Fee distribution by discipline (hours x rate)",
-            )
-            if letter_hours_pie_png:
-                st.image(letter_hours_pie_png, use_container_width=True)
+                letter_after_discs = {l.discipline for l in letter_rebuilt}
+                letter_removed_now = letter_before_discs - letter_after_discs
+                if letter_removed_now:
+                    letter_newly_dismissed = {resourcing.canonical_discipline(d) for d in letter_removed_now if resourcing.canonical_discipline(d)}
+                    st.session_state.dismissed_fee_disciplines = list(dict.fromkeys(
+                        list(st.session_state.dismissed_fee_disciplines) + list(letter_newly_dismissed)
+                    ))
+
+                letter_present = [l.discipline for l in letter_rebuilt]
+                letter_missing_always = set(resourcing.ensure_project_management_present(letter_present)) - set(letter_present)
+                for missing in letter_missing_always:
+                    letter_rebuilt.append(resourcing.DisciplineFeeLine(discipline=missing,
+                                                                        note="Always included -- re-added automatically"))
+                if letter_missing_always:
+                    # The user deleted Project Management via the editor's row-delete
+                    # control -- it's being silently re-added to the data model, but the
+                    # editor widget itself won't show it again until its key changes.
+                    st.session_state._discipline_fee_editor_version += 1
+                st.session_state.discipline_fee_lines = letter_rebuilt
+
+                letter_disc_total = sum(l.fee_amount for l in letter_rebuilt)
+                letter_total_hours_all = sum(l.total_hours for l in letter_rebuilt)
+                letter_avg_rate = (letter_disc_total / letter_total_hours_all) if letter_total_hours_all else None
+                bcol1, bcol2 = st.columns(2)
+                with bcol1:
+                    st.markdown(f"**Discipline fee total: ${letter_disc_total:,.0f}**")
+                with bcol2:
+                    st.markdown(f"**Average rate across project: {f'${letter_avg_rate:,.0f}/hr' if letter_avg_rate else '-- (enter hours to calculate)'}**")
+                if not any(resourcing.canonical_discipline(l.discipline) == resourcing.ALWAYS_INCLUDED_DISCIPLINE
+                           or l.discipline.strip().lower() == resourcing.ALWAYS_INCLUDED_DISCIPLINE.lower()
+                           for l in letter_rebuilt):
+                    st.info("Project Management is always part of the fee build-up and has been re-added.")
+
+                # Cached the same way as the Large Scope discipline table --
+                # see the comment on _disc_fee_cache_sig there for why (skips
+                # redoing the Excel/chart work when the figures haven't
+                # actually changed, which also shrinks the edit-commit race
+                # window between this fragment rerun and the next one).
+                _letter_disc_signature = tuple((l.discipline, l.total_hours, l.rate_per_hour, l.note) for l in letter_rebuilt)
+                if st.session_state.get("_letter_disc_fee_cache_sig") != _letter_disc_signature:
+                    st.session_state._letter_disc_fee_cache_sig = _letter_disc_signature
+                    st.session_state._letter_disc_fee_cache_xlsx = resourcing.discipline_fee_lines_to_excel(
+                        letter_rebuilt, theme_name=st.session_state.proposal_theme)
+                    st.session_state._letter_disc_fee_cache_pie = graphics_engine.generate_fee_distribution_pie(
+                        [(l.discipline, l.fee_amount) for l in letter_rebuilt],
+                        "Fee distribution by discipline (hours x rate)",
+                    )
+                letter_hours_xlsx = st.session_state._letter_disc_fee_cache_xlsx
+                letter_hours_pie_png = st.session_state._letter_disc_fee_cache_pie
+                if letter_hours_xlsx:
+                    st.download_button(
+                        "Export to Excel", data=letter_hours_xlsx, key="letter_download_hours_fee_xlsx",
+                        file_name="discipline_fee_build_up.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        help="Includes a Total row and the average rate across the project (total fee / total hours).",
+                    )
+                else:
+                    st.caption("Excel export needs the 'openpyxl' package -- run `pip install openpyxl` and reload.")
+
+                if letter_hours_pie_png:
+                    st.image(letter_hours_pie_png, use_container_width=True)
+
+            _render_letter_discipline_fee_table()
 
             st.divider()
             st.markdown("#### Delivery program")
@@ -3231,208 +3275,248 @@ with tabs[8]:
             if letter_pie_png:
                 st.image(letter_pie_png, use_container_width=True)
     else:
-        st.markdown("#### First-pass discipline fee build-up")
-        st.caption(
-            "Your own first-pass fee per discipline, built from hours x rate. The table is "
-            "seeded from the disciplines the brief calls for, plus Project Management (always "
-            "included). Enter total hours and an hourly rate per discipline -- the Total column "
-            "is calculated automatically, not typed in directly. Add or remove rows as needed -- "
-            "these are your figures, not an AI estimate."
-        )
-        brief_disc = st.session_state.analysis.disciplines_involved if st.session_state.analysis else []
-        if st.session_state.get("dismissed_fee_disciplines") is None:
-            st.session_state.dismissed_fee_disciplines = []
-        dismissed_fee = {d.lower() for d in st.session_state.dismissed_fee_disciplines}
-
-        if not st.session_state.discipline_fee_lines:
-            st.session_state.discipline_fee_lines = resourcing.seed_discipline_fee_lines(brief_disc)
-            st.session_state._discipline_fee_editor_version += 1
-        else:
-            # Add any newly-required disciplines (e.g. after a Tender Analysis re-run
-            # picks up more of them) without wiping existing entries -- but never
-            # re-add one the user explicitly removed from this table.
-            existing_fee_discs = {resourcing.canonical_discipline(l.discipline) for l in st.session_state.discipline_fee_lines}
-            for disc in resourcing.required_disciplines(brief_disc):
-                if disc not in existing_fee_discs and disc.lower() not in dismissed_fee:
-                    st.session_state.discipline_fee_lines.append(resourcing.DisciplineFeeLine(discipline=disc))
-                    # Force the data_editor below to re-seed from the underlying data
-                    # model -- it otherwise ignores its `data` argument once its
-                    # widget state already exists under a given key. See the
-                    # state-defaults comment for _discipline_fee_editor_version.
-                    st.session_state._discipline_fee_editor_version += 1
-
-        disc_fee_rows = [
-            {
-                "discipline": l.discipline,
-                "total_hours": l.total_hours,
-                "rate_per_hour": l.rate_per_hour,
-                "total": l.fee_amount,
-                "note": l.note,
-            }
-            for l in st.session_state.discipline_fee_lines
-        ]
-        before_discs = {r["discipline"].strip() for r in disc_fee_rows if r["discipline"].strip()}
-
-        edited_disc_fees = st.data_editor(
-            disc_fee_rows, key=f"discipline_fee_editor_v{st.session_state._discipline_fee_editor_version}",
-            use_container_width=True,
-            hide_index=True, num_rows="dynamic",
-            column_config={
-                "discipline": st.column_config.TextColumn("Discipline", required=True),
-                "total_hours": st.column_config.NumberColumn("Total hours", min_value=0.0, step=1.0, format="%.1f"),
-                "rate_per_hour": st.column_config.NumberColumn("Rate per hour ($)", min_value=0.0, step=5.0, format="$%.0f"),
-                "total": st.column_config.NumberColumn("Total ($, excl. GST)", format="$%.0f", disabled=True,
-                                                        help="Calculated automatically -- total hours x rate per hour."),
-                "note": st.column_config.TextColumn("Note"),
-            },
-        )
-        # Rebuild from the editor, dropping blank-discipline rows, then guarantee
-        # Project Management is present even if the user deleted it.
-        rebuilt = [
-            resourcing.DisciplineFeeLine(
-                discipline=str(r.get("discipline") or "").strip(),
-                total_hours=float(r.get("total_hours") or 0),
-                rate_per_hour=float(r.get("rate_per_hour") or 0),
-                note=str(r.get("note") or ""),
-            )
-            for r in edited_disc_fees
-            if str(r.get("discipline") or "").strip()
-        ]
-
-        # A discipline present before this edit but missing after it was removed
-        # via the editor's own delete-row control -- remember that so the
-        # brief-sync merge above doesn't just re-add it on the next rerun.
-        after_discs = {l.discipline for l in rebuilt}
-        removed_now = before_discs - after_discs
-        if removed_now:
-            newly_dismissed = {resourcing.canonical_discipline(d) for d in removed_now if resourcing.canonical_discipline(d)}
-            st.session_state.dismissed_fee_disciplines = list(dict.fromkeys(
-                list(st.session_state.dismissed_fee_disciplines) + list(newly_dismissed)
-            ))
-
-        present = [l.discipline for l in rebuilt]
-        missing_always = set(resourcing.ensure_project_management_present(present)) - set(present)
-        for missing in missing_always:
-            rebuilt.append(resourcing.DisciplineFeeLine(discipline=missing,
-                                                        note="Always included -- re-added automatically"))
-        if missing_always:
-            # The user deleted Project Management via the editor's row-delete
-            # control -- it's being silently re-added to the data model, but the
-            # editor widget itself won't show it again until its key changes.
-            st.session_state._discipline_fee_editor_version += 1
-        st.session_state.discipline_fee_lines = rebuilt
-
-        disc_total = sum(l.fee_amount for l in rebuilt)
-        total_hours_all = sum(l.total_hours for l in rebuilt)
-        # The blended rate across the whole project (total fee / total hours) --
-        # the key sanity-check figure for whether the priced hours/rates make
-        # sense in aggregate, not just discipline by discipline.
-        avg_rate = (disc_total / total_hours_all) if total_hours_all else None
-        mcol1, mcol2 = st.columns(2)
-        with mcol1:
-            st.markdown(f"**Discipline fee total: ${disc_total:,.0f}**")
-        with mcol2:
-            st.markdown(f"**Average rate across project: {f'${avg_rate:,.0f}/hr' if avg_rate else '-- (enter hours to calculate)'}**")
-        if not any(resourcing.canonical_discipline(l.discipline) == resourcing.ALWAYS_INCLUDED_DISCIPLINE
-                   or l.discipline.strip().lower() == resourcing.ALWAYS_INCLUDED_DISCIPLINE.lower()
-                   for l in rebuilt):
-            st.info("Project Management is always part of the fee build-up and has been re-added.")
-
-        hours_xlsx = resourcing.discipline_fee_lines_to_excel(rebuilt, theme_name=st.session_state.proposal_theme)
-        if hours_xlsx:
-            st.download_button(
-                "Export to Excel", data=hours_xlsx, key="download_hours_fee_xlsx",
-                file_name="discipline_fee_build_up.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                help="Includes a Total row and the average rate across the project (total fee / total hours).",
-            )
-        else:
-            st.caption("Excel export needs the 'openpyxl' package -- run `pip install openpyxl` and reload.")
-
-        hours_pie_png = graphics_engine.generate_fee_distribution_pie(
-            [(l.discipline, l.fee_amount) for l in rebuilt],
-            "Fee distribution by discipline (hours x rate)",
-        )
-        if hours_pie_png:
-            st.image(hours_pie_png, use_container_width=True)
-        else:
-            st.caption("Enter hours and a rate for at least one discipline above to see the fee distribution chart.")
-
-        st.divider()
-        st.markdown("#### Scope item / deliverable fee build-up")
-        _large_scope_items = st.session_state.analysis.scope_items if st.session_state.analysis else []
-        if not _large_scope_items:
-            st.info("Run Tender Analysis to extract scope items and deliverables first.")
-        else:
-            st.caption(fee_estimation_engine.SCOPE_FEE_SEED_NOTE)
+        @st.fragment
+        def _render_large_discipline_fee_table():
+            # Wrapped in a fragment so editing a cell only reruns this table
+            # (fast, in place) instead of the whole ~3700-line script -- without
+            # this, each keystroke-commit reruns everything (every other tab's
+            # code, every chart) which is slow enough that fast typing across
+            # cells can land before the previous rerun finishes and get
+            # silently dropped when the widget remounts. Downstream sections
+            # (the "Indicative fee split" below) read st.session_state
+            # .discipline_fee_lines directly rather than a local variable here,
+            # since this fragment can rerun on its own without the rest of the
+            # script -- they'll pick up the latest values on their own next full
+            # rerun (e.g. switching tabs).
+            st.markdown("#### First-pass discipline fee build-up")
             st.caption(
-                "Prepopulated with the scope items/deliverables extracted from the brief, "
-                "one row each, so there's a real starting list to price rather than a blank "
-                "table -- edit, rename, delete, or add rows freely; nothing here is exported "
-                "automatically (the discipline build-up above is what feeds the pack)."
+                "Your own first-pass fee per discipline, built from hours x rate. The table is "
+                "seeded from the disciplines the brief calls for, plus Project Management (always "
+                "included). Enter total hours and an hourly rate per discipline -- the Total column "
+                "is calculated automatically, not typed in directly. Add or remove rows as needed -- "
+                "these are your figures, not an AI estimate."
             )
-            if not st.session_state.scope_item_fees:
-                st.session_state.scope_item_fees = fee_estimation_engine.ensure_project_management_present(
-                    fee_estimation_engine.seed_scope_item_fees(_large_scope_items, None)
-                )
-                st.session_state._large_scope_fee_editor_version += 1
-            else:
-                _existing_titles = {f.item_title.strip().lower() for f in st.session_state.scope_item_fees}
-                for _item in _large_scope_items:
-                    if _item.title.strip().lower() not in _existing_titles:
-                        st.session_state.scope_item_fees.append(
-                            fee_estimation_engine.ScopeItemFee(item_title=_item.title, fee_amount=0.0,
-                                                               notes="Enter fee -- no estimate seeded")
-                        )
-                        # Force the data_editor below to re-seed from the underlying
-                        # data model -- it otherwise ignores its `data` argument once
-                        # its widget state already exists under a given key. See the
-                        # state-defaults comment for _large_scope_fee_editor_version.
-                        st.session_state._large_scope_fee_editor_version += 1
-                # Project Management is a fixed line item, additional to whatever
-                # deliverables Tender Analysis extracts -- re-add it if missing.
-                if not any(f.item_title.strip().lower() == fee_estimation_engine.ALWAYS_INCLUDED_ITEM.lower()
-                           for f in st.session_state.scope_item_fees):
-                    st.session_state.scope_item_fees = fee_estimation_engine.ensure_project_management_present(
-                        st.session_state.scope_item_fees
-                    )
-                    st.session_state._large_scope_fee_editor_version += 1
+            brief_disc = st.session_state.analysis.disciplines_involved if st.session_state.analysis else []
+            if st.session_state.get("dismissed_fee_disciplines") is None:
+                st.session_state.dismissed_fee_disciplines = []
+            dismissed_fee = {d.lower() for d in st.session_state.dismissed_fee_disciplines}
 
-            _large_fee_rows = [
-                {"item_title": f.item_title, "fee_amount": f.fee_amount, "notes": f.notes}
-                for f in st.session_state.scope_item_fees
+            if not st.session_state.discipline_fee_lines:
+                st.session_state.discipline_fee_lines = resourcing.seed_discipline_fee_lines(brief_disc)
+                st.session_state._discipline_fee_editor_version += 1
+            else:
+                # Add any newly-required disciplines (e.g. after a Tender Analysis re-run
+                # picks up more of them) without wiping existing entries -- but never
+                # re-add one the user explicitly removed from this table.
+                existing_fee_discs = {resourcing.canonical_discipline(l.discipline) for l in st.session_state.discipline_fee_lines}
+                for disc in resourcing.required_disciplines(brief_disc):
+                    if disc not in existing_fee_discs and disc.lower() not in dismissed_fee:
+                        st.session_state.discipline_fee_lines.append(resourcing.DisciplineFeeLine(discipline=disc))
+                        # Force the data_editor below to re-seed from the underlying data
+                        # model -- it otherwise ignores its `data` argument once its
+                        # widget state already exists under a given key. See the
+                        # state-defaults comment for _discipline_fee_editor_version.
+                        st.session_state._discipline_fee_editor_version += 1
+
+            disc_fee_rows = [
+                {
+                    "discipline": l.discipline,
+                    "total_hours": l.total_hours,
+                    "rate_per_hour": l.rate_per_hour,
+                    "total": l.fee_amount,
+                    "note": l.note,
+                }
+                for l in st.session_state.discipline_fee_lines
             ]
-            _large_edited_fees = st.data_editor(
-                _large_fee_rows,
-                key=f"large_scope_fee_editor_v{st.session_state._large_scope_fee_editor_version}",
-                use_container_width=True, hide_index=True,
-                num_rows="dynamic",
+            before_discs = {r["discipline"].strip() for r in disc_fee_rows if r["discipline"].strip()}
+
+            edited_disc_fees = st.data_editor(
+                disc_fee_rows, key=f"discipline_fee_editor_v{st.session_state._discipline_fee_editor_version}",
+                use_container_width=True,
+                hide_index=True, num_rows="dynamic",
                 column_config={
-                    "item_title": st.column_config.TextColumn("Scope item / deliverable", required=True),
-                    "fee_amount": st.column_config.NumberColumn("Fee ($, excl. GST)", min_value=0.0, step=50.0, format="$%.0f"),
-                    "notes": st.column_config.TextColumn("Notes"),
+                    "discipline": st.column_config.TextColumn("Discipline", required=True),
+                    "total_hours": st.column_config.NumberColumn("Total hours", min_value=0.0, step=1.0, format="%.1f"),
+                    "rate_per_hour": st.column_config.NumberColumn("Rate per hour ($)", min_value=0.0, step=5.0, format="$%.0f"),
+                    "total": st.column_config.NumberColumn("Total ($, excl. GST)", format="$%.0f", disabled=True,
+                                                            help="Calculated automatically -- total hours x rate per hour."),
+                    "note": st.column_config.TextColumn("Note"),
                 },
             )
-            _large_rebuilt_scope_fees = [
-                fee_estimation_engine.ScopeItemFee(
-                    item_title=str(r.get("item_title") or "").strip(),
-                    fee_amount=float(r.get("fee_amount") or 0), notes=str(r.get("notes") or ""),
+            # Rebuild from the editor, dropping blank-discipline rows, then guarantee
+            # Project Management is present even if the user deleted it.
+            rebuilt = [
+                resourcing.DisciplineFeeLine(
+                    discipline=str(r.get("discipline") or "").strip(),
+                    total_hours=float(r.get("total_hours") or 0),
+                    rate_per_hour=float(r.get("rate_per_hour") or 0),
+                    note=str(r.get("note") or ""),
                 )
-                for r in _large_edited_fees
-                if str(r.get("item_title") or "").strip()
+                for r in edited_disc_fees
+                if str(r.get("discipline") or "").strip()
             ]
-            # Project Management is a fixed line item -- if the user deleted it via
-            # the editor's own row-delete control, silently re-add it.
-            _large_had_pm = any(f.item_title.strip().lower() == fee_estimation_engine.ALWAYS_INCLUDED_ITEM.lower()
-                                for f in _large_rebuilt_scope_fees)
-            st.session_state.scope_item_fees = fee_estimation_engine.ensure_project_management_present(
-                _large_rebuilt_scope_fees
-            )
-            if not _large_had_pm:
-                st.session_state._large_scope_fee_editor_version += 1
-                st.info("Project Management is a fixed line item and has been re-added.")
-            _large_scope_fee_total = sum(f.fee_amount for f in st.session_state.scope_item_fees)
-            st.markdown(f"**Total: ${_large_scope_fee_total:,.0f}**")
+
+            # A discipline present before this edit but missing after it was removed
+            # via the editor's own delete-row control -- remember that so the
+            # brief-sync merge above doesn't just re-add it on the next rerun.
+            after_discs = {l.discipline for l in rebuilt}
+            removed_now = before_discs - after_discs
+            if removed_now:
+                newly_dismissed = {resourcing.canonical_discipline(d) for d in removed_now if resourcing.canonical_discipline(d)}
+                st.session_state.dismissed_fee_disciplines = list(dict.fromkeys(
+                    list(st.session_state.dismissed_fee_disciplines) + list(newly_dismissed)
+                ))
+
+            present = [l.discipline for l in rebuilt]
+            missing_always = set(resourcing.ensure_project_management_present(present)) - set(present)
+            for missing in missing_always:
+                rebuilt.append(resourcing.DisciplineFeeLine(discipline=missing,
+                                                            note="Always included -- re-added automatically"))
+            if missing_always:
+                # The user deleted Project Management via the editor's row-delete
+                # control -- it's being silently re-added to the data model, but the
+                # editor widget itself won't show it again until its key changes.
+                st.session_state._discipline_fee_editor_version += 1
+            st.session_state.discipline_fee_lines = rebuilt
+
+            disc_total = sum(l.fee_amount for l in rebuilt)
+            total_hours_all = sum(l.total_hours for l in rebuilt)
+            # The blended rate across the whole project (total fee / total hours) --
+            # the key sanity-check figure for whether the priced hours/rates make
+            # sense in aggregate, not just discipline by discipline.
+            avg_rate = (disc_total / total_hours_all) if total_hours_all else None
+            mcol1, mcol2 = st.columns(2)
+            with mcol1:
+                st.markdown(f"**Discipline fee total: ${disc_total:,.0f}**")
+            with mcol2:
+                st.markdown(f"**Average rate across project: {f'${avg_rate:,.0f}/hr' if avg_rate else '-- (enter hours to calculate)'}**")
+            if not any(resourcing.canonical_discipline(l.discipline) == resourcing.ALWAYS_INCLUDED_DISCIPLINE
+                       or l.discipline.strip().lower() == resourcing.ALWAYS_INCLUDED_DISCIPLINE.lower()
+                       for l in rebuilt):
+                st.info("Project Management is always part of the fee build-up and has been re-added.")
+
+            # The Excel export and pie chart are regenerated from `rebuilt` --
+            # both are real work (openpyxl workbook + matplotlib render), and
+            # without caching that ran again on literally every keystroke
+            # commit, even ones that don't touch these disciplines at all.
+            # That's wasted time on its own, but it also matters for
+            # correctness: it's extra wall-clock inside this fragment's rerun,
+            # which widens the window in which a second, fast edit (typing
+            # into the next row before this rerun settles) can race the
+            # server round-trip and have its own value overwritten by a
+            # stale re-render. Skipping the regen when the underlying figures
+            # haven't changed since the last render shrinks that window.
+            # Keyed by a plain tuple signature (not an object identity) so it
+            # survives across reruns via session_state.
+            _disc_signature = tuple((l.discipline, l.total_hours, l.rate_per_hour, l.note) for l in rebuilt)
+            if st.session_state.get("_disc_fee_cache_sig") != _disc_signature:
+                st.session_state._disc_fee_cache_sig = _disc_signature
+                st.session_state._disc_fee_cache_xlsx = resourcing.discipline_fee_lines_to_excel(
+                    rebuilt, theme_name=st.session_state.proposal_theme)
+                st.session_state._disc_fee_cache_pie = graphics_engine.generate_fee_distribution_pie(
+                    [(l.discipline, l.fee_amount) for l in rebuilt],
+                    "Fee distribution by discipline (hours x rate)",
+                )
+            hours_xlsx = st.session_state._disc_fee_cache_xlsx
+            hours_pie_png = st.session_state._disc_fee_cache_pie
+            if hours_xlsx:
+                st.download_button(
+                    "Export to Excel", data=hours_xlsx, key="download_hours_fee_xlsx",
+                    file_name="discipline_fee_build_up.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    help="Includes a Total row and the average rate across the project (total fee / total hours).",
+                )
+            else:
+                st.caption("Excel export needs the 'openpyxl' package -- run `pip install openpyxl` and reload.")
+
+            if hours_pie_png:
+                st.image(hours_pie_png, use_container_width=True)
+            else:
+                st.caption("Enter hours and a rate for at least one discipline above to see the fee distribution chart.")
+
+        _render_large_discipline_fee_table()
+
+        st.divider()
+        @st.fragment
+        def _render_large_scope_fee_table():
+            # Same fragment-wrap rationale as the discipline table above -- see
+            # _render_large_discipline_fee_table().
+            st.markdown("#### Scope item / deliverable fee build-up")
+            _large_scope_items = st.session_state.analysis.scope_items if st.session_state.analysis else []
+            if not _large_scope_items:
+                st.info("Run Tender Analysis to extract scope items and deliverables first.")
+            else:
+                st.caption(fee_estimation_engine.SCOPE_FEE_SEED_NOTE)
+                st.caption(
+                    "Prepopulated with the scope items/deliverables extracted from the brief, "
+                    "one row each, so there's a real starting list to price rather than a blank "
+                    "table -- edit, rename, delete, or add rows freely; nothing here is exported "
+                    "automatically (the discipline build-up above is what feeds the pack)."
+                )
+                if not st.session_state.scope_item_fees:
+                    st.session_state.scope_item_fees = fee_estimation_engine.ensure_project_management_present(
+                        fee_estimation_engine.seed_scope_item_fees(_large_scope_items, None)
+                    )
+                    st.session_state._large_scope_fee_editor_version += 1
+                else:
+                    _existing_titles = {f.item_title.strip().lower() for f in st.session_state.scope_item_fees}
+                    for _item in _large_scope_items:
+                        if _item.title.strip().lower() not in _existing_titles:
+                            st.session_state.scope_item_fees.append(
+                                fee_estimation_engine.ScopeItemFee(item_title=_item.title, fee_amount=0.0,
+                                                                   notes="Enter fee -- no estimate seeded")
+                            )
+                            # Force the data_editor below to re-seed from the underlying
+                            # data model -- it otherwise ignores its `data` argument once
+                            # its widget state already exists under a given key. See the
+                            # state-defaults comment for _large_scope_fee_editor_version.
+                            st.session_state._large_scope_fee_editor_version += 1
+                    # Project Management is a fixed line item, additional to whatever
+                    # deliverables Tender Analysis extracts -- re-add it if missing.
+                    if not any(f.item_title.strip().lower() == fee_estimation_engine.ALWAYS_INCLUDED_ITEM.lower()
+                               for f in st.session_state.scope_item_fees):
+                        st.session_state.scope_item_fees = fee_estimation_engine.ensure_project_management_present(
+                            st.session_state.scope_item_fees
+                        )
+                        st.session_state._large_scope_fee_editor_version += 1
+
+                _large_fee_rows = [
+                    {"item_title": f.item_title, "fee_amount": f.fee_amount, "notes": f.notes}
+                    for f in st.session_state.scope_item_fees
+                ]
+                _large_edited_fees = st.data_editor(
+                    _large_fee_rows,
+                    key=f"large_scope_fee_editor_v{st.session_state._large_scope_fee_editor_version}",
+                    use_container_width=True, hide_index=True,
+                    num_rows="dynamic",
+                    column_config={
+                        "item_title": st.column_config.TextColumn("Scope item / deliverable", required=True),
+                        "fee_amount": st.column_config.NumberColumn("Fee ($, excl. GST)", min_value=0.0, step=50.0, format="$%.0f"),
+                        "notes": st.column_config.TextColumn("Notes"),
+                    },
+                )
+                _large_rebuilt_scope_fees = [
+                    fee_estimation_engine.ScopeItemFee(
+                        item_title=str(r.get("item_title") or "").strip(),
+                        fee_amount=float(r.get("fee_amount") or 0), notes=str(r.get("notes") or ""),
+                    )
+                    for r in _large_edited_fees
+                    if str(r.get("item_title") or "").strip()
+                ]
+                # Project Management is a fixed line item -- if the user deleted it via
+                # the editor's own row-delete control, silently re-add it.
+                _large_had_pm = any(f.item_title.strip().lower() == fee_estimation_engine.ALWAYS_INCLUDED_ITEM.lower()
+                                    for f in _large_rebuilt_scope_fees)
+                st.session_state.scope_item_fees = fee_estimation_engine.ensure_project_management_present(
+                    _large_rebuilt_scope_fees
+                )
+                if not _large_had_pm:
+                    st.session_state._large_scope_fee_editor_version += 1
+                    st.info("Project Management is a fixed line item and has been re-added.")
+                _large_scope_fee_total = sum(f.fee_amount for f in st.session_state.scope_item_fees)
+                st.markdown(f"**Total: ${_large_scope_fee_total:,.0f}**")
+
+        _render_large_scope_fee_table()
 
         st.divider()
         st.markdown("#### Delivery program")
@@ -3490,8 +3574,13 @@ with tabs[8]:
                  "total above for this split only -- it doesn't change anything else in the tool.",
         )
         manual_total = st.session_state.fee_estimate_manual_total
-        buildup_discs = [l.discipline for l in rebuilt]
-        buildup_total = sum(l.fee_amount for l in rebuilt)
+        # Read from session_state rather than the discipline-table block's own
+        # `rebuilt` local (that block is now a self-contained @st.fragment, see
+        # below, so its locals aren't in scope here) -- equivalent, since that
+        # fragment always writes its result to st.session_state.discipline_fee_lines
+        # before returning.
+        buildup_discs = [l.discipline for l in st.session_state.discipline_fee_lines]
+        buildup_total = sum(l.fee_amount for l in st.session_state.discipline_fee_lines)
 
         def _reconcile_estimates(estimates):
             by_disc = {resourcing.canonical_discipline(e.discipline): e for e in (estimates or [])}
@@ -3521,7 +3610,7 @@ with tabs[8]:
                             source="From discipline fee build-up",
                             confidence="User-set",
                         )
-                        for l in rebuilt
+                        for l in st.session_state.discipline_fee_lines
                     ]
                 else:
                     st.warning("Enter hours and rates in the discipline fee build-up table above first.")
