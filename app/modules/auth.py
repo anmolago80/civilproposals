@@ -314,7 +314,7 @@ def require_login() -> db.User:
         # with unsafe_allow_html=True.
         headline_html = (
             branding.brand_html(logo_size=52, wordmark_size="1.9rem", show_beta=True)
-            + '<div style="margin-top:22px;font-size:2rem;font-weight:800;letter-spacing:-0.02em;color:#0F172A;line-height:1.2;">Turn a tender brief into a first-pass proposal in minutes</div>'
+            + '<div style="margin-top:22px;font-size:2rem;font-weight:800;letter-spacing:-0.02em;color:#0F172A;line-height:1.2;">Turn a tender brief into a draft proposal in minutes</div>'
             + '<div style="margin-top:12px;color:#5A6B7A;font-size:1.02rem;line-height:1.55;max-width:480px;">Compliance matrix, weighted structure, first-pass drafts, and a designed Word export -- built specifically for civil engineering firms.</div>'
         )
         st.markdown(headline_html, unsafe_allow_html=True)
@@ -351,16 +351,20 @@ def require_login() -> db.User:
                 email = st.text_input("Work email", key="signup_email")
                 password = st.text_input("Password", type="password", key="signup_password",
                                           help="At least 8 characters.")
+                confirm_password = st.text_input("Confirm password", type="password", key="signup_confirm_password")
                 st.caption(f"Free trial: {DEFAULT_TRIAL_LIMIT} full proposals, no card required. "
                            f"Then $200/month, cancel anytime.")
                 submitted = st.form_submit_button("Create account", type="primary", use_container_width=True)
             if submitted:
-                try:
-                    user = create_user(email, password, name, firm_name)
-                    log_in(user)
-                    st.rerun()
-                except ValueError as e:
-                    st.error(str(e))
+                if password != confirm_password:
+                    st.error("Passwords don't match -- please re-enter them.")
+                else:
+                    try:
+                        user = create_user(email, password, name, firm_name)
+                        log_in(user)
+                        st.rerun()
+                    except ValueError as e:
+                        st.error(str(e))
 
     st.stop()
 

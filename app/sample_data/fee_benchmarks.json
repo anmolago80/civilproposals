@@ -1,0 +1,157 @@
+{
+  "_readme": "Bundled rule-of-thumb reference table used by modules/fee_estimation_engine.py's estimate_fee_split() -- the fast, offline default path for the Fee Estimate tab's indicative discipline split. Every entry's 'source' and 'confidence' fields are deliberately honest: these are generic, typical multidisciplinary civil-engineering consulting fee-split PATTERNS (not a live lookup, not a named published survey), meant only as an internal sanity-check starting point per the INDICATIVE_NOTE shown alongside them in the app. Each project type's fee_split percentages sum to 100. 'Default' is the required fallback for any project type not otherwise listed here.",
+
+  "Structural Engineering": {
+    "fee_split": {
+      "Structural Design": 45,
+      "Detailing & Drafting": 15,
+      "Construction Administration": 15,
+      "Project Management": 12,
+      "QA/QC & Peer Review": 8,
+      "Geotechnical Input (subconsultant)": 5
+    },
+    "source": "Bundled rule-of-thumb reference table -- typical multidisciplinary consulting practice split, not a live or published benchmark. Verify independently before use.",
+    "confidence": "Low"
+  },
+  "Geotechnical Engineering": {
+    "fee_split": {
+      "Geotechnical Investigation & Design": 50,
+      "Field Investigation Coordination": 15,
+      "Laboratory Testing Coordination": 10,
+      "Project Management": 10,
+      "Reporting & QA/QC": 10,
+      "Construction Monitoring": 5
+    },
+    "source": "Bundled rule-of-thumb reference table -- typical multidisciplinary consulting practice split, not a live or published benchmark. Verify independently before use.",
+    "confidence": "Low"
+  },
+  "Transportation Engineering": {
+    "fee_split": {
+      "Roadway/Highway Design": 35,
+      "Traffic Engineering & Analysis": 15,
+      "Structures (Bridges/Culverts)": 12,
+      "Drainage & Stormwater": 10,
+      "Construction Administration": 10,
+      "Project Management": 10,
+      "Signals & ITS": 8
+    },
+    "source": "Bundled rule-of-thumb reference table -- typical multidisciplinary consulting practice split, not a live or published benchmark. Verify independently before use.",
+    "confidence": "Low"
+  },
+  "Water Resources & Hydraulic Engineering": {
+    "fee_split": {
+      "Hydrology & Hydraulic Modeling": 35,
+      "Water/Wastewater Infrastructure Design": 25,
+      "Construction Administration": 12,
+      "Permitting & Regulatory": 10,
+      "Project Management": 10,
+      "QA/QC": 8
+    },
+    "source": "Bundled rule-of-thumb reference table -- typical multidisciplinary consulting practice split, not a live or published benchmark. Verify independently before use.",
+    "confidence": "Low"
+  },
+  "Environmental Engineering": {
+    "fee_split": {
+      "Environmental Assessment & Permitting": 35,
+      "Site Investigation & Remediation Design": 25,
+      "Monitoring & Reporting": 12,
+      "Regulatory Liaison": 10,
+      "Project Management": 10,
+      "QA/QC": 8
+    },
+    "source": "Bundled rule-of-thumb reference table -- typical multidisciplinary consulting practice split, not a live or published benchmark. Verify independently before use.",
+    "confidence": "Low"
+  },
+  "Construction Engineering & Management": {
+    "fee_split": {
+      "Construction Management & Oversight": 40,
+      "Project Management": 15,
+      "Scheduling & Cost Control": 15,
+      "Quality Assurance & Inspection": 15,
+      "Safety Management": 8,
+      "Commissioning & Closeout": 7
+    },
+    "source": "Bundled rule-of-thumb reference table -- typical multidisciplinary consulting practice split, not a live or published benchmark. Verify independently before use.",
+    "confidence": "Low"
+  },
+  "Coastal & Ocean Engineering": {
+    "fee_split": {
+      "Coastal Design & Modeling": 40,
+      "Construction Administration": 13,
+      "Marine/Geotechnical Investigation": 15,
+      "Permitting & Environmental": 12,
+      "QA/QC": 10,
+      "Project Management": 10
+    },
+    "source": "Bundled rule-of-thumb reference table -- typical multidisciplinary consulting practice split, not a live or published benchmark. Verify independently before use.",
+    "confidence": "Low"
+  },
+  "Surveying & Geomatics Engineering": {
+    "fee_split": {
+      "Field Survey": 40,
+      "Data Processing & Mapping": 25,
+      "GIS & Deliverable Preparation": 15,
+      "QA/QC": 10,
+      "Project Management": 10
+    },
+    "source": "Bundled rule-of-thumb reference table -- typical multidisciplinary consulting practice split, not a live or published benchmark. Verify independently before use.",
+    "confidence": "Low"
+  },
+  "Infrastructure & Urban Engineering": {
+    "fee_split": {
+      "Civil/Site Infrastructure Design": 35,
+      "Construction Administration": 15,
+      "Utilities Coordination": 15,
+      "Drainage & Stormwater": 13,
+      "Urban Planning Input": 12,
+      "Project Management": 10
+    },
+    "source": "Bundled rule-of-thumb reference table -- typical multidisciplinary consulting practice split, not a live or published benchmark. Verify independently before use.",
+    "confidence": "Low"
+  },
+  "Civil Engineering Materials": {
+    "fee_split": {
+      "Materials Testing & Specification": 40,
+      "Laboratory Analysis": 20,
+      "QA/QC & Compliance Reporting": 18,
+      "Field Inspection": 12,
+      "Project Management": 10
+    },
+    "source": "Bundled rule-of-thumb reference table -- typical multidisciplinary consulting practice split, not a live or published benchmark. Verify independently before use.",
+    "confidence": "Low"
+  },
+  "Earthquake Engineering": {
+    "fee_split": {
+      "Seismic Analysis & Design": 45,
+      "Structural Design Integration": 20,
+      "Geotechnical/Site Response": 13,
+      "QA/QC & Peer Review": 12,
+      "Project Management": 10
+    },
+    "source": "Bundled rule-of-thumb reference table -- typical multidisciplinary consulting practice split, not a live or published benchmark. Verify independently before use.",
+    "confidence": "Low"
+  },
+  "Forensic Engineering": {
+    "fee_split": {
+      "Investigation & Failure Analysis": 40,
+      "Reporting & Expert Documentation": 20,
+      "Site Assessment": 15,
+      "Testing & Laboratory Coordination": 15,
+      "Project Management": 10
+    },
+    "source": "Bundled rule-of-thumb reference table -- typical multidisciplinary consulting practice split, not a live or published benchmark. Verify independently before use.",
+    "confidence": "Low"
+  },
+  "Default": {
+    "fee_split": {
+      "Design & Engineering": 45,
+      "Documentation & Drafting": 15,
+      "Construction Administration": 15,
+      "Project Management": 12,
+      "QA/QC": 8,
+      "Coordination & Permitting": 5
+    },
+    "source": "Bundled rule-of-thumb reference table -- generic multidisciplinary consulting split for a project type not otherwise listed. Verify independently before use.",
+    "confidence": "Low"
+  }
+}
