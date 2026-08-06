@@ -442,6 +442,21 @@ def _init_state():
         "_letter_disc_fee_apply_tick": False,
         "_letter_disc_fee_apply_tick_seen": False,
         "_letter_disc_fee_last_applied_editor_sig": None,
+        # Same deferred-apply pattern, extended to the other three fee-editing
+        # tables (scope item / deliverable fee build-up, both pack sizes, and
+        # the discipline fee % split, both pack sizes).
+        "_scope_fee_apply_tick": False,
+        "_scope_fee_apply_tick_seen": False,
+        "_scope_fee_last_applied_editor_sig": None,
+        "_large_scope_fee_apply_tick": False,
+        "_large_scope_fee_apply_tick_seen": False,
+        "_large_scope_fee_last_applied_editor_sig": None,
+        "_pct_fee_apply_tick": False,
+        "_pct_fee_apply_tick_seen": False,
+        "_pct_fee_last_applied_editor_sig": None,
+        "_letter_pct_fee_apply_tick": False,
+        "_letter_pct_fee_apply_tick_seen": False,
+        "_letter_pct_fee_last_applied_editor_sig": None,
         "scope_item_fees": [],
         "fee_seed_total": 0.0,
         # Manually-entered total project fee for the indicative benchmark split
@@ -656,6 +671,27 @@ def _render_resource_rows(kind: str, known_names: list) -> None:
         st.rerun()
 
 
+# The six "Done entering data -- refresh ..." deferred-apply fee tables (see
+# _render_large_discipline_fee_table() and its siblings) each track their own
+# "*_last_applied_editor_sig" -- None means "never applied yet, bypass the
+# tick requirement on the very next render." That bypass can fire once
+# *before* a project is ever loaded (e.g. against the empty/default project
+# these tables briefly render against right after account creation, seeded
+# with nothing but the always-included "Project Management" line), which
+# permanently consumes it with a near-empty baseline. Loading a real project
+# afterwards then makes every one of these tables look permanently "pending"
+# (mismatched against that stale one-row baseline) even though the user
+# hasn't touched anything -- confirmed via a debug probe showing exactly this
+# for the large-scope "Indicative fee split by discipline" table. Resetting
+# all of them here, alongside the loaded values, gives a freshly (re)loaded
+# project a genuine first-load bypass keyed to its own real data.
+_FEE_TABLE_APPLY_STATE_PREFIXES = (
+    "_disc_fee_", "_letter_disc_fee_",
+    "_scope_fee_", "_large_scope_fee_",
+    "_pct_fee_", "_letter_pct_fee_",
+)
+
+
 def _apply_loaded_project(loaded_state: dict, source_label: str) -> None:
     """Shared by both the local 'Open' button and the manual zip uploader --
     overwrites every project_store-managed session_state key with the loaded
@@ -665,6 +701,10 @@ def _apply_loaded_project(loaded_state: dict, source_label: str) -> None:
         st.session_state[k] = v
     st.session_state._project_save_bytes = None
     st.session_state.docx_buffer = None
+    for prefix in _FEE_TABLE_APPLY_STATE_PREFIXES:
+        st.session_state[f"{prefix}last_applied_editor_sig"] = None
+        st.session_state[f"{prefix}apply_tick"] = False
+        st.session_state[f"{prefix}apply_tick_seen"] = False
     st.success(f"Loaded project from {source_label}. Re-enter your AI provider settings in the sidebar to continue.")
     st.rerun()
 
@@ -2946,23 +2986,54 @@ with tabs[8]:
                         "notes": st.column_config.TextColumn("Notes"),
                     },
                 )
-                rebuilt_scope_fees = [
-                    fee_estimation_engine.ScopeItemFee(
-                        item_title=str(r.get("item_title") or "").strip(),
-                        fee_amount=float(r.get("fee_amount") or 0), notes=str(r.get("notes") or ""),
-                    )
+                # Deferred apply -- same pattern as the discipline fee build-up
+                # table's checkbox (see the comment there for the full
+                # rationale). Rebuilding the model and re-adding Project
+                # Management only happens once the user ticks the box, so
+                # reruns while typing stay cheap.
+                _scope_raw_sig = tuple(
+                    (str(r.get("item_title") or ""), r.get("fee_amount"), str(r.get("notes") or ""))
                     for r in edited_fees
-                    if str(r.get("item_title") or "").strip()
-                ]
-                # Project Management is a fixed line item -- if the user deleted it via
-                # the editor's own row-delete control, silently re-add it (mirrors the
-                # discipline fee table's "always re-add Project Management" behaviour).
-                _had_pm = any(f.item_title.strip().lower() == fee_estimation_engine.ALWAYS_INCLUDED_ITEM.lower()
-                              for f in rebuilt_scope_fees)
-                st.session_state.scope_item_fees = fee_estimation_engine.ensure_project_management_present(rebuilt_scope_fees)
-                if not _had_pm:
-                    st.session_state._scope_fee_editor_version += 1
-                    st.info("Project Management is a fixed line item and has been re-added.")
+                )
+                _scope_first_load = st.session_state.get("_scope_fee_last_applied_editor_sig") is None
+                _scope_pending = _scope_raw_sig != st.session_state.get("_scope_fee_last_applied_editor_sig")
+                _scope_tick_val = st.session_state.get("_scope_fee_apply_tick", False)
+                _scope_tick_seen = st.session_state.get("_scope_fee_apply_tick_seen", False)
+                if _scope_pending and _scope_tick_val and _scope_tick_seen:
+                    st.session_state["_scope_fee_apply_tick"] = False
+                scope_apply_now = st.checkbox(
+                    "Done entering data -- refresh total",
+                    key="_scope_fee_apply_tick",
+                )
+                st.session_state["_scope_fee_apply_tick_seen"] = scope_apply_now
+
+                if _scope_first_load or (scope_apply_now and _scope_pending):
+                    rebuilt_scope_fees = [
+                        fee_estimation_engine.ScopeItemFee(
+                            item_title=str(r.get("item_title") or "").strip(),
+                            fee_amount=float(r.get("fee_amount") or 0), notes=str(r.get("notes") or ""),
+                        )
+                        for r in edited_fees
+                        if str(r.get("item_title") or "").strip()
+                    ]
+                    # Project Management is a fixed line item -- if the user deleted it via
+                    # the editor's own row-delete control, silently re-add it (mirrors the
+                    # discipline fee table's "always re-add Project Management" behaviour).
+                    _had_pm = any(f.item_title.strip().lower() == fee_estimation_engine.ALWAYS_INCLUDED_ITEM.lower()
+                                  for f in rebuilt_scope_fees)
+                    st.session_state.scope_item_fees = fee_estimation_engine.ensure_project_management_present(rebuilt_scope_fees)
+                    if not _had_pm:
+                        st.session_state._scope_fee_editor_version += 1
+                        st.info("Project Management is a fixed line item and has been re-added.")
+                    st.session_state._scope_fee_last_applied_editor_sig = _scope_raw_sig
+                else:
+                    st.caption(
+                        "The total below is from the last time you ticked the box above -- "
+                        "tick it again to bring it up to date."
+                        if _scope_pending else
+                        "The total below reflects the ticked data above."
+                    )
+
                 total = sum(f.fee_amount for f in st.session_state.scope_item_fees)
                 st.markdown(f"**Total: ${total:,.0f}**")
                 if any(f.fee_amount <= 0 for f in st.session_state.scope_item_fees):
@@ -3175,153 +3246,193 @@ with tabs[8]:
                 st.info("Click 'Generate default program' for an editable starting grid, sized by how many tasks each scope item lists -- adjust the weeks freely afterwards.")
 
         st.divider()
-        with st.expander("Discipline fee split (%) -- this is what's exported", expanded=False):
-            st.caption(
-                "This Fee % table is what actually goes into the exported pack's Fees section "
-                "(the old scope-item fee table above no longer is). Its discipline list always "
-                "matches the discipline fee build-up table above -- add or remove disciplines "
-                "up there, not here."
-            )
-            st.warning(fee_estimation_engine.INDICATIVE_NOTE)
+        @st.fragment
+        def _render_letter_pct_fee_table():
+            # Wrapped in its own fragment (this used to rerun the entire ~3800-line
+            # script on every keystroke, with no caching at all on the Excel/chart
+            # regen below -- the worst case of the edit-commit race across all the
+            # fee tables). See _render_large_discipline_fee_table() for the general
+            # rationale.
+            with st.expander("Discipline fee split (%) -- this is what's exported", expanded=False):
+                st.caption(
+                    "This Fee % table is what actually goes into the exported pack's Fees section "
+                    "(the old scope-item fee table above no longer is). Its discipline list always "
+                    "matches the discipline fee build-up table above -- add or remove disciplines "
+                    "up there, not here."
+                )
+                st.warning(fee_estimation_engine.INDICATIVE_NOTE)
 
-            letter_buildup_discs = [l.discipline for l in st.session_state.discipline_fee_lines]
-            letter_buildup_total = sum(l.fee_amount for l in st.session_state.discipline_fee_lines)
+                letter_buildup_discs = [l.discipline for l in st.session_state.discipline_fee_lines]
+                letter_buildup_total = sum(l.fee_amount for l in st.session_state.discipline_fee_lines)
 
-            # Prepopulate the total from the discipline fee build-up the first time
-            # this is used (0.0 = "not yet set") -- after that it's an independent
-            # figure the user can edit freely, even if the build-up total changes
-            # later, rather than staying permanently locked to it.
-            if not st.session_state.letter_fee_total_override and letter_buildup_total:
-                st.session_state.letter_fee_total_override = letter_buildup_total
+                # Prepopulate the total from the discipline fee build-up the first time
+                # this is used (0.0 = "not yet set") -- after that it's an independent
+                # figure the user can edit freely, even if the build-up total changes
+                # later, rather than staying permanently locked to it.
+                if not st.session_state.letter_fee_total_override and letter_buildup_total:
+                    st.session_state.letter_fee_total_override = letter_buildup_total
 
-            st.number_input(
-                "Total project fee ($, excl. GST) -- used to convert Fee % into a $ figure below",
-                min_value=0.0, step=1000.0, key="letter_fee_total_override",
-                help="Starts prepopulated from the discipline fee build-up total above, then "
-                     "stays independently editable -- change it here to use a different total "
-                     "for this % split's $ column, Excel export, and chart only. Doesn't change "
-                     "the build-up table itself.",
-            )
-            letter_fee_total = st.session_state.letter_fee_total_override
+                st.number_input(
+                    "Total project fee ($, excl. GST) -- used to convert Fee % into a $ figure below",
+                    min_value=0.0, step=1000.0, key="letter_fee_total_override",
+                    help="Starts prepopulated from the discipline fee build-up total above, then "
+                         "stays independently editable -- change it here to use a different total "
+                         "for this % split's $ column, Excel export, and chart only. Doesn't change "
+                         "the build-up table itself.",
+                )
+                letter_fee_total = st.session_state.letter_fee_total_override
 
-            def _letter_reconcile_estimates(estimates):
-                by_disc = {resourcing.canonical_discipline(e.discipline): e for e in (estimates or [])}
-                reconciled = []
-                for disc in letter_buildup_discs:
-                    key = resourcing.canonical_discipline(disc)
-                    existing = by_disc.get(key)
-                    if existing is not None:
-                        reconciled.append(fee_estimation_engine.DisciplineFeeEstimate(
-                            discipline=disc, fee_percentage=existing.fee_percentage,
-                            source=existing.source, confidence=existing.confidence,
-                        ))
-                    else:
-                        reconciled.append(fee_estimation_engine.DisciplineFeeEstimate(
-                            discipline=disc, fee_percentage=0.0, source="", confidence="",
-                        ))
-                return reconciled
+                def _letter_reconcile_estimates(estimates):
+                    by_disc = {resourcing.canonical_discipline(e.discipline): e for e in (estimates or [])}
+                    reconciled = []
+                    for disc in letter_buildup_discs:
+                        key = resourcing.canonical_discipline(disc)
+                        existing = by_disc.get(key)
+                        if existing is not None:
+                            reconciled.append(fee_estimation_engine.DisciplineFeeEstimate(
+                                discipline=disc, fee_percentage=existing.fee_percentage,
+                                source=existing.source, confidence=existing.confidence,
+                            ))
+                        else:
+                            reconciled.append(fee_estimation_engine.DisciplineFeeEstimate(
+                                discipline=disc, fee_percentage=0.0, source="", confidence="",
+                            ))
+                    return reconciled
 
-            bcol1, bcol2, bcol3 = st.columns(3)
-            with bcol1:
-                if st.button("Reset % from discipline fee build-up", key="letter_reset_from_buildup_btn", type="primary"):
-                    if letter_buildup_total > 0:
-                        st.session_state.fee_estimates = [
-                            fee_estimation_engine.DisciplineFeeEstimate(
-                                discipline=l.discipline,
-                                fee_percentage=round(l.fee_amount / letter_buildup_total * 100, 1),
-                                source="From discipline fee build-up",
-                                confidence="User-set",
+                bcol1, bcol2, bcol3 = st.columns(3)
+                with bcol1:
+                    if st.button("Reset % from discipline fee build-up", key="letter_reset_from_buildup_btn", type="primary"):
+                        if letter_buildup_total > 0:
+                            st.session_state.fee_estimates = [
+                                fee_estimation_engine.DisciplineFeeEstimate(
+                                    discipline=l.discipline,
+                                    fee_percentage=round(l.fee_amount / letter_buildup_total * 100, 1),
+                                    source="From discipline fee build-up",
+                                    confidence="User-set",
+                                )
+                                for l in st.session_state.discipline_fee_lines
+                            ]
+                        else:
+                            st.warning("Enter hours and rates in the discipline fee build-up table above first.")
+                with bcol2:
+                    if st.button("Estimate from bundled benchmarks", key="letter_benchmark_btn"):
+                        fee_cap = st.session_state.analysis.fee_cap if st.session_state.analysis else None
+                        estimates = fee_estimation_engine.estimate_fee_split(st.session_state.project_type, fee_cap)
+                        st.session_state.fee_estimates = _letter_reconcile_estimates(estimates)
+                with bcol3:
+                    refresh_ready = bool(st.session_state.ai_config.get("api_key"))
+                    if st.button("Refresh via AI knowledge (not a live web fetch)", disabled=not refresh_ready, key="letter_refresh_btn"):
+                        fee_cap = st.session_state.analysis.fee_cap if st.session_state.analysis else None
+                        with st.spinner("Asking the AI provider for its knowledge of published benchmarks..."):
+                            estimates = fee_estimation_engine.refresh_estimate_from_web(
+                                st.session_state.project_type, letter_buildup_discs, fee_cap, st.session_state.ai_config,
                             )
-                            for l in st.session_state.discipline_fee_lines
-                        ]
-                    else:
-                        st.warning("Enter hours and rates in the discipline fee build-up table above first.")
-            with bcol2:
-                if st.button("Estimate from bundled benchmarks", key="letter_benchmark_btn"):
-                    fee_cap = st.session_state.analysis.fee_cap if st.session_state.analysis else None
-                    estimates = fee_estimation_engine.estimate_fee_split(st.session_state.project_type, fee_cap)
-                    st.session_state.fee_estimates = _letter_reconcile_estimates(estimates)
-            with bcol3:
-                refresh_ready = bool(st.session_state.ai_config.get("api_key"))
-                if st.button("Refresh via AI knowledge (not a live web fetch)", disabled=not refresh_ready, key="letter_refresh_btn"):
-                    fee_cap = st.session_state.analysis.fee_cap if st.session_state.analysis else None
-                    with st.spinner("Asking the AI provider for its knowledge of published benchmarks..."):
-                        estimates = fee_estimation_engine.refresh_estimate_from_web(
-                            st.session_state.project_type, letter_buildup_discs, fee_cap, st.session_state.ai_config,
+                        st.session_state.fee_estimates = _letter_reconcile_estimates(estimates)
+
+                st.session_state.fee_estimates = _letter_reconcile_estimates(st.session_state.fee_estimates)
+
+                letter_fee_pct_rows = [
+                    {
+                        "discipline": e.discipline,
+                        "fee_percentage": e.fee_percentage,
+                        "indicative_amount": (f"${letter_fee_total * e.fee_percentage / 100:,.0f}"
+                                               if letter_fee_total else "-"),
+                        "confidence": e.confidence,
+                        "source": e.source,
+                    }
+                    for e in st.session_state.fee_estimates
+                ]
+                letter_edited_pct = st.data_editor(
+                    letter_fee_pct_rows, key="letter_fee_pct_editor", use_container_width=True, hide_index=True,
+                    column_config={
+                        "discipline": st.column_config.TextColumn("Discipline", disabled=True),
+                        "fee_percentage": st.column_config.NumberColumn("Fee %", min_value=0.0, max_value=100.0, step=0.5, format="%.1f%%"),
+                        "indicative_amount": st.column_config.TextColumn(
+                            "Indicative $", disabled=True,
+                            help="Fee % x the total project fee entered above -- recalculated automatically.",
+                        ),
+                        "confidence": st.column_config.TextColumn("Confidence"),
+                        "source": st.column_config.TextColumn("Source"),
+                    },
+                )
+
+                # Deferred apply -- same pattern as the discipline fee build-up
+                # table's checkbox (see the comment there for the full rationale).
+                # The three buttons above are unaffected -- they're deliberate,
+                # single-click actions, not rapid per-keystroke edits, so they
+                # still take effect immediately.
+                letter_pct_raw_sig = tuple(
+                    (r.get("discipline"), r.get("fee_percentage"), r.get("confidence"), r.get("source"))
+                    for r in letter_edited_pct
+                )
+                letter_pct_first_load = st.session_state.get("_letter_pct_fee_last_applied_editor_sig") is None
+                letter_pct_pending = letter_pct_raw_sig != st.session_state.get("_letter_pct_fee_last_applied_editor_sig")
+                letter_pct_tick_val = st.session_state.get("_letter_pct_fee_apply_tick", False)
+                letter_pct_tick_seen = st.session_state.get("_letter_pct_fee_apply_tick_seen", False)
+                if letter_pct_pending and letter_pct_tick_val and letter_pct_tick_seen:
+                    st.session_state["_letter_pct_fee_apply_tick"] = False
+                letter_pct_apply_now = st.checkbox(
+                    "Done entering data -- refresh totals & chart",
+                    key="_letter_pct_fee_apply_tick",
+                )
+                st.session_state["_letter_pct_fee_apply_tick_seen"] = letter_pct_apply_now
+
+                if letter_pct_first_load or (letter_pct_apply_now and letter_pct_pending):
+                    st.session_state.fee_estimates = [
+                        fee_estimation_engine.DisciplineFeeEstimate(
+                            discipline=r["discipline"], fee_percentage=float(r["fee_percentage"] or 0),
+                            confidence=r["confidence"] or "", source=r["source"] or "",
                         )
-                    st.session_state.fee_estimates = _letter_reconcile_estimates(estimates)
+                        for r in letter_edited_pct
+                    ]
+                    st.session_state._letter_pct_fee_last_applied_editor_sig = letter_pct_raw_sig
+                else:
+                    st.caption(
+                        "Totals, the chart, and the Excel export below are from the last time "
+                        "you ticked the box above -- tick it again to bring them up to date."
+                        if letter_pct_pending else
+                        "Totals, the chart, and the Excel export below reflect the ticked data above."
+                    )
 
-            st.session_state.fee_estimates = _letter_reconcile_estimates(st.session_state.fee_estimates)
+                letter_pct_total = sum(e.fee_percentage for e in st.session_state.fee_estimates)
+                st.caption(f"Total: {letter_pct_total:.1f}% (doesn't need to sum to exactly 100%).")
 
-            letter_fee_pct_rows = [
-                {
-                    "discipline": e.discipline,
-                    "fee_percentage": e.fee_percentage,
-                    "indicative_amount": (f"${letter_fee_total * e.fee_percentage / 100:,.0f}"
-                                           if letter_fee_total else "-"),
-                    "confidence": e.confidence,
-                    "source": e.source,
+                _letter_pct_indicative_amounts = {
+                    e.discipline: (letter_fee_total * e.fee_percentage / 100 if letter_fee_total else None)
+                    for e in st.session_state.fee_estimates
                 }
-                for e in st.session_state.fee_estimates
-            ]
-            letter_edited_pct = st.data_editor(
-                letter_fee_pct_rows, key="letter_fee_pct_editor", use_container_width=True, hide_index=True,
-                column_config={
-                    "discipline": st.column_config.TextColumn("Discipline", disabled=True),
-                    "fee_percentage": st.column_config.NumberColumn("Fee %", min_value=0.0, max_value=100.0, step=0.5, format="%.1f%%"),
-                    "indicative_amount": st.column_config.TextColumn(
-                        "Indicative $", disabled=True,
-                        help="Fee % x the total project fee entered above -- recalculated automatically.",
-                    ),
-                    "confidence": st.column_config.TextColumn("Confidence"),
-                    "source": st.column_config.TextColumn("Source"),
-                },
-            )
-            st.session_state.fee_estimates = [
-                fee_estimation_engine.DisciplineFeeEstimate(
-                    discipline=r["discipline"], fee_percentage=float(r["fee_percentage"] or 0),
-                    confidence=r["confidence"] or "", source=r["source"] or "",
+                letter_pct_xlsx = fee_estimation_engine.fee_estimates_to_excel(
+                    st.session_state.fee_estimates,
+                    indicative_amounts=_letter_pct_indicative_amounts,
+                    theme_name=st.session_state.proposal_theme,
                 )
-                for r in letter_edited_pct
-            ]
+                if letter_pct_xlsx:
+                    st.download_button(
+                        "Export to Excel", data=letter_pct_xlsx, key="letter_download_pct_fee_xlsx",
+                        file_name="indicative_fee_split.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+                else:
+                    st.caption("Excel export needs the 'openpyxl' package -- run `pip install openpyxl` and reload.")
 
-            letter_pct_total = sum(e.fee_percentage for e in st.session_state.fee_estimates)
-            st.caption(f"Total: {letter_pct_total:.1f}% (doesn't need to sum to exactly 100%).")
-
-            _letter_pct_indicative_amounts = {
-                e.discipline: (letter_fee_total * e.fee_percentage / 100 if letter_fee_total else None)
-                for e in st.session_state.fee_estimates
-            }
-            letter_pct_xlsx = fee_estimation_engine.fee_estimates_to_excel(
-                st.session_state.fee_estimates,
-                indicative_amounts=_letter_pct_indicative_amounts,
-                theme_name=st.session_state.proposal_theme,
-            )
-            if letter_pct_xlsx:
-                st.download_button(
-                    "Export to Excel", data=letter_pct_xlsx, key="letter_download_pct_fee_xlsx",
-                    file_name="indicative_fee_split.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                # Chart the $ split once a total is available (matches the $ column and
+                # Excel export); otherwise chart the raw percentages.
+                if letter_fee_total > 0:
+                    letter_pie_items = [(e.discipline, _letter_pct_indicative_amounts.get(e.discipline) or 0) for e in st.session_state.fee_estimates]
+                    letter_pie_fmt = lambda v: f"${v:,.0f}"
+                    letter_pie_legend_value = "raw"
+                else:
+                    letter_pie_items = [(e.discipline, e.fee_percentage) for e in st.session_state.fee_estimates]
+                    letter_pie_fmt = lambda v: f"{v:.0f}%"
+                    letter_pie_legend_value = "share"
+                letter_pie_png = graphics_engine.generate_fee_distribution_pie(
+                    letter_pie_items, "Discipline fee split", value_fmt=letter_pie_fmt,
+                    legend_value=letter_pie_legend_value,
                 )
-            else:
-                st.caption("Excel export needs the 'openpyxl' package -- run `pip install openpyxl` and reload.")
+                if letter_pie_png:
+                    st.image(letter_pie_png, use_container_width=True)
 
-            # Chart the $ split once a total is available (matches the $ column and
-            # Excel export); otherwise chart the raw percentages.
-            if letter_fee_total > 0:
-                letter_pie_items = [(e.discipline, _letter_pct_indicative_amounts.get(e.discipline) or 0) for e in st.session_state.fee_estimates]
-                letter_pie_fmt = lambda v: f"${v:,.0f}"
-                letter_pie_legend_value = "raw"
-            else:
-                letter_pie_items = [(e.discipline, e.fee_percentage) for e in st.session_state.fee_estimates]
-                letter_pie_fmt = lambda v: f"{v:.0f}%"
-                letter_pie_legend_value = "share"
-            letter_pie_png = graphics_engine.generate_fee_distribution_pie(
-                letter_pie_items, "Discipline fee split", value_fmt=letter_pie_fmt,
-                legend_value=letter_pie_legend_value,
-            )
-            if letter_pie_png:
-                st.image(letter_pie_png, use_container_width=True)
+        _render_letter_pct_fee_table()
     else:
         @st.fragment
         def _render_large_discipline_fee_table():
@@ -3593,24 +3704,53 @@ with tabs[8]:
                         "notes": st.column_config.TextColumn("Notes"),
                     },
                 )
-                _large_rebuilt_scope_fees = [
-                    fee_estimation_engine.ScopeItemFee(
-                        item_title=str(r.get("item_title") or "").strip(),
-                        fee_amount=float(r.get("fee_amount") or 0), notes=str(r.get("notes") or ""),
-                    )
+                # Deferred apply -- same pattern as the discipline fee build-up
+                # table's checkbox (see the comment there for the full
+                # rationale).
+                _large_scope_raw_sig = tuple(
+                    (str(r.get("item_title") or ""), r.get("fee_amount"), str(r.get("notes") or ""))
                     for r in _large_edited_fees
-                    if str(r.get("item_title") or "").strip()
-                ]
-                # Project Management is a fixed line item -- if the user deleted it via
-                # the editor's own row-delete control, silently re-add it.
-                _large_had_pm = any(f.item_title.strip().lower() == fee_estimation_engine.ALWAYS_INCLUDED_ITEM.lower()
-                                    for f in _large_rebuilt_scope_fees)
-                st.session_state.scope_item_fees = fee_estimation_engine.ensure_project_management_present(
-                    _large_rebuilt_scope_fees
                 )
-                if not _large_had_pm:
-                    st.session_state._large_scope_fee_editor_version += 1
-                    st.info("Project Management is a fixed line item and has been re-added.")
+                _large_scope_first_load = st.session_state.get("_large_scope_fee_last_applied_editor_sig") is None
+                _large_scope_pending = _large_scope_raw_sig != st.session_state.get("_large_scope_fee_last_applied_editor_sig")
+                _large_scope_tick_val = st.session_state.get("_large_scope_fee_apply_tick", False)
+                _large_scope_tick_seen = st.session_state.get("_large_scope_fee_apply_tick_seen", False)
+                if _large_scope_pending and _large_scope_tick_val and _large_scope_tick_seen:
+                    st.session_state["_large_scope_fee_apply_tick"] = False
+                large_scope_apply_now = st.checkbox(
+                    "Done entering data -- refresh total",
+                    key="_large_scope_fee_apply_tick",
+                )
+                st.session_state["_large_scope_fee_apply_tick_seen"] = large_scope_apply_now
+
+                if _large_scope_first_load or (large_scope_apply_now and _large_scope_pending):
+                    _large_rebuilt_scope_fees = [
+                        fee_estimation_engine.ScopeItemFee(
+                            item_title=str(r.get("item_title") or "").strip(),
+                            fee_amount=float(r.get("fee_amount") or 0), notes=str(r.get("notes") or ""),
+                        )
+                        for r in _large_edited_fees
+                        if str(r.get("item_title") or "").strip()
+                    ]
+                    # Project Management is a fixed line item -- if the user deleted it via
+                    # the editor's own row-delete control, silently re-add it.
+                    _large_had_pm = any(f.item_title.strip().lower() == fee_estimation_engine.ALWAYS_INCLUDED_ITEM.lower()
+                                        for f in _large_rebuilt_scope_fees)
+                    st.session_state.scope_item_fees = fee_estimation_engine.ensure_project_management_present(
+                        _large_rebuilt_scope_fees
+                    )
+                    if not _large_had_pm:
+                        st.session_state._large_scope_fee_editor_version += 1
+                        st.info("Project Management is a fixed line item and has been re-added.")
+                    st.session_state._large_scope_fee_last_applied_editor_sig = _large_scope_raw_sig
+                else:
+                    st.caption(
+                        "The total below is from the last time you ticked the box above -- "
+                        "tick it again to bring it up to date."
+                        if _large_scope_pending else
+                        "The total below reflects the ticked data above."
+                    )
+
                 _large_scope_fee_total = sum(f.fee_amount for f in st.session_state.scope_item_fees)
                 st.markdown(f"**Total: ${_large_scope_fee_total:,.0f}**")
 
@@ -3655,160 +3795,199 @@ with tabs[8]:
             st.info("Click 'Generate default program' for an editable starting grid, sized by how many tasks each scope item lists -- adjust the weeks freely afterwards.")
 
         st.divider()
-        st.markdown("#### Indicative fee split by discipline")
-        st.caption(
-            "Its discipline list always matches the discipline fee build-up table above -- add "
-            "or remove disciplines up there, not here. Fee % is directly editable below; reset "
-            "it from the build-up's own $ split, or seed it from the benchmark/AI buttons "
-            "(remapped onto the build-up's discipline list either way)."
-        )
-        st.warning(fee_estimation_engine.INDICATIVE_NOTE)
+        @st.fragment
+        def _render_large_pct_fee_table():
+            # Wrapped in its own fragment -- this used to rerun the entire
+            # ~3900-line script on every keystroke, with no caching at all on
+            # the Excel/chart regen below. See _render_large_discipline_fee_table()
+            # for the general rationale.
+            st.markdown("#### Indicative fee split by discipline")
+            st.caption(
+                "Its discipline list always matches the discipline fee build-up table above -- add "
+                "or remove disciplines up there, not here. Fee % is directly editable below; reset "
+                "it from the build-up's own $ split, or seed it from the benchmark/AI buttons "
+                "(remapped onto the build-up's discipline list either way)."
+            )
+            st.warning(fee_estimation_engine.INDICATIVE_NOTE)
 
-        st.number_input(
-            "Total project fee ($, excl. GST) -- optional",
-            min_value=0.0, step=1000.0, key="fee_estimate_manual_total",
-            help="Enter your own total to split by the discipline percentages below. Overrides "
-                 "both the brief's stated fee cap (if any) and the discipline fee build-up "
-                 "total above for this split only -- it doesn't change anything else in the tool.",
-        )
-        manual_total = st.session_state.fee_estimate_manual_total
-        # Read from session_state rather than the discipline-table block's own
-        # `rebuilt` local (that block is now a self-contained @st.fragment, see
-        # below, so its locals aren't in scope here) -- equivalent, since that
-        # fragment always writes its result to st.session_state.discipline_fee_lines
-        # before returning.
-        buildup_discs = [l.discipline for l in st.session_state.discipline_fee_lines]
-        buildup_total = sum(l.fee_amount for l in st.session_state.discipline_fee_lines)
+            st.number_input(
+                "Total project fee ($, excl. GST) -- optional",
+                min_value=0.0, step=1000.0, key="fee_estimate_manual_total",
+                help="Enter your own total to split by the discipline percentages below. Overrides "
+                     "both the brief's stated fee cap (if any) and the discipline fee build-up "
+                     "total above for this split only -- it doesn't change anything else in the tool.",
+            )
+            manual_total = st.session_state.fee_estimate_manual_total
+            # Read from session_state rather than the discipline-table block's own
+            # `rebuilt` local (that block is a separate, self-contained
+            # @st.fragment, so its locals aren't in scope here) -- equivalent,
+            # since that fragment always writes its result to
+            # st.session_state.discipline_fee_lines before returning.
+            buildup_discs = [l.discipline for l in st.session_state.discipline_fee_lines]
+            buildup_total = sum(l.fee_amount for l in st.session_state.discipline_fee_lines)
 
-        def _reconcile_estimates(estimates):
-            by_disc = {resourcing.canonical_discipline(e.discipline): e for e in (estimates or [])}
-            reconciled = []
-            for disc in buildup_discs:
-                key = resourcing.canonical_discipline(disc)
-                existing = by_disc.get(key)
-                if existing is not None:
-                    reconciled.append(fee_estimation_engine.DisciplineFeeEstimate(
-                        discipline=disc, fee_percentage=existing.fee_percentage,
-                        source=existing.source, confidence=existing.confidence,
-                    ))
-                else:
-                    reconciled.append(fee_estimation_engine.DisciplineFeeEstimate(
-                        discipline=disc, fee_percentage=0.0, source="", confidence="",
-                    ))
-            return reconciled
+            def _reconcile_estimates(estimates):
+                by_disc = {resourcing.canonical_discipline(e.discipline): e for e in (estimates or [])}
+                reconciled = []
+                for disc in buildup_discs:
+                    key = resourcing.canonical_discipline(disc)
+                    existing = by_disc.get(key)
+                    if existing is not None:
+                        reconciled.append(fee_estimation_engine.DisciplineFeeEstimate(
+                            discipline=disc, fee_percentage=existing.fee_percentage,
+                            source=existing.source, confidence=existing.confidence,
+                        ))
+                    else:
+                        reconciled.append(fee_estimation_engine.DisciplineFeeEstimate(
+                            discipline=disc, fee_percentage=0.0, source="", confidence="",
+                        ))
+                return reconciled
 
-        bcol1, bcol2, bcol3 = st.columns(3)
-        with bcol1:
-            if st.button("Reset % from discipline fee build-up", key="reset_from_buildup_btn", type="primary"):
-                if buildup_total > 0:
-                    st.session_state.fee_estimates = [
-                        fee_estimation_engine.DisciplineFeeEstimate(
-                            discipline=l.discipline,
-                            fee_percentage=round(l.fee_amount / buildup_total * 100, 1),
-                            source="From discipline fee build-up",
-                            confidence="User-set",
+            bcol1, bcol2, bcol3 = st.columns(3)
+            with bcol1:
+                if st.button("Reset % from discipline fee build-up", key="reset_from_buildup_btn", type="primary"):
+                    if buildup_total > 0:
+                        st.session_state.fee_estimates = [
+                            fee_estimation_engine.DisciplineFeeEstimate(
+                                discipline=l.discipline,
+                                fee_percentage=round(l.fee_amount / buildup_total * 100, 1),
+                                source="From discipline fee build-up",
+                                confidence="User-set",
+                            )
+                            for l in st.session_state.discipline_fee_lines
+                        ]
+                    else:
+                        st.warning("Enter hours and rates in the discipline fee build-up table above first.")
+            with bcol2:
+                if st.button("Estimate from bundled benchmarks", key="benchmark_btn"):
+                    fee_cap = (str(manual_total) if manual_total > 0
+                               else (st.session_state.analysis.fee_cap if st.session_state.analysis else None))
+                    estimates = fee_estimation_engine.estimate_fee_split(st.session_state.project_type, fee_cap)
+                    st.session_state.fee_estimates = _reconcile_estimates(estimates)
+            with bcol3:
+                refresh_ready = bool(st.session_state.ai_config.get("api_key"))
+                if st.button("Refresh via AI knowledge (not a live web fetch)", disabled=not refresh_ready, key="refresh_btn"):
+                    fee_cap = (str(manual_total) if manual_total > 0
+                               else (st.session_state.analysis.fee_cap if st.session_state.analysis else None))
+                    with st.spinner("Asking the AI provider for its knowledge of published benchmarks..."):
+                        estimates = fee_estimation_engine.refresh_estimate_from_web(
+                            st.session_state.project_type, buildup_discs, fee_cap, st.session_state.ai_config,
                         )
-                        for l in st.session_state.discipline_fee_lines
-                    ]
-                else:
-                    st.warning("Enter hours and rates in the discipline fee build-up table above first.")
-        with bcol2:
-            if st.button("Estimate from bundled benchmarks", key="benchmark_btn"):
-                fee_cap = (str(manual_total) if manual_total > 0
-                           else (st.session_state.analysis.fee_cap if st.session_state.analysis else None))
-                estimates = fee_estimation_engine.estimate_fee_split(st.session_state.project_type, fee_cap)
-                st.session_state.fee_estimates = _reconcile_estimates(estimates)
-        with bcol3:
-            refresh_ready = bool(st.session_state.ai_config.get("api_key"))
-            if st.button("Refresh via AI knowledge (not a live web fetch)", disabled=not refresh_ready, key="refresh_btn"):
-                fee_cap = (str(manual_total) if manual_total > 0
-                           else (st.session_state.analysis.fee_cap if st.session_state.analysis else None))
-                with st.spinner("Asking the AI provider for its knowledge of published benchmarks..."):
-                    estimates = fee_estimation_engine.refresh_estimate_from_web(
-                        st.session_state.project_type, buildup_discs, fee_cap, st.session_state.ai_config,
+                    st.session_state.fee_estimates = _reconcile_estimates(estimates)
+
+            st.session_state.fee_estimates = _reconcile_estimates(st.session_state.fee_estimates)
+
+            def _indicative_amount(pct):
+                if manual_total > 0:
+                    return manual_total * pct / 100
+                if buildup_total > 0:
+                    return buildup_total * pct / 100
+                return None
+
+            fee_pct_rows = [
+                {
+                    "discipline": e.discipline,
+                    "fee_percentage": e.fee_percentage,
+                    "indicative_amount": (f"${_indicative_amount(e.fee_percentage):,.0f}"
+                                           if _indicative_amount(e.fee_percentage) else "-"),
+                    "confidence": e.confidence,
+                    "source": e.source,
+                }
+                for e in st.session_state.fee_estimates
+            ]
+            edited_pct = st.data_editor(
+                fee_pct_rows, key="fee_pct_editor", use_container_width=True, hide_index=True,
+                column_config={
+                    "discipline": st.column_config.TextColumn("Discipline", disabled=True),
+                    "fee_percentage": st.column_config.NumberColumn("Fee %", min_value=0.0, max_value=100.0, step=0.5, format="%.1f%%"),
+                    "indicative_amount": st.column_config.TextColumn(
+                        "Indicative $", disabled=True,
+                        help="Fee % x the manual total above (if entered), else x the discipline fee build-up total.",
+                    ),
+                    "confidence": st.column_config.TextColumn("Confidence"),
+                    "source": st.column_config.TextColumn("Source"),
+                },
+            )
+
+            # Deferred apply -- same pattern as the discipline fee build-up
+            # table's checkbox (see the comment there for the full rationale).
+            # The three buttons above are unaffected -- they're deliberate,
+            # single-click actions, not rapid per-keystroke edits, so they
+            # still take effect immediately.
+            pct_raw_sig = tuple(
+                (r.get("discipline"), r.get("fee_percentage"), r.get("confidence"), r.get("source"))
+                for r in edited_pct
+            )
+            pct_first_load = st.session_state.get("_pct_fee_last_applied_editor_sig") is None
+            pct_pending = pct_raw_sig != st.session_state.get("_pct_fee_last_applied_editor_sig")
+            pct_tick_val = st.session_state.get("_pct_fee_apply_tick", False)
+            pct_tick_seen = st.session_state.get("_pct_fee_apply_tick_seen", False)
+            if pct_pending and pct_tick_val and pct_tick_seen:
+                st.session_state["_pct_fee_apply_tick"] = False
+            pct_apply_now = st.checkbox(
+                "Done entering data -- refresh totals & chart",
+                key="_pct_fee_apply_tick",
+            )
+            st.session_state["_pct_fee_apply_tick_seen"] = pct_apply_now
+
+            if pct_first_load or (pct_apply_now and pct_pending):
+                st.session_state.fee_estimates = [
+                    fee_estimation_engine.DisciplineFeeEstimate(
+                        discipline=r["discipline"], fee_percentage=float(r["fee_percentage"] or 0),
+                        confidence=r["confidence"] or "", source=r["source"] or "",
                     )
-                st.session_state.fee_estimates = _reconcile_estimates(estimates)
+                    for r in edited_pct
+                ]
+                st.session_state._pct_fee_last_applied_editor_sig = pct_raw_sig
+            else:
+                st.caption(
+                    "Totals, the chart, and the Excel export below are from the last time "
+                    "you ticked the box above -- tick it again to bring them up to date."
+                    if pct_pending else
+                    "Totals, the chart, and the Excel export below reflect the ticked data above."
+                )
 
-        st.session_state.fee_estimates = _reconcile_estimates(st.session_state.fee_estimates)
+            pct_total = sum(e.fee_percentage for e in st.session_state.fee_estimates)
+            st.caption(f"Total: {pct_total:.1f}% (doesn't need to sum to exactly 100%).")
 
-        def _indicative_amount(pct):
-            if manual_total > 0:
-                return manual_total * pct / 100
-            if buildup_total > 0:
-                return buildup_total * pct / 100
-            return None
-
-        fee_pct_rows = [
-            {
-                "discipline": e.discipline,
-                "fee_percentage": e.fee_percentage,
-                "indicative_amount": (f"${_indicative_amount(e.fee_percentage):,.0f}"
-                                       if _indicative_amount(e.fee_percentage) else "-"),
-                "confidence": e.confidence,
-                "source": e.source,
-            }
-            for e in st.session_state.fee_estimates
-        ]
-        edited_pct = st.data_editor(
-            fee_pct_rows, key="fee_pct_editor", use_container_width=True, hide_index=True,
-            column_config={
-                "discipline": st.column_config.TextColumn("Discipline", disabled=True),
-                "fee_percentage": st.column_config.NumberColumn("Fee %", min_value=0.0, max_value=100.0, step=0.5, format="%.1f%%"),
-                "indicative_amount": st.column_config.TextColumn(
-                    "Indicative $", disabled=True,
-                    help="Fee % x the manual total above (if entered), else x the discipline fee build-up total.",
-                ),
-                "confidence": st.column_config.TextColumn("Confidence"),
-                "source": st.column_config.TextColumn("Source"),
-            },
-        )
-        st.session_state.fee_estimates = [
-            fee_estimation_engine.DisciplineFeeEstimate(
-                discipline=r["discipline"], fee_percentage=float(r["fee_percentage"] or 0),
-                confidence=r["confidence"] or "", source=r["source"] or "",
+            _fee_pct_indicative_amounts = {e.discipline: _indicative_amount(e.fee_percentage) for e in st.session_state.fee_estimates}
+            pct_xlsx = fee_estimation_engine.fee_estimates_to_excel(
+                st.session_state.fee_estimates,
+                indicative_amounts=_fee_pct_indicative_amounts,
+                theme_name=st.session_state.proposal_theme,
             )
-            for r in edited_pct
-        ]
+            if pct_xlsx:
+                st.download_button(
+                    "Export to Excel", data=pct_xlsx, key="download_pct_fee_xlsx",
+                    file_name="indicative_fee_split.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            else:
+                st.caption("Excel export needs the 'openpyxl' package -- run `pip install openpyxl` and reload.")
 
-        pct_total = sum(e.fee_percentage for e in st.session_state.fee_estimates)
-        st.caption(f"Total: {pct_total:.1f}% (doesn't need to sum to exactly 100%).")
-
-        _fee_pct_indicative_amounts = {e.discipline: _indicative_amount(e.fee_percentage) for e in st.session_state.fee_estimates}
-        pct_xlsx = fee_estimation_engine.fee_estimates_to_excel(
-            st.session_state.fee_estimates,
-            indicative_amounts=_fee_pct_indicative_amounts,
-            theme_name=st.session_state.proposal_theme,
-        )
-        if pct_xlsx:
-            st.download_button(
-                "Export to Excel", data=pct_xlsx, key="download_pct_fee_xlsx",
-                file_name="indicative_fee_split.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            # Chart the $ split once a total (manual or build-up) is available (matches
+            # the other pie's units); otherwise chart the raw percentages, since that's
+            # the only figure available with no total to anchor to.
+            if any(_fee_pct_indicative_amounts.values()):
+                pct_pie_items = [(e.discipline, _fee_pct_indicative_amounts.get(e.discipline) or 0) for e in st.session_state.fee_estimates]
+                pct_pie_fmt = lambda v: f"${v:,.0f}"
+                pct_pie_legend_value = "raw"
+            else:
+                pct_pie_items = [(e.discipline, e.fee_percentage) for e in st.session_state.fee_estimates]
+                pct_pie_fmt = lambda v: f"{v:.0f}%"
+                # "share" (not "raw"): if disciplines beyond the top 6 get folded into
+                # "Other", the chart's total shrinks below 100 -- showing each slice's
+                # recomputed share keeps the legend number matching what's actually
+                # drawn, instead of the un-renormalised percentage.
+                pct_pie_legend_value = "share"
+            pct_pie_png = graphics_engine.generate_fee_distribution_pie(
+                pct_pie_items, "Indicative fee split by discipline", value_fmt=pct_pie_fmt,
+                legend_value=pct_pie_legend_value,
             )
-        else:
-            st.caption("Excel export needs the 'openpyxl' package -- run `pip install openpyxl` and reload.")
+            if pct_pie_png:
+                st.image(pct_pie_png, use_container_width=True)
 
-        # Chart the $ split once a total (manual or build-up) is available (matches
-        # the other pie's units); otherwise chart the raw percentages, since that's
-        # the only figure available with no total to anchor to.
-        if any(_fee_pct_indicative_amounts.values()):
-            pct_pie_items = [(e.discipline, _fee_pct_indicative_amounts.get(e.discipline) or 0) for e in st.session_state.fee_estimates]
-            pct_pie_fmt = lambda v: f"${v:,.0f}"
-            pct_pie_legend_value = "raw"
-        else:
-            pct_pie_items = [(e.discipline, e.fee_percentage) for e in st.session_state.fee_estimates]
-            pct_pie_fmt = lambda v: f"{v:.0f}%"
-            # "share" (not "raw"): if disciplines beyond the top 6 get folded into
-            # "Other", the chart's total shrinks below 100 -- showing each slice's
-            # recomputed share keeps the legend number matching what's actually
-            # drawn, instead of the un-renormalised percentage.
-            pct_pie_legend_value = "share"
-        pct_pie_png = graphics_engine.generate_fee_distribution_pie(
-            pct_pie_items, "Indicative fee split by discipline", value_fmt=pct_pie_fmt,
-            legend_value=pct_pie_legend_value,
-        )
-        if pct_pie_png:
-            st.image(pct_pie_png, use_container_width=True)
+        _render_large_pct_fee_table()
 
 
 # ---------------------------------------------------------------------------

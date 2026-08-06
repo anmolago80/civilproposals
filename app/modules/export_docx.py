@@ -861,11 +861,17 @@ _PERSONNEL_HINTS = (
 )
 _METHODOLOGY_HINTS = ("methodolog", "approach", "delivering the service", "our method", "delivery approach", "how we")
 _EXPERIENCE_HINTS = ("relevant experience", "experience", "track record", "past performance", "project references")
+_EXECUTIVE_SUMMARY_HINTS = ("executive summary",)
 
 
 def _is_personnel_section(title: str) -> bool:
     t = (title or "").lower()
     return any(h in t for h in _PERSONNEL_HINTS)
+
+
+def _is_executive_summary_section(title: str) -> bool:
+    t = (title or "").lower()
+    return any(h in t for h in _EXECUTIVE_SUMMARY_HINTS)
 
 
 def _is_methodology_section(title: str) -> bool:
@@ -911,6 +917,19 @@ def _build_proposal_response(
     has_dedicated_experience_section = any(_is_experience_section(s.title) for s in sections)
 
     for section in sections:
+        # Executive Summary is a fixed section (proposal_structure.FIXED_SECTIONS)
+        # so it's always present here with its own page-allocation entry, but its
+        # actual content is already rendered once, in full, by
+        # _build_executive_summary() as the dedicated front-matter page right
+        # after the cover/TOC (see build_docx). Rendering it again here -- as an
+        # ordinary numbered section with its own guidance box and a second,
+        # independently-drafted "Executive Summary" AI response -- printed two
+        # different Executive Summaries into the same document. It still gets
+        # its 1-page budget in the Page Allocation Plan table; it just doesn't
+        # get a second content section down here.
+        if _is_executive_summary_section(section.title):
+            continue
+
         # 1. Full-page divider on its own page (full bleed, edge to edge).
         divider_png = divider_images.get(section.title)
         if divider_png:
