@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CivilProposals: AI-assisted tender & proposal drafting for civil engineering firms</title>
-<meta name="description" content="Turn a tender brief into a structured first pass proposal in minutes. Built for civil engineering firms. 3 free proposals, then $200/month.">
+<meta name="description" content="Turn a tender brief into a structured first pass proposal in minutes. Built for civil engineering firms. 1 free bid on sign up, then from $50 a bid.">
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -182,15 +182,35 @@
   /* Pricing */
   .pricing-card{
     max-width:440px;margin:0 auto;background:#fff;border:1px solid var(--border);
-    border-radius:18px;padding:44px;text-align:center;
+    border-radius:18px;padding:40px 34px;text-align:center;
     box-shadow:0 20px 44px rgba(17,24,39,.08);
   }
   .price{font-size:3.2rem;font-weight:800;margin:16px 0 2px;}
   .price span{font-size:1.02rem;font-weight:500;color:var(--text-muted);}
-  .pricing-card ul{list-style:none;text-align:left;margin:28px 0;}
-  .pricing-card li{padding:10px 0;border-bottom:1px solid var(--border);color:var(--ink);font-size:.95rem;display:flex;gap:11px;align-items:flex-start;}
+  .price-sub{color:var(--text-muted);font-size:.88rem;}
+  .pricing-card ul{list-style:none;text-align:left;margin:24px 0;}
+  .pricing-card li{padding:9px 0;border-bottom:1px solid var(--border);color:var(--ink);font-size:.93rem;display:flex;gap:11px;align-items:flex-start;}
   .pricing-card li:last-child{border-bottom:none;}
   .check{color:var(--blue);font-weight:900;}
+  .plan-name{font-weight:800;color:var(--blue);}
+
+  /* Three-tier pricing grid -- each card reuses .pricing-card's look, with
+     the grid context overriding the old single-card max-width/centering. */
+  .pricing-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;align-items:stretch;margin-top:44px;}
+  .pricing-grid .pricing-card{max-width:none;margin:0;display:flex;flex-direction:column;}
+  .pricing-grid .pricing-card ul{flex:1;}
+  @media(max-width:900px){.pricing-grid{grid-template-columns:1fr;max-width:440px;margin:44px auto 0;}}
+  .pricing-card.featured{border:2px solid var(--blue);box-shadow:0 24px 54px rgba(29,78,216,.18);position:relative;}
+  .pricing-badge{
+    position:absolute;top:-14px;left:50%;transform:translateX(-50%);
+    background:var(--blue);color:#fff;font-size:.7rem;font-weight:800;letter-spacing:.05em;
+    text-transform:uppercase;padding:6px 16px;border-radius:20px;white-space:nowrap;
+  }
+  .value-callout{
+    max-width:720px;margin:0 auto 8px;text-align:center;color:var(--text-muted);
+    font-size:1.05rem;line-height:1.7;
+  }
+  .value-callout strong{color:var(--ink);}
 
   .beta-note{
     background:#FFF8EE;border:1px solid #F3D9AE;border-radius:14px;
@@ -389,16 +409,16 @@
   <div class="wrap">
     <div class="fact-grid">
       <div class="fact-card">
-        <div class="fact-icon">🆓</div>
-        <div class="fact-number">3</div>
-        <div class="fact-label">free full proposals</div>
-        <p>"No card required to try it on a real brief first."</p>
+        <div class="fact-icon">💰</div>
+        <div class="fact-number">$2,400</div>
+        <div class="fact-label">avg. cost to prepare a small proposal</div>
+        <p>"Typical in-house drafting time, at standard billing rates."</p>
       </div>
       <div class="fact-card">
-        <div class="fact-icon">💳</div>
-        <div class="fact-number">$200<span style="font-size:1.1rem;font-weight:600;">/mo</span></div>
-        <div class="fact-label">after your trial</div>
-        <p>"Unlimited proposals, AI drafting included, cancel anytime."</p>
+        <div class="fact-icon">⚡</div>
+        <div class="fact-number">50%</div>
+        <div class="fact-label">of that work, done for you</div>
+        <p>"Formatting, structure, and first pass drafting, handled automatically."</p>
       </div>
       <div class="fact-card">
         <div class="fact-icon">🧪</div>
@@ -413,22 +433,55 @@
 <section style="background:var(--surface);" id="pricing">
   <div class="wrap">
     <span class="section-label">Pricing</span>
-    <h2 class="section-title">Simple pricing</h2>
-    <p class="section-sub">Try it on a real brief before you pay anything.</p>
-    <div class="pricing-card">
-      <div style="font-weight:800;color:var(--blue);">CivilProposals</div>
-      <div class="price">$200<span>/month</span></div>
-      <p style="color:var(--text-muted);font-size:.9rem;">after your first 3 free proposals</p>
-      <ul>
-        <li><span class="check">✓</span> 3 free full proposals: no card required</li>
-        <li><span class="check">✓</span> Unlimited proposals on the paid plan</li>
-        <li><span class="check">✓</span> AI drafting included: no separate API key or bill</li>
-        <li><span class="check">✓</span> Tagged, reusable content library across projects</li>
-        <li><span class="check">✓</span> Compliance matrix, gap analysis, fee & program tools</li>
-        <li><span class="check">✓</span> Cancel anytime</li>
-      </ul>
-      <a class="btn-primary" style="display:block;" href="https://app.civilproposals.com">Get Started</a>
+    <h2 class="section-title">Pricing that pays for itself</h2>
+    <p class="section-sub">
+      A single bid can easily cost your firm $2,400 in staff time to prepare. CivilProposals
+      does half that work for you, starting at a fraction of the price.
+    </p>
+
+    <div class="pricing-grid">
+      <div class="pricing-card">
+        <div class="plan-name">Free</div>
+        <div class="price">$0</div>
+        <p class="price-sub">1 free bid on sign up</p>
+        <ul>
+          <li><span class="check">✓</span> 1 full bid, no card required</li>
+          <li><span class="check">✓</span> Full AI drafting included</li>
+          <li><span class="check">✓</span> Designed Word export</li>
+          <li><span class="check">✓</span> See exactly what you get before you pay anything</li>
+        </ul>
+        <a class="btn-secondary" style="display:block;" href="https://app.civilproposals.com">Try for free</a>
+      </div>
+
+      <div class="pricing-card">
+        <div class="plan-name">Pay as you go</div>
+        <div class="price">$50<span>/bid</span></div>
+        <p class="price-sub">Only pay when you use it</p>
+        <ul>
+          <li><span class="check">✓</span> $50 a bid, no subscription</li>
+          <li><span class="check">✓</span> Full AI drafting included</li>
+          <li><span class="check">✓</span> Compliance matrix, fee & program tools</li>
+          <li><span class="check">✓</span> Nothing to cancel: use it as often as you like</li>
+        </ul>
+        <a class="btn-secondary" style="display:block;" href="https://app.civilproposals.com">Get Started</a>
+      </div>
+
+      <div class="pricing-card featured">
+        <span class="pricing-badge">Best value</span>
+        <div class="plan-name">Monthly</div>
+        <div class="price">$130<span>/month</span></div>
+        <p class="price-sub">3 bids included, about $43 a bid</p>
+        <ul>
+          <li><span class="check">✓</span> 3 bids every month</li>
+          <li><span class="check">✓</span> Everything in Pay as you go</li>
+          <li><span class="check">✓</span> Tagged, reusable content library</li>
+          <li><span class="check">✓</span> Compliance matrix, gap analysis, fee & program tools</li>
+          <li><span class="check">✓</span> Cancel anytime</li>
+        </ul>
+        <a class="btn-primary" style="display:block;" href="https://app.civilproposals.com">Get Started</a>
+      </div>
     </div>
+
     <div class="beta-note">
       <strong>🧪 Beta:</strong> CivilProposals is new and actively evolving: pricing, features,
       and behaviour may change as we learn from real firms using it. We'd genuinely appreciate
