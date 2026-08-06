@@ -431,6 +431,17 @@ def _init_state():
         "_letter_disc_fee_cache_sig": None,
         "_letter_disc_fee_cache_xlsx": None,
         "_letter_disc_fee_cache_pie": None,
+        # Deferred-apply state for the discipline fee tables -- the rebuild
+        # (dedup/dismiss logic) and the cache above only run when the user
+        # explicitly ticks a "done entering data" box, rather than on every
+        # keystroke-commit. See the checkbox handling in the discipline fee
+        # table fragments below for why.
+        "_disc_fee_apply_tick": False,
+        "_disc_fee_apply_tick_seen": False,
+        "_disc_fee_last_applied_editor_sig": None,
+        "_letter_disc_fee_apply_tick": False,
+        "_letter_disc_fee_apply_tick_seen": False,
+        "_letter_disc_fee_last_applied_editor_sig": None,
         "scope_item_fees": [],
         "fee_seed_total": 0.0,
         # Manually-entered total project fee for the indicative benchmark split
@@ -3019,36 +3030,73 @@ with tabs[8]:
                         "note": st.column_config.TextColumn("Note"),
                     },
                 )
-                letter_rebuilt = [
-                    resourcing.DisciplineFeeLine(
-                        discipline=str(r.get("discipline") or "").strip(),
-                        total_hours=float(r.get("total_hours") or 0),
-                        rate_per_hour=float(r.get("rate_per_hour") or 0),
-                        note=str(r.get("note") or ""),
-                    )
+                # Deferred apply -- same rationale as the Large Scope discipline
+                # table's checkbox (see the comment there): the rebuild and the
+                # Excel/chart cache below only run once the user explicitly
+                # ticks "done", instead of on every keystroke-commit, so most
+                # reruns while typing stay cheap and the value-loss race has a
+                # much smaller window to land in.
+                letter_raw_sig = tuple(
+                    (str(r.get("discipline") or ""), r.get("total_hours"), r.get("rate_per_hour"), str(r.get("note") or ""))
                     for r in letter_edited_disc_fees
-                    if str(r.get("discipline") or "").strip()
-                ]
+                )
+                letter_first_load = st.session_state.get("_letter_disc_fee_last_applied_editor_sig") is None
+                letter_pending = letter_raw_sig != st.session_state.get("_letter_disc_fee_last_applied_editor_sig")
+                # See the _disc_tick_seen comment on the Large Scope discipline
+                # table for why this edge-detection flag is needed.
+                letter_tick_val = st.session_state.get("_letter_disc_fee_apply_tick", False)
+                letter_tick_seen = st.session_state.get("_letter_disc_fee_apply_tick_seen", False)
+                if letter_pending and letter_tick_val and letter_tick_seen:
+                    st.session_state["_letter_disc_fee_apply_tick"] = False
+                letter_apply_now = st.checkbox(
+                    "Done entering data -- refresh totals & chart",
+                    key="_letter_disc_fee_apply_tick",
+                )
+                st.session_state["_letter_disc_fee_apply_tick_seen"] = letter_apply_now
 
-                letter_after_discs = {l.discipline for l in letter_rebuilt}
-                letter_removed_now = letter_before_discs - letter_after_discs
-                if letter_removed_now:
-                    letter_newly_dismissed = {resourcing.canonical_discipline(d) for d in letter_removed_now if resourcing.canonical_discipline(d)}
-                    st.session_state.dismissed_fee_disciplines = list(dict.fromkeys(
-                        list(st.session_state.dismissed_fee_disciplines) + list(letter_newly_dismissed)
-                    ))
+                if letter_first_load or (letter_apply_now and letter_pending):
+                    letter_rebuilt = [
+                        resourcing.DisciplineFeeLine(
+                            discipline=str(r.get("discipline") or "").strip(),
+                            total_hours=float(r.get("total_hours") or 0),
+                            rate_per_hour=float(r.get("rate_per_hour") or 0),
+                            note=str(r.get("note") or ""),
+                        )
+                        for r in letter_edited_disc_fees
+                        if str(r.get("discipline") or "").strip()
+                    ]
 
-                letter_present = [l.discipline for l in letter_rebuilt]
-                letter_missing_always = set(resourcing.ensure_project_management_present(letter_present)) - set(letter_present)
-                for missing in letter_missing_always:
-                    letter_rebuilt.append(resourcing.DisciplineFeeLine(discipline=missing,
-                                                                        note="Always included -- re-added automatically"))
-                if letter_missing_always:
-                    # The user deleted Project Management via the editor's row-delete
-                    # control -- it's being silently re-added to the data model, but the
-                    # editor widget itself won't show it again until its key changes.
-                    st.session_state._discipline_fee_editor_version += 1
-                st.session_state.discipline_fee_lines = letter_rebuilt
+                    letter_after_discs = {l.discipline for l in letter_rebuilt}
+                    letter_removed_now = letter_before_discs - letter_after_discs
+                    if letter_removed_now:
+                        letter_newly_dismissed = {resourcing.canonical_discipline(d) for d in letter_removed_now if resourcing.canonical_discipline(d)}
+                        st.session_state.dismissed_fee_disciplines = list(dict.fromkeys(
+                            list(st.session_state.dismissed_fee_disciplines) + list(letter_newly_dismissed)
+                        ))
+
+                    letter_present = [l.discipline for l in letter_rebuilt]
+                    letter_missing_always = set(resourcing.ensure_project_management_present(letter_present)) - set(letter_present)
+                    for missing in letter_missing_always:
+                        letter_rebuilt.append(resourcing.DisciplineFeeLine(discipline=missing,
+                                                                            note="Always included -- re-added automatically"))
+                    if letter_missing_always:
+                        # The user deleted Project Management via the editor's row-delete
+                        # control -- it's being silently re-added to the data model, but the
+                        # editor widget itself won't show it again until its key changes.
+                        st.session_state._discipline_fee_editor_version += 1
+                    st.session_state.discipline_fee_lines = letter_rebuilt
+                    st.session_state._letter_disc_fee_last_applied_editor_sig = letter_raw_sig
+                else:
+                    st.caption(
+                        "Totals, the chart, and the Excel export below are from the last time "
+                        "you ticked the box above -- tick it again to bring them up to date."
+                        if letter_pending else
+                        "Totals, the chart, and the Excel export below reflect the ticked data above."
+                    )
+
+                # Always display from the applied model (session_state) -- see
+                # the same note on the Large Scope discipline table.
+                letter_rebuilt = st.session_state.discipline_fee_lines
 
                 letter_disc_total = sum(l.fee_amount for l in letter_rebuilt)
                 letter_total_hours_all = sum(l.total_hours for l in letter_rebuilt)
@@ -3343,41 +3391,91 @@ with tabs[8]:
                     "note": st.column_config.TextColumn("Note"),
                 },
             )
-            # Rebuild from the editor, dropping blank-discipline rows, then guarantee
-            # Project Management is present even if the user deleted it.
-            rebuilt = [
-                resourcing.DisciplineFeeLine(
-                    discipline=str(r.get("discipline") or "").strip(),
-                    total_hours=float(r.get("total_hours") or 0),
-                    rate_per_hour=float(r.get("rate_per_hour") or 0),
-                    note=str(r.get("note") or ""),
-                )
+            # Deferred apply: rebuilding the model (dedup/dismiss logic) and
+            # regenerating the Excel export + pie chart on literally every
+            # keystroke-commit was a big contributor to the intermittent
+            # value-loss race in this grid -- every rerun while the user was
+            # actively typing did real work server-side, widening the window
+            # in which a second, fast edit could race the round trip and get
+            # silently dropped. Now, reruns while editing do nothing but hold
+            # the editor's own state (cheap); the heavier rebuild only runs
+            # once, on a deliberate, separate action -- ticking this box --
+            # well after typing has settled. Any further edit auto-unticks
+            # it, so stale numbers can't linger unnoticed.
+            _disc_raw_sig = tuple(
+                (str(r.get("discipline") or ""), r.get("total_hours"), r.get("rate_per_hour"), str(r.get("note") or ""))
                 for r in edited_disc_fees
-                if str(r.get("discipline") or "").strip()
-            ]
+            )
+            _disc_first_load = st.session_state.get("_disc_fee_last_applied_editor_sig") is None
+            _disc_pending = _disc_raw_sig != st.session_state.get("_disc_fee_last_applied_editor_sig")
+            # Distinguish "the user just ticked the box this rerun" (must NOT
+            # be reset -- that's the click we want to act on) from "the box
+            # was already ticked from a previous apply, and a fresh edit
+            # since then has made it stale" (SHOULD be reset). Both look
+            # identical as (pending=True, tick=True) at the top of a rerun,
+            # so _disc_fee_apply_tick_seen tracks whether the tick was
+            # already True as of the end of the *previous* rerun -- only
+            # then is it safe to call it stale.
+            _disc_tick_val = st.session_state.get("_disc_fee_apply_tick", False)
+            _disc_tick_seen = st.session_state.get("_disc_fee_apply_tick_seen", False)
+            if _disc_pending and _disc_tick_val and _disc_tick_seen:
+                st.session_state["_disc_fee_apply_tick"] = False
+            disc_apply_now = st.checkbox(
+                "Done entering data -- refresh totals & chart",
+                key="_disc_fee_apply_tick",
+            )
+            st.session_state["_disc_fee_apply_tick_seen"] = disc_apply_now
 
-            # A discipline present before this edit but missing after it was removed
-            # via the editor's own delete-row control -- remember that so the
-            # brief-sync merge above doesn't just re-add it on the next rerun.
-            after_discs = {l.discipline for l in rebuilt}
-            removed_now = before_discs - after_discs
-            if removed_now:
-                newly_dismissed = {resourcing.canonical_discipline(d) for d in removed_now if resourcing.canonical_discipline(d)}
-                st.session_state.dismissed_fee_disciplines = list(dict.fromkeys(
-                    list(st.session_state.dismissed_fee_disciplines) + list(newly_dismissed)
-                ))
+            if _disc_first_load or (disc_apply_now and _disc_pending):
+                # Rebuild from the editor, dropping blank-discipline rows, then guarantee
+                # Project Management is present even if the user deleted it.
+                rebuilt = [
+                    resourcing.DisciplineFeeLine(
+                        discipline=str(r.get("discipline") or "").strip(),
+                        total_hours=float(r.get("total_hours") or 0),
+                        rate_per_hour=float(r.get("rate_per_hour") or 0),
+                        note=str(r.get("note") or ""),
+                    )
+                    for r in edited_disc_fees
+                    if str(r.get("discipline") or "").strip()
+                ]
 
-            present = [l.discipline for l in rebuilt]
-            missing_always = set(resourcing.ensure_project_management_present(present)) - set(present)
-            for missing in missing_always:
-                rebuilt.append(resourcing.DisciplineFeeLine(discipline=missing,
-                                                            note="Always included -- re-added automatically"))
-            if missing_always:
-                # The user deleted Project Management via the editor's row-delete
-                # control -- it's being silently re-added to the data model, but the
-                # editor widget itself won't show it again until its key changes.
-                st.session_state._discipline_fee_editor_version += 1
-            st.session_state.discipline_fee_lines = rebuilt
+                # A discipline present before this edit but missing after it was removed
+                # via the editor's own delete-row control -- remember that so the
+                # brief-sync merge above doesn't just re-add it on the next rerun.
+                after_discs = {l.discipline for l in rebuilt}
+                removed_now = before_discs - after_discs
+                if removed_now:
+                    newly_dismissed = {resourcing.canonical_discipline(d) for d in removed_now if resourcing.canonical_discipline(d)}
+                    st.session_state.dismissed_fee_disciplines = list(dict.fromkeys(
+                        list(st.session_state.dismissed_fee_disciplines) + list(newly_dismissed)
+                    ))
+
+                present = [l.discipline for l in rebuilt]
+                missing_always = set(resourcing.ensure_project_management_present(present)) - set(present)
+                for missing in missing_always:
+                    rebuilt.append(resourcing.DisciplineFeeLine(discipline=missing,
+                                                                note="Always included -- re-added automatically"))
+                if missing_always:
+                    # The user deleted Project Management via the editor's row-delete
+                    # control -- it's being silently re-added to the data model, but the
+                    # editor widget itself won't show it again until its key changes.
+                    st.session_state._discipline_fee_editor_version += 1
+                st.session_state.discipline_fee_lines = rebuilt
+                st.session_state._disc_fee_last_applied_editor_sig = _disc_raw_sig
+            else:
+                st.caption(
+                    "Totals, the chart, and the Excel export below are from the last time "
+                    "you ticked the box above -- tick it again to bring them up to date."
+                    if _disc_pending else
+                    "Totals, the chart, and the Excel export below reflect the ticked data above."
+                )
+
+            # Always display from the applied model (session_state), not a
+            # freshly-rebuilt local var -- until the box above is (re)ticked,
+            # this intentionally still shows the last-applied figures even
+            # though the editor itself may have newer, unapplied edits in it.
+            rebuilt = st.session_state.discipline_fee_lines
 
             disc_total = sum(l.fee_amount for l in rebuilt)
             total_hours_all = sum(l.total_hours for l in rebuilt)
