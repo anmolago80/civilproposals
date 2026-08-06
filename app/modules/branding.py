@@ -136,7 +136,7 @@ def vertical_steps_component_html(steps: list[dict]) -> str:
                 f'color:#fff;display:flex;align-items:center;justify-content:center;'
                 f'font-size:.66rem;font-weight:800;flex-shrink:0;z-index:1;">&#10003;</div>'
             )
-            label_html = f'<span style="font-size:.8rem;font-weight:650;color:{GREEN};">{label}</span>'
+            label_html = f'<span style="font-size:.86rem;font-weight:650;color:{GREEN};">{label}</span>'
         else:
             marker = (
                 f'<div style="width:20px;height:20px;border-radius:50%;background:{SURFACE};'
@@ -147,7 +147,7 @@ def vertical_steps_component_html(steps: list[dict]) -> str:
             # with the background"). #334155 (slate-700) keeps not-done
             # steps visually secondary to the green "done" state while
             # staying clearly legible.
-            label_html = f'<span style="font-size:.8rem;font-weight:500;color:#334155;">{label}</span>'
+            label_html = f'<span style="font-size:.86rem;font-weight:500;color:#334155;">{label}</span>'
 
         connector = "" if is_last else (
             f'<div style="position:absolute;left:9.5px;top:20px;width:2px;height:100%;'
@@ -157,7 +157,7 @@ def vertical_steps_component_html(steps: list[dict]) -> str:
         rows.append(
             f'<div class="cp-step-row" data-cp-step="{i}" '
             'style="position:relative;display:flex;align-items:center;gap:10px;'
-            'padding:5px 8px;margin:0 -8px;border-radius:8px;cursor:pointer;">'
+            'padding:10px 8px;margin:0 -8px;border-radius:8px;cursor:pointer;">'
             f'{connector}{marker}{label_html}'
             '</div>'
         )

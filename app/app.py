@@ -868,115 +868,22 @@ with st.sidebar:
     # is harmless.
     components.html(
         branding.vertical_steps_component_html(_stepper_steps),
-        height=max(1, len(_stepper_steps)) * 34 + 16,
+        height=max(1, len(_stepper_steps)) * 44 + 16,
     )
-    st.divider()
+    st.caption(
+        "This tool never invents project experience, staff, certifications, insurances, "
+        "or commercial terms. Missing information becomes a clearly marked placeholder, "
+        "not a guess."
+    )
+    # "My projects" / "This computer" and "Export / import a file" used to
+    # live here, stacked below the steps. Moved into two popovers in the
+    # fixed top-right banner instead (see _render_my_projects_popover() and
+    # _render_export_import_popover(), called from there) -- the user asked
+    # for them up in the banner alongside Upgrade/Log out rather than taking
+    # up permanent vertical space in the sidebar.
 
     if not IS_SAAS_MODE:
-        # Local-disk autosave -- only correct for the original single-user
-        # desktop prototype. In SAAS_MODE this is replaced by the DB-backed
-        # "My projects" branch below (see cloud_project_store.py): writing
-        # to a 'projects/' folder on the *server's* disk in a hosted,
-        # multi-tenant deployment would be shared across every logged-in
-        # user's browser sessions (a real data leak, not just a rough edge),
-        # and Railway's container disk is wiped on every redeploy regardless.
-        st.markdown("**This computer**")
-        st.checkbox(
-            "Auto-save as I work", key="_autosave_enabled",
-            help=f"Saves to a 'projects' folder next to the app, at most every {AUTOSAVE_INTERVAL_SECONDS}s "
-                 "of activity -- only once a project name is entered (Project Setup).",
-        )
-        if st.session_state._last_autosave_path:
-            st.caption(f"Last saved {datetime.fromtimestamp(st.session_state._last_autosave_ts).strftime('%H:%M:%S')}")
-        elif not _project_identifier():
-            st.caption("Enter a project or tender name (Project Setup) to enable auto-save.")
-
-        local_projects = local_project_store.list_local_projects()
-        if local_projects:
-            options = [p["display_name"] for p in local_projects]
-            chosen = st.selectbox("Recent projects", options, key="_local_project_pick")
-            chosen_entry = next(p for p in local_projects if p["display_name"] == chosen)
-            lcol1, lcol2 = st.columns(2)
-            with lcol1:
-                if st.button("Open", key="_open_local_project"):
-                    try:
-                        loaded_state = local_project_store.load_local(chosen_entry["path"])
-                        _apply_loaded_project(loaded_state, f"'{chosen_entry['display_name']}'")
-                    except project_store.ProjectLoadError as exc:
-                        st.error(str(exc))
-            with lcol2:
-                if st.button("Delete", key="_delete_local_project"):
-                    local_project_store.delete_local(chosen_entry["path"])
-                    st.rerun()
-        else:
-            st.caption("No local saves yet.")
-
-    elif current_user:
-        # DB-backed equivalent of "This computer" above, scoped to this
-        # user's account (see cloud_project_store.py) -- so uploads, brief
-        # analysis, drafts, and team assignments survive a page refresh, a
-        # dropped connection, or the app being redeployed, instead of living
-        # only in this one browser tab's live session.
-        st.markdown("**My projects**")
-        st.checkbox(
-            "Auto-save as I work", key="_autosave_enabled",
-            help=f"Saves to your account, at most every {AUTOSAVE_INTERVAL_SECONDS}s of activity -- "
-                 "only once a project name is entered (Project Setup). Lets you pick back up later, even "
-                 "after closing the tab or a refresh.",
-        )
-        if st.session_state._last_autosave_error:
-            st.warning(
-                f"Auto-save failed: {st.session_state._last_autosave_error} -- your work in this "
-                "tab is NOT saved to your account yet. Use \"💾 Download project file\" below as a "
-                "backup, and let support know if this keeps happening."
-            )
-        elif st.session_state._last_autosave_path:
-            st.caption(f"Last saved {datetime.fromtimestamp(st.session_state._last_autosave_ts).strftime('%H:%M:%S')}")
-        elif not _project_identifier():
-            st.caption("Enter a project or tender name (Project Setup) to enable auto-save.")
-
-        cloud_projects = cloud_project_store.list_cloud_projects(current_user.id)
-        if cloud_projects:
-            options = [p["display_name"] for p in cloud_projects]
-            chosen = st.selectbox("Recent projects", options, key="_cloud_project_pick")
-            chosen_entry = next(p for p in cloud_projects if p["display_name"] == chosen)
-            lcol1, lcol2 = st.columns(2)
-            with lcol1:
-                if st.button("Open", key="_open_cloud_project"):
-                    try:
-                        loaded_state = cloud_project_store.load_cloud(current_user.id, chosen_entry["id"])
-                        _apply_loaded_project(loaded_state, f"'{chosen_entry['display_name']}'")
-                    except project_store.ProjectLoadError as exc:
-                        st.error(str(exc))
-            with lcol2:
-                if st.button("Delete", key="_delete_cloud_project"):
-                    cloud_project_store.delete_cloud(current_user.id, chosen_entry["id"])
-                    st.rerun()
-        else:
-            st.caption("No saved projects yet -- one will appear here shortly after you start "
-                       "one (auto-save kicks in once you enter a project name on Project Setup).")
-
-    st.markdown("**Export / import a file**")
-    st.caption("For sharing a project or keeping a backup outside this computer.")
-    loaded_file = st.file_uploader("Load a project file", type=["zip"], key="project_loader")
-    if loaded_file is not None and st.session_state._last_loaded_project_name != loaded_file.name:
-        try:
-            loaded_state = project_store.load_project(loaded_file.getvalue())
-            st.session_state._last_loaded_project_name = loaded_file.name
-            _apply_loaded_project(loaded_state, f"'{loaded_file.name}'")
-        except project_store.ProjectLoadError as exc:
-            st.error(str(exc))
-
-    if st.button("Prepare project save file"):
-        st.session_state._project_save_bytes = project_store.save_project(st.session_state)
-    if st.session_state._project_save_bytes:
-        save_filename = (st.session_state.tender_name or "untitled_project").replace(" ", "_")
-        st.download_button(
-            "💾 Download project file", data=st.session_state._project_save_bytes,
-            file_name=f"{save_filename}.tenderproj.zip", mime="application/zip",
-        )
-
-    if not IS_SAAS_MODE:
+        st.divider()
         st.markdown("**Claude API key**")
         _current_claude_key = (
             st.session_state.ai_config.get("api_key", "")
@@ -1148,14 +1055,11 @@ with st.sidebar:
     # In SAAS_MODE, nothing renders here at all -- AI drafting runs on
     # the account's own server-side ANTHROPIC_API_KEY (see the module
     # docstring at the top of this file), so there's no API key
-    # concept to surface to a subscriber.
-
-    st.divider()
-    st.caption(
-        "This tool never invents project experience, staff, certifications, insurances, "
-        "or commercial terms. Missing information becomes a clearly marked placeholder, "
-        "not a guess."
-    )
+    # concept to surface to a subscriber. The "never invents..." disclaimer
+    # used to live here, at the very bottom of the sidebar -- moved to sit
+    # immediately under the step list instead (see above), per the user's
+    # request to have it read right alongside the workflow steps rather
+    # than below everything else.
 # This CSS is deliberately injected here -- after auth.require_login() has
 # already returned above, meaning a user is definitely signed in by this
 # point -- rather than in the unconditional page-wide <style> block near
@@ -1192,17 +1096,143 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Upgrade/Manage billing and Log out -- static in the browser window's top
-# right corner (per the user's request), not just the top of the left-hand
-# sidebar column. Rendered here in the MAIN content area (not inside `with
-# st.sidebar:`) specifically so `position: fixed` anchors to the whole
-# viewport rather than the sidebar's own stacking context -- no JS-driven
-# position syncing needed this time (unlike the old sidebar version), since
-# a viewport corner is a fixed target and doesn't move as content scrolls.
-# A little top padding is added to the tab content below so the fixed bar
-# never overlaps a tab's own heading.
-if IS_SAAS_MODE and current_user:
-    with st.container(key="_topright_actions"):
+def _render_my_projects_popover_body() -> None:
+    """Contents of the top banner's "My projects" popover -- the same
+    autosave-status + recent-projects-open/delete UI that used to sit
+    permanently in the sidebar (see the comment left in its place there),
+    just now tucked behind a click instead of always taking up vertical
+    space. Local-disk vs. DB-backed branch exactly as before."""
+    if not IS_SAAS_MODE:
+        # Local-disk autosave -- only correct for the original single-user
+        # desktop prototype. In SAAS_MODE this is replaced by the DB-backed
+        # branch below (see cloud_project_store.py): writing to a
+        # 'projects/' folder on the *server's* disk in a hosted,
+        # multi-tenant deployment would be shared across every logged-in
+        # user's browser sessions (a real data leak, not just a rough edge),
+        # and Railway's container disk is wiped on every redeploy regardless.
+        st.checkbox(
+            "Auto-save as I work", key="_autosave_enabled",
+            help=f"Saves to a 'projects' folder next to the app, at most every {AUTOSAVE_INTERVAL_SECONDS}s "
+                 "of activity -- only once a project name is entered (Project Setup).",
+        )
+        if st.session_state._last_autosave_path:
+            st.caption(f"Last saved {datetime.fromtimestamp(st.session_state._last_autosave_ts).strftime('%H:%M:%S')}")
+        elif not _project_identifier():
+            st.caption("Enter a project or tender name (Project Setup) to enable auto-save.")
+
+        local_projects = local_project_store.list_local_projects()
+        if local_projects:
+            options = [p["display_name"] for p in local_projects]
+            chosen = st.selectbox("Recent projects", options, key="_local_project_pick")
+            chosen_entry = next(p for p in local_projects if p["display_name"] == chosen)
+            lcol1, lcol2 = st.columns(2)
+            with lcol1:
+                if st.button("Open", key="_open_local_project"):
+                    try:
+                        loaded_state = local_project_store.load_local(chosen_entry["path"])
+                        _apply_loaded_project(loaded_state, f"'{chosen_entry['display_name']}'")
+                    except project_store.ProjectLoadError as exc:
+                        st.error(str(exc))
+            with lcol2:
+                if st.button("Delete", key="_delete_local_project"):
+                    local_project_store.delete_local(chosen_entry["path"])
+                    st.rerun()
+        else:
+            st.caption("No local saves yet.")
+
+    elif current_user:
+        # DB-backed equivalent of the local-disk branch above, scoped to
+        # this user's account (see cloud_project_store.py) -- so uploads,
+        # brief analysis, drafts, and team assignments survive a page
+        # refresh, a dropped connection, or the app being redeployed,
+        # instead of living only in this one browser tab's live session.
+        st.checkbox(
+            "Auto-save as I work", key="_autosave_enabled",
+            help=f"Saves to your account, at most every {AUTOSAVE_INTERVAL_SECONDS}s of activity -- "
+                 "only once a project name is entered (Project Setup). Lets you pick back up later, even "
+                 "after closing the tab or a refresh.",
+        )
+        if st.session_state._last_autosave_error:
+            st.warning(
+                f"Auto-save failed: {st.session_state._last_autosave_error} -- your work in this "
+                "tab is NOT saved to your account yet. Use \"Export / Import\" above as a backup, "
+                "and let support know if this keeps happening."
+            )
+        elif st.session_state._last_autosave_path:
+            st.caption(f"Last saved {datetime.fromtimestamp(st.session_state._last_autosave_ts).strftime('%H:%M:%S')}")
+        elif not _project_identifier():
+            st.caption("Enter a project or tender name (Project Setup) to enable auto-save.")
+
+        cloud_projects = cloud_project_store.list_cloud_projects(current_user.id)
+        if cloud_projects:
+            options = [p["display_name"] for p in cloud_projects]
+            chosen = st.selectbox("Recent projects", options, key="_cloud_project_pick")
+            chosen_entry = next(p for p in cloud_projects if p["display_name"] == chosen)
+            lcol1, lcol2 = st.columns(2)
+            with lcol1:
+                if st.button("Open", key="_open_cloud_project"):
+                    try:
+                        loaded_state = cloud_project_store.load_cloud(current_user.id, chosen_entry["id"])
+                        _apply_loaded_project(loaded_state, f"'{chosen_entry['display_name']}'")
+                    except project_store.ProjectLoadError as exc:
+                        st.error(str(exc))
+            with lcol2:
+                if st.button("Delete", key="_delete_cloud_project"):
+                    cloud_project_store.delete_cloud(current_user.id, chosen_entry["id"])
+                    st.rerun()
+        else:
+            st.caption("No saved projects yet -- one will appear here shortly after you start "
+                       "one (auto-save kicks in once you enter a project name on Project Setup).")
+
+
+def _render_export_import_popover_body() -> None:
+    """Contents of the top banner's "Export / Import" popover -- unchanged
+    from the sidebar version, just relocated (see the comment left in its
+    place in the sidebar)."""
+    st.caption("For sharing a project or keeping a backup outside this computer.")
+    loaded_file = st.file_uploader("Load a project file", type=["zip"], key="project_loader")
+    if loaded_file is not None and st.session_state._last_loaded_project_name != loaded_file.name:
+        try:
+            loaded_state = project_store.load_project(loaded_file.getvalue())
+            st.session_state._last_loaded_project_name = loaded_file.name
+            _apply_loaded_project(loaded_state, f"'{loaded_file.name}'")
+        except project_store.ProjectLoadError as exc:
+            st.error(str(exc))
+
+    if st.button("Prepare project save file"):
+        st.session_state._project_save_bytes = project_store.save_project(st.session_state)
+    if st.session_state._project_save_bytes:
+        save_filename = (st.session_state.tender_name or "untitled_project").replace(" ", "_")
+        st.download_button(
+            "💾 Download project file", data=st.session_state._project_save_bytes,
+            file_name=f"{save_filename}.tenderproj.zip", mime="application/zip",
+        )
+
+
+# Top banner -- static in the browser window's top right corner (per the
+# user's request), not just the top of the left-hand sidebar column.
+# Rendered here in the MAIN content area (not inside `with st.sidebar:`)
+# specifically so `position: fixed` anchors to the whole viewport rather
+# than the sidebar's own stacking context -- no JS-driven position syncing
+# needed this time (unlike the old sidebar version), since a viewport
+# corner is a fixed target and doesn't move as content scrolls. A little
+# top padding is added to the tab content below so the fixed bar never
+# overlaps a tab's own heading.
+#
+# "My projects" and "Export / Import" live here too now, as two compact
+# popovers -- laid out horizontally alongside Upgrade/Log out (a flex row,
+# see the CSS below) rather than stacked as separate always-expanded
+# sections down the sidebar, which was pushing the banner-worthy actions
+# out of easy reach and growing the sidebar's height for content most
+# visits don't need. Rendered unconditionally (both SaaS and local-disk
+# mode) so the popovers are always available; only Upgrade/Manage billing
+# and Log out stay gated to signed-in SaaS accounts.
+with st.container(key="_topright_actions"):
+    with st.popover("📁 My projects", width="content"):
+        _render_my_projects_popover_body()
+    with st.popover("⇅ Export / Import", width="content"):
+        _render_export_import_popover_body()
+    if IS_SAAS_MODE and current_user:
         if not _access["subscribed"]:
             if st.button("Upgrade", key="_topright_upgrade_btn"):
                 try:
@@ -1218,50 +1248,59 @@ if IS_SAAS_MODE and current_user:
         if st.button("Log out", key="_topright_logout_btn"):
             auth.log_out()
             st.rerun()
-    st.markdown(
-        """<style>
-        .st-key-_topright_actions {
-            /* z-index has to clear Streamlit's own header/toolbar bar
-               (data-testid="stHeader"), which sits at z-index: 999990 --
-               invisible in this app (see the `header [data-testid="stToolbar"]
-               {visibility: hidden}` rule near the top of the file) but still
-               present and still stacked above ordinary page content, so
-               without this our fixed bar renders UNDER it and never appears. */
-            position: fixed !important; top: 0.75rem; right: 1.5rem; z-index: 1000000;
-            display: flex !important; flex-direction: row !important; gap: 8px;
-            justify-content: flex-end;
-            /* Streamlit's own emotion-cache classes on this container default
-               it to width: 100% (fine in normal flow, but once position:fixed
-               takes it out of flow that stretches it across the whole
-               viewport, pushing its flex-start-aligned children to the LEFT
-               edge instead of the right). Shrink it back to its content so
-               "right: 1.5rem" actually reads as "hug the right edge". */
-            width: fit-content !important; left: auto !important;
-            background: transparent;
-        }
-        .st-key-_topright_upgrade_btn button, .st-key-_topright_upgrade_btn a {
-            background-color: #2563EB !important; color: #fff !important;
-            border-color: #2563EB !important;
-        }
-        .st-key-_topright_upgrade_btn button:hover, .st-key-_topright_upgrade_btn a:hover {
-            background-color: #1D4ED8 !important; border-color: #1D4ED8 !important;
-        }
-        .st-key-_topright_logout_btn button {
-            background-color: #DC2626 !important; color: #fff !important;
-            border-color: #DC2626 !important;
-        }
-        .st-key-_topright_logout_btn button:hover {
-            background-color: #B91C1C !important; border-color: #B91C1C !important;
-        }
-        /* Reserve room up top so the fixed bar never sits over a tab's own
-           heading -- applied to the main content block specifically, not
-           the sidebar, which keeps its own normal top spacing. */
-        [data-testid="stAppViewContainer"] > .main [data-testid="stMainBlockContainer"] {
-            padding-top: 3.5rem;
-        }
-        </style>""",
-        unsafe_allow_html=True,
-    )
+st.markdown(
+    """<style>
+    .st-key-_topright_actions {
+        /* z-index has to clear Streamlit's own header/toolbar bar
+           (data-testid="stHeader"), which sits at z-index: 999990 --
+           invisible in this app (see the `header [data-testid="stToolbar"]
+           {visibility: hidden}` rule near the top of the file) but still
+           present and still stacked above ordinary page content, so
+           without this our fixed bar renders UNDER it and never appears. */
+        position: fixed !important; top: 0.75rem; right: 1.5rem; z-index: 1000000;
+        display: flex !important; flex-direction: row !important; gap: 8px;
+        align-items: flex-start;
+        justify-content: flex-end;
+        /* Streamlit's own emotion-cache classes on this container default
+           it to width: 100% (fine in normal flow, but once position:fixed
+           takes it out of flow that stretches it across the whole
+           viewport, pushing its flex-start-aligned children to the LEFT
+           edge instead of the right). Shrink it back to its content so
+           "right: 1.5rem" actually reads as "hug the right edge". */
+        width: fit-content !important; left: auto !important;
+        background: transparent;
+    }
+    /* Compact the popover trigger + Upgrade/Log out buttons so the row
+       stays a single slim horizontal strip instead of growing the banner
+       -- smaller padding and font than Streamlit's default button size. */
+    .st-key-_topright_actions button {
+        padding: 0.25rem 0.7rem !important;
+        font-size: 0.82rem !important;
+        min-height: 0 !important;
+    }
+    .st-key-_topright_upgrade_btn button, .st-key-_topright_upgrade_btn a {
+        background-color: #2563EB !important; color: #fff !important;
+        border-color: #2563EB !important;
+    }
+    .st-key-_topright_upgrade_btn button:hover, .st-key-_topright_upgrade_btn a:hover {
+        background-color: #1D4ED8 !important; border-color: #1D4ED8 !important;
+    }
+    .st-key-_topright_logout_btn button {
+        background-color: #DC2626 !important; color: #fff !important;
+        border-color: #DC2626 !important;
+    }
+    .st-key-_topright_logout_btn button:hover {
+        background-color: #B91C1C !important; border-color: #B91C1C !important;
+    }
+    /* Reserve room up top so the fixed bar never sits over a tab's own
+       heading -- applied to the main content block specifically, not
+       the sidebar, which keeps its own normal top spacing. */
+    [data-testid="stAppViewContainer"] > .main [data-testid="stMainBlockContainer"] {
+        padding-top: 3.5rem;
+    }
+    </style>""",
+    unsafe_allow_html=True,
+)
 
 tabs = st.tabs([
     "1 · Project Setup", "2 · Upload Documents",
@@ -2986,6 +3025,11 @@ with tabs[8]:
                         "notes": st.column_config.TextColumn("Notes"),
                     },
                 )
+                st.caption(
+                    "To delete a row: tick the checkbox on its left, then either press "
+                    "Delete/Backspace on your keyboard or click the 🗑 icon that appears "
+                    "above the table."
+                )
                 # Deferred apply -- same pattern as the discipline fee build-up
                 # table's checkbox (see the comment there for the full
                 # rationale). Rebuilding the model and re-adding Project
@@ -3100,6 +3144,11 @@ with tabs[8]:
                                                                 help="Calculated automatically -- total hours x rate per hour."),
                         "note": st.column_config.TextColumn("Note"),
                     },
+                )
+                st.caption(
+                    "To delete a row: tick the checkbox on its left, then either press "
+                    "Delete/Backspace on your keyboard or click the 🗑 icon that appears "
+                    "above the table."
                 )
                 # Deferred apply -- same rationale as the Large Scope discipline
                 # table's checkbox (see the comment there): the rebuild and the
@@ -3502,6 +3551,11 @@ with tabs[8]:
                     "note": st.column_config.TextColumn("Note"),
                 },
             )
+            st.caption(
+                "To delete a row: tick the checkbox on its left, then either press "
+                "Delete/Backspace on your keyboard or click the 🗑 icon that appears "
+                "above the table."
+            )
             # Deferred apply: rebuilding the model (dedup/dismiss logic) and
             # regenerating the Excel export + pie chart on literally every
             # keystroke-commit was a big contributor to the intermittent
@@ -3704,6 +3758,11 @@ with tabs[8]:
                         "notes": st.column_config.TextColumn("Notes"),
                     },
                 )
+                st.caption(
+                    "To delete a row: tick the checkbox on its left, then either press "
+                    "Delete/Backspace on your keyboard or click the 🗑 icon that appears "
+                    "above the table."
+                )
                 # Deferred apply -- same pattern as the discipline fee build-up
                 # table's checkbox (see the comment there for the full
                 # rationale).
@@ -3810,14 +3869,6 @@ with tabs[8]:
             )
             st.warning(fee_estimation_engine.INDICATIVE_NOTE)
 
-            st.number_input(
-                "Total project fee ($, excl. GST) -- optional",
-                min_value=0.0, step=1000.0, key="fee_estimate_manual_total",
-                help="Enter your own total to split by the discipline percentages below. Overrides "
-                     "both the brief's stated fee cap (if any) and the discipline fee build-up "
-                     "total above for this split only -- it doesn't change anything else in the tool.",
-            )
-            manual_total = st.session_state.fee_estimate_manual_total
             # Read from session_state rather than the discipline-table block's own
             # `rebuilt` local (that block is a separate, self-contained
             # @st.fragment, so its locals aren't in scope here) -- equivalent,
@@ -3825,6 +3876,24 @@ with tabs[8]:
             # st.session_state.discipline_fee_lines before returning.
             buildup_discs = [l.discipline for l in st.session_state.discipline_fee_lines]
             buildup_total = sum(l.fee_amount for l in st.session_state.discipline_fee_lines)
+
+            # Prepopulate the total from the discipline fee build-up the first time
+            # this is used (0.0 = "not yet set") -- after that it's an independent
+            # figure the user can edit freely, even if the build-up total changes
+            # later, rather than staying permanently locked to it. Same pattern as
+            # the Small Scope pack's letter_fee_total_override, below.
+            if not st.session_state.fee_estimate_manual_total and buildup_total:
+                st.session_state.fee_estimate_manual_total = buildup_total
+
+            st.number_input(
+                "Total project fee ($, excl. GST) -- optional",
+                min_value=0.0, step=1000.0, key="fee_estimate_manual_total",
+                help="Starts prepopulated from the discipline fee build-up total above, then stays "
+                     "independently editable -- change it here to use a different total for this "
+                     "split's $ column, Excel export, and chart only. Doesn't change the build-up "
+                     "table itself.",
+            )
+            manual_total = st.session_state.fee_estimate_manual_total
 
             def _reconcile_estimates(estimates):
                 by_disc = {resourcing.canonical_discipline(e.discipline): e for e in (estimates or [])}
