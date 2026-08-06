@@ -204,6 +204,27 @@ def seed_scope_item_fees(scope_items: list, total_estimate: float | None = None)
     return fees
 
 
+# Project Management is always included as a fixed line item in the
+# scope-item / deliverable fee tables, in addition to whatever deliverables
+# Tender Analysis extracts -- mirrors resourcing.ALWAYS_INCLUDED_DISCIPLINE /
+# resourcing.ensure_project_management_present() for the discipline fee
+# build-up table, applied here to the deliverable/scope-item fee table instead.
+ALWAYS_INCLUDED_ITEM = "Project Management"
+
+
+def ensure_project_management_present(fees: list[ScopeItemFee]) -> list[ScopeItemFee]:
+    """
+    Guarantee a "Project Management" row is present in a scope-item/deliverable
+    fee list, appending one (at $0, to be priced) if it's missing -- whether
+    because the list hasn't been seeded with it yet, or because the user
+    deleted it via the editor. Matching is case-insensitive on item_title.
+    """
+    if any(f.item_title.strip().lower() == ALWAYS_INCLUDED_ITEM.lower() for f in fees):
+        return fees
+    return fees + [ScopeItemFee(item_title=ALWAYS_INCLUDED_ITEM, fee_amount=0.0,
+                                 notes="Fixed line item -- always included in addition to deliverables")]
+
+
 def _load_benchmarks() -> dict:
     with open(_BENCHMARKS_PATH, "r", encoding="utf-8") as f:
         return json.load(f)

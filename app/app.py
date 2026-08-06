@@ -407,6 +407,20 @@ def _init_state():
         # never re-added by the brief-sync merge (separate from
         # dismissed_disciplines, which is the Team & Resourcing tab's own list).
         "dismissed_fee_disciplines": [],
+        # Bump counters folded into the discipline/scope-item fee data_editor
+        # widget keys below -- st.data_editor with a fixed key ignores its
+        # `data` argument on every rerun after the first (the widget owns its
+        # state once created), so merging a newly-extracted discipline or
+        # scope item into the underlying session_state list alone is not
+        # enough: the editor keeps showing whatever it first rendered,
+        # forever, even across a fresh Tender Analysis run. Bumping the
+        # version whenever a genuinely new row gets merged in forces a fresh
+        # widget instance (which picks up the merged data) without touching
+        # the key on every ordinary rerun, which would instead throw away
+        # in-progress edits. See the merge blocks on the Fee Estimate tab.
+        "_discipline_fee_editor_version": 0,
+        "_scope_fee_editor_version": 0,
+        "_large_scope_fee_editor_version": 0,
         "scope_item_fees": [],
         "fee_seed_total": 0.0,
         # Manually-entered total project fee for the indicative benchmark split
@@ -2845,7 +2859,10 @@ with tabs[8]:
                     )
 
             if not st.session_state.scope_item_fees:
-                st.session_state.scope_item_fees = fee_estimation_engine.seed_scope_item_fees(scope_items, None)
+                st.session_state.scope_item_fees = fee_estimation_engine.ensure_project_management_present(
+                    fee_estimation_engine.seed_scope_item_fees(scope_items, None)
+                )
+                st.session_state._scope_fee_editor_version += 1
             else:
                 # Add any newly-extracted scope items (e.g. after a Tender Analysis
                 # re-run) without wiping rows the user has already priced, added, or
@@ -2858,6 +2875,22 @@ with tabs[8]:
                             fee_estimation_engine.ScopeItemFee(item_title=item.title, fee_amount=0.0,
                                                                notes="Enter fee -- no estimate seeded")
                         )
+                        # Force the data_editor below to actually pick up this new row --
+                        # it ignores its `data` argument once its widget state already
+                        # exists under a given key, so a merge alone would silently never
+                        # show up until the key itself changes. See the state-defaults
+                        # comment for _scope_fee_editor_version.
+                        st.session_state._scope_fee_editor_version += 1
+                # Project Management is a fixed line item, additional to whatever
+                # deliverables Tender Analysis extracts -- re-add it if a fresh
+                # Tender Analysis run reset the list without it (first-time seed
+                # above already guarantees it; this covers older projects/state).
+                if not any(f.item_title.strip().lower() == fee_estimation_engine.ALWAYS_INCLUDED_ITEM.lower()
+                           for f in st.session_state.scope_item_fees):
+                    st.session_state.scope_item_fees = fee_estimation_engine.ensure_project_management_present(
+                        st.session_state.scope_item_fees
+                    )
+                    st.session_state._scope_fee_editor_version += 1
 
             # Built from st.session_state.scope_item_fees itself (not re-derived from
             # scope_items every rerun) so rows the user adds, renames, or deletes via
@@ -2868,7 +2901,8 @@ with tabs[8]:
                 for f in st.session_state.scope_item_fees
             ]
             edited_fees = st.data_editor(
-                fee_rows, key="scope_fee_editor", use_container_width=True, hide_index=True,
+                fee_rows, key=f"scope_fee_editor_v{st.session_state._scope_fee_editor_version}",
+                use_container_width=True, hide_index=True,
                 num_rows="dynamic",
                 column_config={
                     "item_title": st.column_config.TextColumn("Scope item / deliverable", required=True),
@@ -2876,7 +2910,7 @@ with tabs[8]:
                     "notes": st.column_config.TextColumn("Notes"),
                 },
             )
-            st.session_state.scope_item_fees = [
+            rebuilt_scope_fees = [
                 fee_estimation_engine.ScopeItemFee(
                     item_title=str(r.get("item_title") or "").strip(),
                     fee_amount=float(r.get("fee_amount") or 0), notes=str(r.get("notes") or ""),
@@ -2884,6 +2918,15 @@ with tabs[8]:
                 for r in edited_fees
                 if str(r.get("item_title") or "").strip()
             ]
+            # Project Management is a fixed line item -- if the user deleted it via
+            # the editor's own row-delete control, silently re-add it (mirrors the
+            # discipline fee table's "always re-add Project Management" behaviour).
+            _had_pm = any(f.item_title.strip().lower() == fee_estimation_engine.ALWAYS_INCLUDED_ITEM.lower()
+                          for f in rebuilt_scope_fees)
+            st.session_state.scope_item_fees = fee_estimation_engine.ensure_project_management_present(rebuilt_scope_fees)
+            if not _had_pm:
+                st.session_state._scope_fee_editor_version += 1
+                st.info("Project Management is a fixed line item and has been re-added.")
             total = sum(f.fee_amount for f in st.session_state.scope_item_fees)
             st.markdown(f"**Total: ${total:,.0f}**")
             if any(f.fee_amount <= 0 for f in st.session_state.scope_item_fees):
@@ -2907,11 +2950,17 @@ with tabs[8]:
 
             if not st.session_state.discipline_fee_lines:
                 st.session_state.discipline_fee_lines = resourcing.seed_discipline_fee_lines(letter_brief_disc)
+                st.session_state._discipline_fee_editor_version += 1
             else:
                 existing_fee_discs = {resourcing.canonical_discipline(l.discipline) for l in st.session_state.discipline_fee_lines}
                 for disc in resourcing.required_disciplines(letter_brief_disc):
                     if disc not in existing_fee_discs and disc.lower() not in letter_dismissed_fee:
                         st.session_state.discipline_fee_lines.append(resourcing.DisciplineFeeLine(discipline=disc))
+                        # Force the data_editor below to re-seed from the underlying
+                        # data model -- it otherwise ignores its `data` argument once
+                        # its widget state already exists under a given key. See the
+                        # state-defaults comment for _discipline_fee_editor_version.
+                        st.session_state._discipline_fee_editor_version += 1
 
             letter_disc_fee_rows = [
                 {
@@ -2926,7 +2975,9 @@ with tabs[8]:
             letter_before_discs = {r["discipline"].strip() for r in letter_disc_fee_rows if r["discipline"].strip()}
 
             letter_edited_disc_fees = st.data_editor(
-                letter_disc_fee_rows, key="letter_discipline_fee_editor", use_container_width=True,
+                letter_disc_fee_rows,
+                key=f"letter_discipline_fee_editor_v{st.session_state._discipline_fee_editor_version}",
+                use_container_width=True,
                 hide_index=True, num_rows="dynamic",
                 column_config={
                     "discipline": st.column_config.TextColumn("Discipline", required=True),
@@ -2957,9 +3008,15 @@ with tabs[8]:
                 ))
 
             letter_present = [l.discipline for l in letter_rebuilt]
-            for missing in set(resourcing.ensure_project_management_present(letter_present)) - set(letter_present):
+            letter_missing_always = set(resourcing.ensure_project_management_present(letter_present)) - set(letter_present)
+            for missing in letter_missing_always:
                 letter_rebuilt.append(resourcing.DisciplineFeeLine(discipline=missing,
                                                                     note="Always included -- re-added automatically"))
+            if letter_missing_always:
+                # The user deleted Project Management via the editor's row-delete
+                # control -- it's being silently re-added to the data model, but the
+                # editor widget itself won't show it again until its key changes.
+                st.session_state._discipline_fee_editor_version += 1
             st.session_state.discipline_fee_lines = letter_rebuilt
 
             letter_disc_total = sum(l.fee_amount for l in letter_rebuilt)
@@ -3189,6 +3246,7 @@ with tabs[8]:
 
         if not st.session_state.discipline_fee_lines:
             st.session_state.discipline_fee_lines = resourcing.seed_discipline_fee_lines(brief_disc)
+            st.session_state._discipline_fee_editor_version += 1
         else:
             # Add any newly-required disciplines (e.g. after a Tender Analysis re-run
             # picks up more of them) without wiping existing entries -- but never
@@ -3197,6 +3255,11 @@ with tabs[8]:
             for disc in resourcing.required_disciplines(brief_disc):
                 if disc not in existing_fee_discs and disc.lower() not in dismissed_fee:
                     st.session_state.discipline_fee_lines.append(resourcing.DisciplineFeeLine(discipline=disc))
+                    # Force the data_editor below to re-seed from the underlying data
+                    # model -- it otherwise ignores its `data` argument once its
+                    # widget state already exists under a given key. See the
+                    # state-defaults comment for _discipline_fee_editor_version.
+                    st.session_state._discipline_fee_editor_version += 1
 
         disc_fee_rows = [
             {
@@ -3211,7 +3274,8 @@ with tabs[8]:
         before_discs = {r["discipline"].strip() for r in disc_fee_rows if r["discipline"].strip()}
 
         edited_disc_fees = st.data_editor(
-            disc_fee_rows, key="discipline_fee_editor", use_container_width=True,
+            disc_fee_rows, key=f"discipline_fee_editor_v{st.session_state._discipline_fee_editor_version}",
+            use_container_width=True,
             hide_index=True, num_rows="dynamic",
             column_config={
                 "discipline": st.column_config.TextColumn("Discipline", required=True),
@@ -3247,9 +3311,15 @@ with tabs[8]:
             ))
 
         present = [l.discipline for l in rebuilt]
-        for missing in set(resourcing.ensure_project_management_present(present)) - set(present):
+        missing_always = set(resourcing.ensure_project_management_present(present)) - set(present)
+        for missing in missing_always:
             rebuilt.append(resourcing.DisciplineFeeLine(discipline=missing,
                                                         note="Always included -- re-added automatically"))
+        if missing_always:
+            # The user deleted Project Management via the editor's row-delete
+            # control -- it's being silently re-added to the data model, but the
+            # editor widget itself won't show it again until its key changes.
+            st.session_state._discipline_fee_editor_version += 1
         st.session_state.discipline_fee_lines = rebuilt
 
         disc_total = sum(l.fee_amount for l in rebuilt)
@@ -3302,7 +3372,10 @@ with tabs[8]:
                 "automatically (the discipline build-up above is what feeds the pack)."
             )
             if not st.session_state.scope_item_fees:
-                st.session_state.scope_item_fees = fee_estimation_engine.seed_scope_item_fees(_large_scope_items, None)
+                st.session_state.scope_item_fees = fee_estimation_engine.ensure_project_management_present(
+                    fee_estimation_engine.seed_scope_item_fees(_large_scope_items, None)
+                )
+                st.session_state._large_scope_fee_editor_version += 1
             else:
                 _existing_titles = {f.item_title.strip().lower() for f in st.session_state.scope_item_fees}
                 for _item in _large_scope_items:
@@ -3311,13 +3384,28 @@ with tabs[8]:
                             fee_estimation_engine.ScopeItemFee(item_title=_item.title, fee_amount=0.0,
                                                                notes="Enter fee -- no estimate seeded")
                         )
+                        # Force the data_editor below to re-seed from the underlying
+                        # data model -- it otherwise ignores its `data` argument once
+                        # its widget state already exists under a given key. See the
+                        # state-defaults comment for _large_scope_fee_editor_version.
+                        st.session_state._large_scope_fee_editor_version += 1
+                # Project Management is a fixed line item, additional to whatever
+                # deliverables Tender Analysis extracts -- re-add it if missing.
+                if not any(f.item_title.strip().lower() == fee_estimation_engine.ALWAYS_INCLUDED_ITEM.lower()
+                           for f in st.session_state.scope_item_fees):
+                    st.session_state.scope_item_fees = fee_estimation_engine.ensure_project_management_present(
+                        st.session_state.scope_item_fees
+                    )
+                    st.session_state._large_scope_fee_editor_version += 1
 
             _large_fee_rows = [
                 {"item_title": f.item_title, "fee_amount": f.fee_amount, "notes": f.notes}
                 for f in st.session_state.scope_item_fees
             ]
             _large_edited_fees = st.data_editor(
-                _large_fee_rows, key="large_scope_fee_editor", use_container_width=True, hide_index=True,
+                _large_fee_rows,
+                key=f"large_scope_fee_editor_v{st.session_state._large_scope_fee_editor_version}",
+                use_container_width=True, hide_index=True,
                 num_rows="dynamic",
                 column_config={
                     "item_title": st.column_config.TextColumn("Scope item / deliverable", required=True),
@@ -3325,7 +3413,7 @@ with tabs[8]:
                     "notes": st.column_config.TextColumn("Notes"),
                 },
             )
-            st.session_state.scope_item_fees = [
+            _large_rebuilt_scope_fees = [
                 fee_estimation_engine.ScopeItemFee(
                     item_title=str(r.get("item_title") or "").strip(),
                     fee_amount=float(r.get("fee_amount") or 0), notes=str(r.get("notes") or ""),
@@ -3333,6 +3421,16 @@ with tabs[8]:
                 for r in _large_edited_fees
                 if str(r.get("item_title") or "").strip()
             ]
+            # Project Management is a fixed line item -- if the user deleted it via
+            # the editor's own row-delete control, silently re-add it.
+            _large_had_pm = any(f.item_title.strip().lower() == fee_estimation_engine.ALWAYS_INCLUDED_ITEM.lower()
+                                for f in _large_rebuilt_scope_fees)
+            st.session_state.scope_item_fees = fee_estimation_engine.ensure_project_management_present(
+                _large_rebuilt_scope_fees
+            )
+            if not _large_had_pm:
+                st.session_state._large_scope_fee_editor_version += 1
+                st.info("Project Management is a fixed line item and has been re-added.")
             _large_scope_fee_total = sum(f.fee_amount for f in st.session_state.scope_item_fees)
             st.markdown(f"**Total: ${_large_scope_fee_total:,.0f}**")
 
