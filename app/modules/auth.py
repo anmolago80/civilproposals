@@ -24,9 +24,16 @@ Design notes:
     is already part of the iframe's initial content -- so there's nothing
     for a slow network to race.
   - The trial is usage-based (N distinct proposals), not time-based, per
-    product decision: 3 free proposals, then a $200/month subscription
-    (see billing.py) that also covers AI usage -- the app no longer asks
-    each user for their own AI provider key in SAAS_MODE (see app.py).
+    product decision: 1 free bid on sign up, then pay per bid or subscribe
+    monthly (see the landing page pricing section) -- the app no longer
+    asks each user for their own AI provider key in SAAS_MODE (see app.py).
+    NOTE: billing.py itself still only knows how to sell a single flat
+    subscription (STRIPE_PRICE_ID) -- the separate "$50/bid pay-as-you-go"
+    and "$130/month, 3 bids" tiers shown on the landing page aren't wired
+    up to real Stripe products yet. That needs new Prices created in the
+    Stripe dashboard and billing.py extended to offer the right one; until
+    then, "Upgrade" in the app checks out against whatever single price
+    STRIPE_PRICE_ID points to.
   - Nothing in this module trusts st.session_state alone for "is this user
     allowed in" -- session_state is rebuilt from the verified cookie token
     on every rerun, so a user can't fake being logged in by manipulating
@@ -352,8 +359,8 @@ def require_login() -> db.User:
                 password = st.text_input("Password", type="password", key="signup_password",
                                           help="At least 8 characters.")
                 confirm_password = st.text_input("Confirm password", type="password", key="signup_confirm_password")
-                st.caption(f"Free trial: {DEFAULT_TRIAL_LIMIT} full proposals, no card required. "
-                           f"Then $200/month, cancel anytime.")
+                st.caption(f"Free trial: {DEFAULT_TRIAL_LIMIT} full bid, no card required. "
+                           f"Then pay per bid, or subscribe monthly -- see pricing on the homepage.")
                 submitted = st.form_submit_button("Create account", type="primary", use_container_width=True)
             if submitted:
                 if password != confirm_password:
@@ -369,7 +376,16 @@ def require_login() -> db.User:
     st.stop()
 
 
-DEFAULT_TRIAL_LIMIT = 3
+DEFAULT_TRIAL_LIMIT = 1
+
+# Accounts that get real unlimited access -- they never actually get
+# blocked, no matter how many bids they run -- but still see the normal
+# "trial limit reached, upgrade" banner once their notional trial credits
+# would otherwise be exhausted. Added so the account holder can preview
+# and test that banner's design/copy on a live account without either (a)
+# genuinely being cut off, or (b) needing a second throwaway account.
+# Lowercased/stripped to match how emails are stored (see create_user()).
+UNLIMITED_PREVIEW_ACCOUNTS = {"anmolago@icloud.com"}
 
 
 # ---------------------------------------------------------------------------
@@ -379,19 +395,30 @@ DEFAULT_TRIAL_LIMIT = 3
 def get_access_status(user: db.User) -> dict:
     """
     Returns {"allowed": bool, "reason": str, "trial_remaining": int,
-    "subscribed": bool} -- the single source of truth app.py uses to decide
-    whether to show the paywall instead of the tabs, and whether to count a
-    new proposal against the trial.
+    "subscribed": bool, "limit_reached": bool} -- the single source of
+    truth app.py uses to decide whether to show the paywall instead of the
+    tabs, and whether to count a new proposal against the trial.
+
+    "limit_reached" is true once trial credits are used up and there's no
+    active subscription -- for almost everyone this is exactly when
+    "allowed" also goes false. The one exception is
+    UNLIMITED_PREVIEW_ACCOUNTS: "allowed" stays true for them regardless
+    (so they're never actually blocked), but "limit_reached" still flips
+    true so the sidebar can show them the same "upgrade" banner a normal
+    account would see at that point.
     """
     subscribed = user.subscription_status in ("active", "past_due")  # grace period on past_due
     trial_remaining = max(0, (user.trial_proposals_limit or 0) - (user.trial_proposals_used or 0))
-    allowed = subscribed or trial_remaining > 0
+    is_unlimited_preview = (user.email or "").strip().lower() in UNLIMITED_PREVIEW_ACCOUNTS
+    limit_reached = trial_remaining <= 0 and not subscribed
+    allowed = subscribed or trial_remaining > 0 or is_unlimited_preview
     return {
         "allowed": allowed,
         "subscribed": user.subscription_status == "active",
         "past_due": user.subscription_status == "past_due",
         "trial_remaining": trial_remaining,
         "trial_limit": user.trial_proposals_limit or 0,
+        "limit_reached": limit_reached,
     }
 
 
