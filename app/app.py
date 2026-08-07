@@ -373,6 +373,7 @@ def _init_state():
         "project_differentiator": "",
         "project_sales_pitch": "",
         "pitch_review": None,
+        "pitch_questions": None,
         "tender_summary_buffer": None,
         "graphics": None,
         "weighting_chart_png": None,
@@ -581,6 +582,7 @@ def _reset_downstream_from_brief() -> None:
         "team_intro": None,
         "experience_intro": None,
         "pitch_review": None,
+        "pitch_questions": None,
         "tender_summary_buffer": None,
         "graphics": None,
         "weighting_chart_png": None,
@@ -2344,6 +2346,63 @@ with tabs[5]:
                 st.error(f"Pitch review failed: {exc}")
     if not st.session_state.ai_config.get("api_key"):
         st.caption("Configure an AI provider in the sidebar first.")
+
+    st.markdown("**Sharpen further with follow-up questions**")
+    st.caption(
+        "Generates a few targeted questions about whatever's still vague or unsupported in what "
+        "you've written above (up to 4 per field), then folds your answers straight into a sharper "
+        "rewrite -- same rule as everywhere else on this page, nothing added beyond what you type. "
+        "Only runs when you click the button, never automatically."
+    )
+    if st.button("Get sharpening questions", disabled=not _pitch_ready, key="get_pitch_questions_btn"):
+        with st.spinner("Coming up with follow-up questions..."):
+            try:
+                for i in range(4):
+                    st.session_state.pop(f"diff_qa_{i}", None)
+                    st.session_state.pop(f"pitch_qa_{i}", None)
+                st.session_state.pitch_questions = pitch_review_module.generate_pitch_questions(
+                    st.session_state.project_differentiator, st.session_state.project_sales_pitch,
+                    st.session_state.analysis, _project_info(), st.session_state.ai_config,
+                )
+            except Exception as exc:
+                st.error(f"Couldn't generate questions: {exc}")
+
+    if st.session_state.pitch_questions:
+        pq = st.session_state.pitch_questions
+        if not pq.differentiator_questions and not pq.sales_pitch_questions:
+            st.caption("Both already read specific and concrete -- no follow-up questions needed.")
+        else:
+            qcol1, qcol2 = st.columns(2)
+            with qcol1:
+                if pq.differentiator_questions:
+                    st.markdown("*Differentiator*")
+                    for i, q in enumerate(pq.differentiator_questions):
+                        st.text_input(q, key=f"diff_qa_{i}")
+            with qcol2:
+                if pq.sales_pitch_questions:
+                    st.markdown("*Sales pitch*")
+                    for i, q in enumerate(pq.sales_pitch_questions):
+                        st.text_input(q, key=f"pitch_qa_{i}")
+
+            if st.button("Sharpen with my answers", key="sharpen_with_answers_btn", type="primary"):
+                with st.spinner("Sharpening with your answers..."):
+                    try:
+                        _diff_qa = [
+                            (q, st.session_state.get(f"diff_qa_{i}", ""))
+                            for i, q in enumerate(pq.differentiator_questions)
+                        ]
+                        _pitch_qa = [
+                            (q, st.session_state.get(f"pitch_qa_{i}", ""))
+                            for i, q in enumerate(pq.sales_pitch_questions)
+                        ]
+                        st.session_state.pitch_review = pitch_review_module.review_pitch(
+                            st.session_state.project_differentiator, st.session_state.project_sales_pitch,
+                            st.session_state.analysis, _project_info(), st.session_state.ai_config,
+                            differentiator_qa=_diff_qa, sales_pitch_qa=_pitch_qa,
+                        )
+                        st.success("Sharpened using your answers -- see the rewrite below.")
+                    except Exception as exc:
+                        st.error(f"Sharpening failed: {exc}")
 
     if st.session_state.pitch_review:
         pr = st.session_state.pitch_review
