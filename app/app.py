@@ -1277,6 +1277,63 @@ def _render_export_import_popover_body() -> None:
         )
 
 
+def _render_proposal_library_popover_body() -> None:
+    """Contents of the top banner's "Proposal Library" popover -- browse and
+    download proposals archived from the Export Pack tab ('Archive to
+    Library'). Used to live as an always-collapsed expander at the bottom
+    of Project Setup; moved up here (same popover treatment as "My
+    projects" / "Export / Import") so it's reachable from any tab, not
+    just Project Setup, and reads as one family of "banner-level" actions
+    rather than being buried further down the page."""
+    st.caption(
+        "Proposals you've archived from the Export Pack tab ('Archive to Library'). "
+        "Nothing lands here automatically -- archive a pack once you're happy with it. "
+        "Download any entry with the button below; your browser's own Save As dialog "
+        "lets you pick any folder, including a location on your C: drive."
+    )
+    _lib_pack_type = "small_scope" if _is_letter() else "large_scope"
+    _lib_pack_label = "Small Scope" if _is_letter() else "Large Scope"
+    _lib_type_filter = st.selectbox(
+        "Filter by project type", ["All"] + PROJECT_TYPES, key="lib_setup_type_filter",
+    )
+    st.caption(
+        f"Showing **{_lib_pack_label}** proposals for "
+        f"**{'all disciplines' if _lib_type_filter == 'All' else _lib_type_filter}** -- "
+        "matches the proposal format currently selected in Project Setup ('Which does "
+        "this pursuit need?'). Switch that to see the other pack size's archive instead."
+    )
+    _lib_entries = proposal_library.list_library(
+        _lib_user_id(),
+        None if _lib_type_filter == "All" else _lib_type_filter,
+        pack_type=_lib_pack_type,
+    )
+    if not _lib_entries:
+        st.caption(
+            "Nothing archived yet" + ("" if _lib_type_filter == "All" else f" for {_lib_type_filter}")
+            + f" ({_lib_pack_label})."
+        )
+    else:
+        for _e in _lib_entries:
+            _lcol1, _lcol2 = st.columns([5, 1])
+            with _lcol1:
+                _client_bit = f" | client: {_e['client_name']}" if _e.get("client_name") else ""
+                st.markdown(
+                    f"**{_e.get('project_name') or _e.get('tender_name') or 'Untitled'}** -- "
+                    f"{_e.get('project_type', '')} | archived {_e.get('archived_at', '')}"
+                    f"{_client_bit}"
+                )
+            with _lcol2:
+                try:
+                    _lib_bytes = proposal_library.read_entry_bytes(_lib_user_id(), _e["path"])
+                    st.download_button(
+                        "Download", data=_lib_bytes, file_name=_e.get("filename", "proposal.docx"),
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        key=f"lib_dl_{_e.get('filename')}",
+                    )
+                except Exception:
+                    st.caption("File unavailable")
+
+
 # Top banner -- static in the browser window's top right corner (per the
 # user's request), not just the top of the left-hand sidebar column.
 # Rendered here in the MAIN content area (not inside `with st.sidebar:`)
@@ -1298,6 +1355,8 @@ def _render_export_import_popover_body() -> None:
 with st.container(key="_topright_actions"):
     with st.popover("📁 My projects", width="content"):
         _render_my_projects_popover_body()
+    with st.popover("📁 Proposal Library", width="content"):
+        _render_proposal_library_popover_body()
     with st.popover("⇅ Export / Import", width="content"):
         _render_export_import_popover_body()
     if IS_SAAS_MODE and current_user:
@@ -1440,54 +1499,10 @@ with tabs[0]:
             st.text_input("Sender email", key="letter_sender_email")
 
     st.divider()
-    with st.expander("Proposal Library -- browse & download archived proposals"):
-        st.caption(
-            "Proposals you've archived from the Export Pack tab ('Archive to Library'), filed "
-            "under library/<Project Type>/. Nothing lands here automatically -- archive a pack "
-            "once you're happy with it. Download any entry with the button below; your browser's "
-            "own Save As dialog lets you pick any folder, including a location on your C: drive."
-        )
-        _lib_pack_type = "small_scope" if _is_letter() else "large_scope"
-        _lib_pack_label = "Small Scope" if _is_letter() else "Large Scope"
-        _lib_type_filter = st.selectbox(
-            "Filter by project type", ["All"] + PROJECT_TYPES, key="lib_setup_type_filter",
-        )
-        st.caption(
-            f"Showing **{_lib_pack_label}** proposals for "
-            f"**{'all disciplines' if _lib_type_filter == 'All' else _lib_type_filter}** -- "
-            "matches the pursuit size currently selected above ('Which does this pursuit "
-            "need?'). Switch that to see the other pack size's archive instead."
-        )
-        _lib_entries = proposal_library.list_library(
-            _lib_user_id(),
-            None if _lib_type_filter == "All" else _lib_type_filter,
-            pack_type=_lib_pack_type,
-        )
-        if not _lib_entries:
-            st.caption(
-                "Nothing archived yet" + ("" if _lib_type_filter == "All" else f" for {_lib_type_filter}")
-                + f" ({_lib_pack_label})."
-            )
-        else:
-            for _e in _lib_entries:
-                _lcol1, _lcol2 = st.columns([5, 1])
-                with _lcol1:
-                    _client_bit = f" | client: {_e['client_name']}" if _e.get("client_name") else ""
-                    st.markdown(
-                        f"**{_e.get('project_name') or _e.get('tender_name') or 'Untitled'}** -- "
-                        f"{_e.get('project_type', '')} | archived {_e.get('archived_at', '')}"
-                        f"{_client_bit}"
-                    )
-                with _lcol2:
-                    try:
-                        _lib_bytes = proposal_library.read_entry_bytes(_lib_user_id(), _e["path"])
-                        st.download_button(
-                            "Download", data=_lib_bytes, file_name=_e.get("filename", "proposal.docx"),
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            key=f"lib_dl_{_e.get('filename')}",
-                        )
-                    except Exception:
-                        st.caption("File unavailable")
+    st.caption(
+        "📁 Looking for the Proposal Library (browse & download archived proposals)? "
+        "It's moved up to the top banner, next to 'My projects'."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -4431,7 +4446,7 @@ with tabs[9]:
             "Archive this generated proposal into the Proposal Library "
             f"(library/{st.session_state.project_type or '<project type>'}/) for reuse later -- "
             "as a 'Previous proposals' reference in Upload Docs, or to browse and "
-            "download from Project Setup. Nothing is archived automatically; click below "
+            "download from the 'Proposal Library' button in the top banner. Nothing is archived automatically; click below "
             "whenever you're happy with this version. Only the proposal DOCX itself is archived, "
             "not the Tender Summary or the PowerPoint companions above."
         )
