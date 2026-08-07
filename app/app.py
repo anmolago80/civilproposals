@@ -853,7 +853,13 @@ def _ensure_divider_config(sections) -> None:
                 "layout": layout,
                 "photo_index": (i % len(photos)) if photos else None,
                 "quote_index": None,
+                "photo_caption": "",
             }
+        else:
+            # Back-fill for configs created before "photo_caption" existed
+            # (older saved/autosaved projects) -- never clobber a value
+            # that's already there.
+            config[s.title].setdefault("photo_caption", "")
     # Drop config for sections that no longer exist (e.g. after a structure rebuild).
     current_titles = {s.title for s in sections}
     for stale in [t for t in config if t not in current_titles]:
@@ -2587,7 +2593,7 @@ with tabs[6]:
         for section in st.session_state.sections:
             cfg = config[section.title]
             with st.expander(f"{section.section_number}. {section.title}"):
-                c1, c2, c3 = st.columns(3)
+                c1, c2, c3, c4 = st.columns(4)
                 with c1:
                     layout = st.selectbox(
                         "Layout", available_layouts,
@@ -2610,9 +2616,18 @@ with tabs[6]:
                         index=(quote_idx + 1) if quote_idx is not None else 0,
                         key=f"quote_{section.title}", disabled=not st.session_state.quotes,
                     )
+                with c4:
+                    photo_caption = st.text_input(
+                        "Photo title", value=cfg.get("photo_caption", ""),
+                        placeholder="e.g. Mangaweka Bridge",
+                        key=f"photo_caption_{section.title}", disabled=not photos,
+                        help="Shown bottom-right of the photo itself, not the coloured band. "
+                             "Only used when this section has a photo.",
+                    )
                 cfg["layout"] = layout
                 cfg["photo_index"] = None if photo_choice == "(none)" else int(photo_choice.split()[-1]) - 1
                 cfg["quote_index"] = None if quote_choice == "(none)" else quote_options.index(quote_choice) - 1
+                cfg["photo_caption"] = photo_caption.strip()
 
                 existing = st.session_state.divider_images.get(section.title)
                 if existing:
@@ -2631,9 +2646,17 @@ with tabs[6]:
             for section in st.session_state.sections:
                 cfg = config[section.title]
                 photo_bytes = photos[cfg["photo_index"]] if cfg["photo_index"] is not None and photos else None
+                _quote_idx = cfg.get("quote_index")
+                _picked_quote = (
+                    st.session_state.quotes[_quote_idx]
+                    if _quote_idx is not None and _quote_idx < len(st.session_state.quotes) else None
+                )
                 png = divider_designer.render_full_page_divider(
                     section.title, cfg["layout"], theme_name, photo_bytes=photo_bytes,
                     section_label=str(section.section_number),
+                    quote_text=_picked_quote["text"] if _picked_quote else None,
+                    quote_attribution=_picked_quote["attribution"] if _picked_quote else None,
+                    photo_caption=cfg.get("photo_caption") or None,
                 )
                 if png:
                     new_divider_images[section.title] = png
