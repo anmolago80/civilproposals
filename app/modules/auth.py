@@ -27,13 +27,11 @@ Design notes:
     product decision: 1 free bid on sign up, then pay per bid or subscribe
     monthly (see the landing page pricing section) -- the app no longer
     asks each user for their own AI provider key in SAAS_MODE (see app.py).
-    NOTE: billing.py itself still only knows how to sell a single flat
-    subscription (STRIPE_PRICE_ID) -- the separate "$50/bid pay-as-you-go"
-    and "$130/month, 3 bids" tiers shown on the landing page aren't wired
-    up to real Stripe products yet. That needs new Prices created in the
-    Stripe dashboard and billing.py extended to offer the right one; until
-    then, "Upgrade" in the app checks out against whatever single price
-    STRIPE_PRICE_ID points to.
+    Both real tiers are wired to Stripe: the $120/month subscription
+    (STRIPE_PRICE_ID, mode="subscription", unlimited while active) and the
+    $50/bid pay-as-you-go (STRIPE_BID_PRICE_ID, mode="payment", each
+    purchase adds one db.User.bid_credits, spent by record_proposal_usage
+    only after the free trial runs out -- see billing.py).
   - Nothing in this module trusts st.session_state alone for "is this user
     allowed in" -- session_state is rebuilt from the verified cookie token
     on every rerun, so a user can't fake being logged in by manipulating
@@ -485,10 +483,10 @@ UNLIMITED_ACCOUNTS = {"anmolago@icloud.com"}
 def get_access_status(user: db.User) -> dict:
     """
     Returns {"allowed": bool, "reason": str, "trial_remaining": int,
-    "subscribed": bool, "limit_reached": bool, "unlimited": bool} -- the
-    single source of truth app.py uses to decide whether to show the
-    paywall instead of the tabs, and whether to count a new proposal
-    against the trial.
+    "subscribed": bool, "limit_reached": bool, "unlimited": bool,
+    "bid_credits": int} -- the single source of truth app.py uses to decide
+    whether to show the paywall instead of the tabs, and whether to count a
+    new proposal against the trial (see record_proposal_usage).
 
     trial_limit is always DEFAULT_TRIAL_LIMIT, not user.trial_proposals_limit
     -- the trial size is a single product-wide constant, not something that
@@ -498,22 +496,30 @@ def get_access_status(user: db.User) -> dict:
     when they signed up, not an entitlement, so it's ignored here in favour
     of whatever DEFAULT_TRIAL_LIMIT currently is).
 
-    "limit_reached" is true once trial credits are used up and there's no
-    active subscription -- for everyone except UNLIMITED_ACCOUNTS, this is
-    exactly when "allowed" also goes false. UNLIMITED_ACCOUNTS never see
-    limit_reached go true and are always "allowed" -- see "unlimited" below.
+    bid_credits is the pay-as-you-go balance (see db.User.bid_credits) --
+    real, paid credits from $50 one-time Stripe Checkouts, spent AFTER the
+    free trial runs out, same "unlimited while subscribed" carve-out as
+    trial credits: an active subscription never touches this balance at all.
+
+    "limit_reached" is true once BOTH trial credits and bid credits are used
+    up and there's no active subscription -- for everyone except
+    UNLIMITED_ACCOUNTS, this is exactly when "allowed" also goes false.
+    UNLIMITED_ACCOUNTS never see limit_reached go true and are always
+    "allowed" -- see "unlimited" below.
     """
     subscribed = user.subscription_status in ("active", "past_due")  # grace period on past_due
     is_unlimited = (user.email or "").strip().lower() in UNLIMITED_ACCOUNTS
     trial_remaining = max(0, DEFAULT_TRIAL_LIMIT - (user.trial_proposals_used or 0))
-    limit_reached = trial_remaining <= 0 and not subscribed and not is_unlimited
-    allowed = subscribed or trial_remaining > 0 or is_unlimited
+    bid_credits = max(0, user.bid_credits or 0)
+    limit_reached = trial_remaining <= 0 and bid_credits <= 0 and not subscribed and not is_unlimited
+    allowed = subscribed or trial_remaining > 0 or bid_credits > 0 or is_unlimited
     return {
         "allowed": allowed,
         "subscribed": user.subscription_status == "active",
         "past_due": user.subscription_status == "past_due",
         "trial_remaining": trial_remaining,
         "trial_limit": DEFAULT_TRIAL_LIMIT,
+        "bid_credits": bid_credits,
         "limit_reached": limit_reached,
         "unlimited": is_unlimited,
     }
@@ -524,10 +530,13 @@ def record_proposal_usage(user: db.User, project_key: str, project_name: str = "
     Call this once, the first time a user runs Tender Analysis for a given
     project (project_key should be a stable identifier for that project --
     e.g. project name + tender name). If this project hasn't already been
-    counted and the user isn't on a paid subscription, increments
-    trial_proposals_used. Returns True if this call actually consumed a
-    trial credit (idempotent otherwise -- re-analysing the same project
-    never double-counts).
+    counted and the user isn't on a paid subscription, spends one credit --
+    the free trial credit first, then a purchased pay-as-you-go bid_credit
+    once the trial is exhausted (see db.User.bid_credits, get_access_status).
+    An active subscription is unlimited, so neither balance is touched at
+    all while subscribed. Returns True if this call actually consumed a
+    credit of either kind (idempotent otherwise -- re-analysing the same
+    project never double-counts).
     """
     project_key = (project_key or "").strip().lower()
     if not project_key:
@@ -546,6 +555,10 @@ def record_proposal_usage(user: db.User, project_key: str, project_name: str = "
 
         s.add(db.ProposalUsage(user_id=db_user.id, project_key=project_key, project_name=project_name))
         if db_user.subscription_status != "active":
-            db_user.trial_proposals_used = (db_user.trial_proposals_used or 0) + 1
+            trial_remaining = max(0, DEFAULT_TRIAL_LIMIT - (db_user.trial_proposals_used or 0))
+            if trial_remaining > 0:
+                db_user.trial_proposals_used = (db_user.trial_proposals_used or 0) + 1
+            elif (db_user.bid_credits or 0) > 0:
+                db_user.bid_credits = db_user.bid_credits - 1
         s.commit()
         return True

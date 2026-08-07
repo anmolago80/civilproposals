@@ -90,6 +90,14 @@ class User(Base):
     trial_proposals_used = Column(Integer, default=0)
     trial_proposals_limit = Column(Integer, default=1)
 
+    # Pay-as-you-go: one credit per $50 one-time Stripe Checkout (mode=
+    # "payment", see billing.create_bid_checkout_session), consumed by
+    # auth.record_proposal_usage() AFTER the free trial runs out, same
+    # "existence of a row = already counted" idempotency as trial usage --
+    # never touched at all while subscription_status == "active", since an
+    # active subscription is unlimited on its own.
+    bid_credits = Column(Integer, default=0)
+
     is_admin = Column(Boolean, default=False)
 
     # Set the moment the user ticks "I have read and accept these terms" --
@@ -215,6 +223,9 @@ def _run_light_migrations() -> None:
     if "accepted_terms_at" not in existing_columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE users ADD COLUMN accepted_terms_at TIMESTAMP"))
+    if "bid_credits" not in existing_columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN bid_credits INTEGER DEFAULT 0"))
 
 
 def get_session():

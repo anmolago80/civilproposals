@@ -16,12 +16,25 @@ a second service. Revisit with a real webhook endpoint (a small FastAPI
 sidecar service, or Railway's function support) once there's a reason to
 -- e.g. wanting to cut off access the instant a card fails.
 
-Changing the price later: this module reads STRIPE_PRICE_ID from an
-environment variable, never hardcodes an amount. To change the price,
-create a new Price in the Stripe dashboard (Prices are immutable once
-created -- you can't edit $200 into $250 on the same Price object) and
-update the STRIPE_PRICE_ID env var in Railway, then redeploy (or just
-restart the service). No code change needed.
+Changing the price later: this module reads STRIPE_PRICE_ID (and
+STRIPE_BID_PRICE_ID, see below) from environment variables, never hardcodes
+an amount. To change either price, create a new Price in the Stripe
+dashboard (Prices are immutable once created -- you can't edit $200 into
+$250 on the same Price object) and update the matching env var in Railway,
+then redeploy (or just restart the service). No code change needed.
+
+Two products, one Checkout entry point each:
+  - Monthly subscription (STRIPE_PRICE_ID) -- mode="subscription",
+    create_checkout_session(). Unlimited bids while active (see
+    auth.get_access_status/record_proposal_usage -- neither trial nor
+    bid_credits balance is ever touched while subscription_status=="active").
+  - Pay-as-you-go, one bid at a time (STRIPE_BID_PRICE_ID) -- mode=
+    "payment", create_bid_checkout_session(). Each completed purchase adds
+    exactly one credit to db.User.bid_credits, spent by
+    auth.record_proposal_usage() only once the free trial is exhausted.
+handle_checkout_redirect() is shared by both flows -- it tells them apart
+by the returned Checkout Session's own `mode` field, so there's exactly one
+redirect handler, not two.
 """
 
 from __future__ import annotations
@@ -34,28 +47,45 @@ from modules import db
 
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "").strip()
 STRIPE_PRICE_ID = os.environ.get("STRIPE_PRICE_ID", "").strip()
+STRIPE_BID_PRICE_ID = os.environ.get("STRIPE_BID_PRICE_ID", "").strip()
 
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501").rstrip("/")
 
 
 def is_configured() -> bool:
+    """The $120/month subscription checkout -- see create_checkout_session."""
     return bool(stripe.api_key and STRIPE_PRICE_ID)
+
+
+def bid_is_configured() -> bool:
+    """The $50/bid pay-as-you-go checkout -- see create_bid_checkout_session."""
+    return bool(stripe.api_key and STRIPE_BID_PRICE_ID)
+
+
+def _describe_price(price: str) -> str:
+    if not price:
+        return "NOT SET (empty)"
+    desc = f"`{price[:10]}...` (len={len(price)})"
+    if not price.startswith("price_"):
+        desc += " -- does NOT start with price_, so this is not a valid Stripe Price ID"
+    return desc
 
 
 def debug_key_info() -> str:
     """A masked, safe-to-display summary of what's actually loaded into this
-    running process for STRIPE_SECRET_KEY / STRIPE_PRICE_ID -- never the full
-    secret. Meant to be shown next to a checkout error so a copy-paste or
-    stale-deploy problem can be diagnosed from a single screenshot instead of
-    several rounds of guessing. Two things this catches that "check Railway's
-    variable value" alone won't: (1) stripe.api_key is read from the
-    environment once, at module import time (see top of this file) -- if
-    Railway saved the variable but the service never actually redeployed/
-    restarted, the *running* process is still holding the old value, and this
-    will show that old value's shape; (2) a bad paste (extra characters,
-    only a fragment copied, wrong field entirely)."""
+    running process for STRIPE_SECRET_KEY / STRIPE_PRICE_ID /
+    STRIPE_BID_PRICE_ID -- never the full secret. Meant to be shown next to
+    a checkout error (either flow -- subscription or pay-as-you-go) so a
+    copy-paste or stale-deploy problem can be diagnosed from a single
+    screenshot instead of several rounds of guessing. Two things this
+    catches that "check Railway's variable value" alone won't: (1)
+    stripe.api_key is read from the environment once, at module import time
+    (see top of this file) -- if Railway saved the variable but the service
+    never actually redeployed/restarted, the *running* process is still
+    holding the old value, and this will show that old value's shape; (2) a
+    bad paste (extra characters, only a fragment copied, wrong field
+    entirely)."""
     key = stripe.api_key or ""
-    price = STRIPE_PRICE_ID or ""
 
     if not key:
         key_desc = "NOT SET (empty)"
@@ -67,14 +97,11 @@ def debug_key_info() -> str:
         if not looks_valid:
             key_desc += " -- does NOT start with sk_test_ or sk_live_, so this is not a valid Stripe secret key"
 
-    if not price:
-        price_desc = "NOT SET (empty)"
-    else:
-        price_desc = f"`{price[:10]}...` (len={len(price)})"
-        if not price.startswith("price_"):
-            price_desc += " -- does NOT start with price_, so this is not a valid Stripe Price ID"
-
-    return f"STRIPE_SECRET_KEY: {key_desc} | STRIPE_PRICE_ID: {price_desc}"
+    return (
+        f"STRIPE_SECRET_KEY: {key_desc} | "
+        f"STRIPE_PRICE_ID (monthly): {_describe_price(STRIPE_PRICE_ID)} | "
+        f"STRIPE_BID_PRICE_ID (pay-as-you-go): {_describe_price(STRIPE_BID_PRICE_ID)}"
+    )
 
 
 def create_checkout_session(user: db.User) -> str:
@@ -103,12 +130,45 @@ def create_checkout_session(user: db.User) -> str:
     return session.url
 
 
+def create_bid_checkout_session(user: db.User) -> str:
+    """Creates a Stripe Checkout session for a single $50 pay-as-you-go bid
+    and returns the URL to redirect the user to -- mode="payment" (a
+    one-time charge), NOT "subscription". Shares the exact same success/
+    cancel URL shape as create_checkout_session, so both flows land back on
+    the same ?checkout=success&session_id=... redirect handler below, which
+    tells them apart by the completed session's own `mode` field."""
+    if not bid_is_configured():
+        raise RuntimeError(
+            "Pay-as-you-go isn't configured yet -- set STRIPE_SECRET_KEY and STRIPE_BID_PRICE_ID."
+        )
+
+    kwargs = dict(
+        mode="payment",
+        line_items=[{"price": STRIPE_BID_PRICE_ID, "quantity": 1}],
+        client_reference_id=user.id,
+        success_url=f"{APP_BASE_URL}/?checkout=success&session_id={{CHECKOUT_SESSION_ID}}",
+        cancel_url=f"{APP_BASE_URL}/?checkout=cancelled",
+        allow_promotion_codes=True,
+    )
+    if user.stripe_customer_id:
+        kwargs["customer"] = user.stripe_customer_id
+    else:
+        kwargs["customer_email"] = user.email
+
+    session = stripe.checkout.Session.create(**kwargs)
+    return session.url
+
+
 def handle_checkout_redirect(session_id: str) -> db.User | None:
     """Call this when the app loads with ?checkout=success&session_id=...
     in the URL. Verifies the session with Stripe directly (never trust the
-    query string alone) and updates the user's row. Returns the updated
-    user, or None if the session couldn't be verified."""
-    if not is_configured() or not session_id:
+    query string alone) and updates the user's row. Handles BOTH checkout
+    flows -- distinguishes them by the verified session's own `mode` field
+    ("subscription" activates the monthly plan; "payment" is a pay-as-you-go
+    bid purchase, credited as +1 db.User.bid_credits) -- rather than needing
+    two separate redirect handlers wired to two different query params.
+    Returns the updated user, or None if the session couldn't be verified."""
+    if not stripe.api_key or not session_id:
         return None
 
     session = stripe.checkout.Session.retrieve(session_id)
@@ -124,8 +184,13 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
         if not db_user:
             return None
         db_user.stripe_customer_id = session.get("customer") or db_user.stripe_customer_id
-        db_user.stripe_subscription_id = session.get("subscription") or db_user.stripe_subscription_id
-        db_user.subscription_status = "active"
+        if session.get("mode") == "subscription":
+            db_user.stripe_subscription_id = session.get("subscription") or db_user.stripe_subscription_id
+            db_user.subscription_status = "active"
+        else:
+            # Pay-as-you-go: always +1 -- create_bid_checkout_session always
+            # requests quantity=1, so there's no line-item quantity to read.
+            db_user.bid_credits = (db_user.bid_credits or 0) + 1
         s.commit()
         s.refresh(db_user)
         return db_user
