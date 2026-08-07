@@ -928,15 +928,15 @@ with st.sidebar:
 
     if IS_SAAS_MODE and current_user:
         st.caption(f"Signed in as **{current_user.email}**")
-        if _access["subscribed"]:
+        if _access.get("unlimited"):
+            # UNLIMITED_ACCOUNTS (see auth.get_access_status) -- never
+            # blocked, never shown a trial/upgrade banner at all.
+            st.success("Unlimited access")
+        elif _access["subscribed"]:
             st.success("Plan: Active subscription")
         elif _access["past_due"]:
             st.warning("Payment past due -- update your card to keep access.")
         elif _access["limit_reached"]:
-            # Orange, same spot as the normal "Free trial: X of Y" info box --
-            # covers both the real paywall (most accounts) and
-            # UNLIMITED_PREVIEW_ACCOUNTS (see auth.get_access_status), which
-            # still see this banner even though they're not actually blocked.
             st.markdown(
                 '<div style="background:#FFF3E0;color:#B8600A;border:1px solid #F3D9AE;'
                 'border-radius:8px;padding:10px 14px;font-size:.9rem;font-weight:600;">'
@@ -962,11 +962,10 @@ with st.sidebar:
         branding.vertical_steps_component_html(_stepper_steps),
         height=max(1, len(_stepper_steps)) * 44 + 16,
     )
-    st.caption(
-        "This tool never invents project experience, staff, certifications, insurances, "
-        "or commercial terms. Missing information becomes a clearly marked placeholder, "
-        "not a guess."
-    )
+    # Same wording as the signup-time terms and the accept-terms gate
+    # (see auth.TERMS_TEXT) -- one copy of this disclaimer, reused
+    # everywhere it needs to appear instead of several that could drift.
+    st.caption(auth.TERMS_TEXT)
     # "My projects" / "This computer" and "Export / import a file" used to
     # live here, stacked below the steps. Moved into two popovers in the
     # fixed top-right banner instead (see _render_my_projects_popover() and
@@ -2005,12 +2004,12 @@ with tabs[2]:
 
     # This is the metered action: the first time a given project runs Tender
     # Analysis, it consumes the account's free trial bid(s) (see
-    # auth.record_proposal_usage; trial_proposals_limit -- 1 by default, see
-    # db.py). Re-running analysis on the SAME project (same project/tender/
-    # client name) never counts twice. Once the trial is used up, the button
-    # is replaced with an upgrade prompt instead of silently doing nothing --
-    # except for auth.UNLIMITED_PREVIEW_ACCOUNTS, who see the same prompt
-    # but stay unblocked (_access["allowed"] stays true for them).
+    # auth.record_proposal_usage; auth.DEFAULT_TRIAL_LIMIT -- 1, see
+    # auth.get_access_status). Re-running analysis on the SAME project (same
+    # project/tender/client name) never counts twice. Once the trial is used
+    # up, the button is replaced with an upgrade prompt instead of silently
+    # doing nothing -- except for auth.UNLIMITED_ACCOUNTS, who never hit
+    # limit_reached at all (see get_access_status) so never see this prompt.
     _project_key = f"{st.session_state.project_name}|{st.session_state.tender_name}|{st.session_state.client_name}".strip("|")
     _already_counted = False
     if IS_SAAS_MODE and current_user:
