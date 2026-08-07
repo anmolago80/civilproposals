@@ -271,6 +271,24 @@ def current_user() -> db.User | None:
         # the stale cookie anyway. We know for certain a logout was just
         # requested this run, so stop here instead of trusting a cookie
         # we've already told the browser to delete.
+        #
+        # That guard alone only covers the ONE run where the pop() actually
+        # fires, because it's a one-shot flag. Every run after that -- in
+        # particular the run where the user submits the login form again,
+        # possibly for a *different* account -- reaches the code below with
+        # this branch never entered at all, and st.context.cookies (see
+        # _get_cookie_token()) is a snapshot taken once, when this
+        # WebSocket connection was first established, that Streamlit never
+        # refreshes on later reruns within the same connection -- it does
+        # NOT reflect the document.cookie clear (or a same-tab switch to a
+        # different account) that just happened client-side. So the
+        # fallback below would keep resolving to whoever was logged in
+        # before the logout, no matter what the user types into the login
+        # form next. _logged_out_this_session is the persistent (not
+        # one-shot) marker that closes that gap: it stays set, forcing
+        # every call to current_user() to ignore that stale cookie snapshot,
+        # until log_in() clears it on an actual fresh login (below).
+        st.session_state["_logged_out_this_session"] = True
         return None
 
     if st.session_state.get("_auth_user_id"):
@@ -278,6 +296,17 @@ def current_user() -> db.User | None:
         if user and st.session_state.pop("_cookie_write_pending", False):
             _set_cookie_token(make_token(user.id))
         return user
+
+    if st.session_state.get("_logged_out_this_session"):
+        # We've explicitly logged out earlier in this same browser session
+        # and haven't logged back in since (see log_in(), which clears this
+        # flag the moment a fresh login succeeds). Do not fall through to
+        # the raw st.context.cookies read below -- see the long comment
+        # above for why that snapshot can't be trusted here. A real page
+        # reload starts a brand-new session_state (this flag won't exist),
+        # so this only ever affects same-session post-logout behaviour,
+        # which is exactly the scenario that was broken.
+        return None
 
     token = _get_cookie_token()
     user_id = verify_token(token) if token else None
@@ -306,6 +335,15 @@ def log_in(user: db.User) -> None:
     # current_user() above) sidesteps the race instead of racing it.
     st.session_state["_auth_user_id"] = user.id
     st.session_state["_cookie_write_pending"] = True
+    # A fresh, successful login always wins over a prior logout in this same
+    # browser session -- clear the marker that makes current_user() distrust
+    # the (possibly stale) cookie fallback, since _auth_user_id being set
+    # means that fallback branch is never even reached for this user going
+    # forward anyway. Without this, logging out and back in as the SAME
+    # account would leave the flag set for no reason (harmless today, but
+    # only by accident of check ordering) -- clearing it here is the correct
+    # invariant regardless.
+    st.session_state.pop("_logged_out_this_session", None)
 
 
 def log_out() -> None:
@@ -465,6 +503,14 @@ def require_login() -> db.User:
 
 DEFAULT_TRIAL_LIMIT = 1
 
+# The Monthly plan's advertised "3 bids included" (see the landing page
+# pricing card) -- an active subscription used to be treated as fully
+# unlimited in code, which didn't match that promise. Spent via
+# db.User.subscription_bids_used, reset each real Stripe billing period by
+# billing.refresh_subscription_status(); see get_access_status/
+# record_proposal_usage below for how it's actually enforced.
+SUBSCRIPTION_MONTHLY_BID_LIMIT = 3
+
 # Accounts that get real, unconditional unlimited access -- never blocked,
 # never shown a trial-limit or upgrade banner, no matter how many bids they
 # run. This used to also fake-show the normal "trial limit reached" banner
@@ -482,11 +528,13 @@ UNLIMITED_ACCOUNTS = {"anmolago@icloud.com"}
 
 def get_access_status(user: db.User) -> dict:
     """
-    Returns {"allowed": bool, "reason": str, "trial_remaining": int,
-    "subscribed": bool, "limit_reached": bool, "unlimited": bool,
-    "bid_credits": int} -- the single source of truth app.py uses to decide
-    whether to show the paywall instead of the tabs, and whether to count a
-    new proposal against the trial (see record_proposal_usage).
+    Returns {"allowed": bool, "trial_remaining": int, "subscribed": bool,
+    "limit_reached": bool, "unlimited": bool, "bid_credits": int,
+    "subscription_bids_remaining": int, "subscription_bid_limit": int} --
+    the single source of truth app.py uses to decide whether to show the
+    paywall instead of the tabs, and whether to count a new proposal
+    against the trial/subscription/pay-as-you-go balance (see
+    record_proposal_usage).
 
     trial_limit is always DEFAULT_TRIAL_LIMIT, not user.trial_proposals_limit
     -- the trial size is a single product-wide constant, not something that
@@ -496,23 +544,38 @@ def get_access_status(user: db.User) -> dict:
     when they signed up, not an entitlement, so it's ignored here in favour
     of whatever DEFAULT_TRIAL_LIMIT currently is).
 
-    bid_credits is the pay-as-you-go balance (see db.User.bid_credits) --
-    real, paid credits from $50 one-time Stripe Checkouts, spent AFTER the
-    free trial runs out, same "unlimited while subscribed" carve-out as
-    trial credits: an active subscription never touches this balance at all.
+    An ACTIVE subscription is capped at SUBSCRIPTION_MONTHLY_BID_LIMIT (3)
+    bids per real Stripe billing period -- matches the landing page's "3
+    bids included" promise, which the code used to silently ignore (treating
+    "subscribed" as fully unlimited). Once that monthly quota is used up,
+    bid_credits (pay-as-you-go purchases) still work on top of it, same as
+    for a non-subscriber.
 
-    "limit_reached" is true once BOTH trial credits and bid credits are used
-    up and there's no active subscription -- for everyone except
-    UNLIMITED_ACCOUNTS, this is exactly when "allowed" also goes false.
-    UNLIMITED_ACCOUNTS never see limit_reached go true and are always
-    "allowed" -- see "unlimited" below.
+    PAST_DUE is a short payment-recovery grace period -- deliberately left
+    uncapped (always allowed) rather than also enforcing the monthly quota
+    on top of an already-failing card; this is unchanged from before.
+
+    bid_credits is the pay-as-you-go balance (see db.User.bid_credits) --
+    real, paid credits from $50 one-time Stripe Checkouts.
+
+    "limit_reached" mirrors "not allowed" for everyone except
+    UNLIMITED_ACCOUNTS, who never see it go true -- see "unlimited" below.
     """
-    subscribed = user.subscription_status in ("active", "past_due")  # grace period on past_due
     is_unlimited = (user.email or "").strip().lower() in UNLIMITED_ACCOUNTS
     trial_remaining = max(0, DEFAULT_TRIAL_LIMIT - (user.trial_proposals_used or 0))
     bid_credits = max(0, user.bid_credits or 0)
-    limit_reached = trial_remaining <= 0 and bid_credits <= 0 and not subscribed and not is_unlimited
-    allowed = subscribed or trial_remaining > 0 or bid_credits > 0 or is_unlimited
+    subscription_bids_remaining = max(0, SUBSCRIPTION_MONTHLY_BID_LIMIT - (user.subscription_bids_used or 0))
+
+    if user.subscription_status == "active":
+        allowed = is_unlimited or subscription_bids_remaining > 0 or bid_credits > 0
+        limit_reached = not allowed
+    elif user.subscription_status == "past_due":
+        allowed = True  # grace period, unchanged
+        limit_reached = False
+    else:
+        allowed = is_unlimited or trial_remaining > 0 or bid_credits > 0
+        limit_reached = not allowed
+
     return {
         "allowed": allowed,
         "subscribed": user.subscription_status == "active",
@@ -520,6 +583,8 @@ def get_access_status(user: db.User) -> dict:
         "trial_remaining": trial_remaining,
         "trial_limit": DEFAULT_TRIAL_LIMIT,
         "bid_credits": bid_credits,
+        "subscription_bids_remaining": subscription_bids_remaining,
+        "subscription_bid_limit": SUBSCRIPTION_MONTHLY_BID_LIMIT,
         "limit_reached": limit_reached,
         "unlimited": is_unlimited,
     }
@@ -530,13 +595,20 @@ def record_proposal_usage(user: db.User, project_key: str, project_name: str = "
     Call this once, the first time a user runs Tender Analysis for a given
     project (project_key should be a stable identifier for that project --
     e.g. project name + tender name). If this project hasn't already been
-    counted and the user isn't on a paid subscription, spends one credit --
-    the free trial credit first, then a purchased pay-as-you-go bid_credit
-    once the trial is exhausted (see db.User.bid_credits, get_access_status).
-    An active subscription is unlimited, so neither balance is touched at
-    all while subscribed. Returns True if this call actually consumed a
-    credit of either kind (idempotent otherwise -- re-analysing the same
-    project never double-counts).
+    counted, spends one credit, in priority order:
+      - ACTIVE subscription: the current billing period's monthly quota
+        (SUBSCRIPTION_MONTHLY_BID_LIMIT) first, then a purchased
+        pay-as-you-go bid_credit once that's used up.
+      - Otherwise (trial/canceled): the free trial credit first, then a
+        bid_credit once the trial is exhausted.
+      - PAST_DUE: neither balance is touched -- short grace period, see
+        get_access_status.
+    Returns True if this call actually consumed a credit of some kind
+    (idempotent otherwise -- re-analysing the same project never
+    double-counts, and this also returns True in that "nothing left to
+    spend" edge case since the project itself still got recorded -- the
+    caller is expected to have already checked get_access_status().allowed
+    before letting this run at all).
     """
     project_key = (project_key or "").strip().lower()
     if not project_key:
@@ -554,7 +626,13 @@ def record_proposal_usage(user: db.User, project_key: str, project_name: str = "
             return False
 
         s.add(db.ProposalUsage(user_id=db_user.id, project_key=project_key, project_name=project_name))
-        if db_user.subscription_status != "active":
+        if db_user.subscription_status == "active":
+            sub_remaining = max(0, SUBSCRIPTION_MONTHLY_BID_LIMIT - (db_user.subscription_bids_used or 0))
+            if sub_remaining > 0:
+                db_user.subscription_bids_used = (db_user.subscription_bids_used or 0) + 1
+            elif (db_user.bid_credits or 0) > 0:
+                db_user.bid_credits = db_user.bid_credits - 1
+        elif db_user.subscription_status != "past_due":
             trial_remaining = max(0, DEFAULT_TRIAL_LIMIT - (db_user.trial_proposals_used or 0))
             if trial_remaining > 0:
                 db_user.trial_proposals_used = (db_user.trial_proposals_used or 0) + 1

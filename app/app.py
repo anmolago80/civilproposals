@@ -206,7 +206,10 @@ st.markdown(
 )
 
 current_user = None
-_access = {"allowed": True, "subscribed": True, "past_due": False, "trial_remaining": 999, "trial_limit": 999, "bid_credits": 0}
+_access = {
+    "allowed": True, "subscribed": True, "past_due": False, "trial_remaining": 999, "trial_limit": 999,
+    "bid_credits": 0, "subscription_bids_remaining": 999, "subscription_bid_limit": 3,
+}
 
 if IS_SAAS_MODE:
     db.init_db()
@@ -234,15 +237,27 @@ def _lib_user_id() -> str:
     return current_user.id if IS_SAAS_MODE and current_user else "local"
 
 
-def _render_upgrade_buttons(user, key_prefix: str) -> None:
-    """Two ways to keep going once the free trial is used up -- reused at
-    both call sites (the top-right Upgrade popover and the Tender Analysis
-    tab's inline upgrade prompt) so the two checkout flows can't drift out
-    of sync. Subscribe: $120/month, unlimited bids while active (see
-    billing.create_checkout_session). Buy 1 bid: $50 one-time, adds a single
-    db.User.bid_credits (see billing.create_bid_checkout_session) --
-    handy for a firm with one more bid to prepare who doesn't want a
-    recurring charge."""
+def _render_upgrade_buttons(user, key_prefix: str, already_subscribed: bool = False) -> None:
+    """Ways to keep going once the free trial (or, for an already-subscribed
+    account, this billing period's 3-bid quota -- see
+    auth.SUBSCRIPTION_MONTHLY_BID_LIMIT) is used up. Reused at both call
+    sites (the top-right Upgrade popover and the Tender Analysis tab's
+    inline upgrade prompt) so the checkout flows can't drift out of sync.
+    Subscribe: $120/month, 3 bids per billing period (see
+    billing.create_checkout_session) -- hidden when already_subscribed,
+    since subscribing again makes no sense. Buy 1 bid: $50 one-time, adds a
+    single db.User.bid_credits (see billing.create_bid_checkout_session) --
+    works on top of either the trial or an active subscription's quota."""
+    if already_subscribed:
+        if st.button("Buy 1 bid -- $50", key=f"{key_prefix}_bid_btn"):
+            try:
+                url = billing.create_bid_checkout_session(user)
+                st.link_button("Continue to payment →", url, type="primary")
+            except Exception as exc:
+                st.error(f"Couldn't start checkout: {exc}")
+                st.caption(billing.debug_key_info())
+        return
+
     ucol1, ucol2 = st.columns(2)
     with ucol1:
         if st.button("Subscribe -- $120/mo", key=f"{key_prefix}_sub_btn", type="primary"):
@@ -968,10 +983,27 @@ with st.sidebar:
             # UNLIMITED_ACCOUNTS (see auth.get_access_status) -- never
             # blocked, never shown a trial/upgrade banner at all.
             st.success("Unlimited access")
-        elif _access["subscribed"]:
-            st.success("Plan: Active subscription")
         elif _access["past_due"]:
             st.warning("Payment past due -- update your card to keep access.")
+        elif _access["subscribed"]:
+            # Active subscription -- capped at SUBSCRIPTION_MONTHLY_BID_LIMIT
+            # (3) bids per real Stripe billing period, not fully unlimited
+            # (see auth.get_access_status); bid_credits still work on top of
+            # that quota once it runs out, same as for a non-subscriber.
+            if _access["subscription_bids_remaining"] > 0:
+                st.success(
+                    f"Plan: Active subscription -- {_access['subscription_bids_remaining']} of "
+                    f"{_access['subscription_bid_limit']} bid(s) left this cycle"
+                )
+            elif _access.get("bid_credits", 0) > 0:
+                st.info(f"Monthly bids used -- {_access['bid_credits']} pay-as-you-go credit(s) available")
+            else:
+                st.markdown(
+                    '<div style="background:#FFF3E0;color:#B8600A;border:1px solid #F3D9AE;'
+                    'border-radius:8px;padding:10px 14px;font-size:.9rem;font-weight:600;">'
+                    'Monthly bids used -- buy a bid to keep going, or wait for renewal.</div>',
+                    unsafe_allow_html=True,
+                )
         elif _access["limit_reached"]:
             st.markdown(
                 '<div style="background:#FFF3E0;color:#B8600A;border:1px solid #F3D9AE;'
@@ -2057,11 +2089,17 @@ with tabs[2]:
     _trial_blocked = IS_SAAS_MODE and current_user and not _access["allowed"] and not _already_counted
 
     if _trial_blocked or (IS_SAAS_MODE and current_user and _access["limit_reached"] and not _already_counted):
-        st.warning(
-            f"You've used all {_access['trial_limit']} free trial bid(s). "
-            "Upgrade to keep going -- pay per bid, or subscribe monthly. See pricing on the homepage."
-        )
-        _render_upgrade_buttons(current_user, key_prefix="_tab3")
+        if _access["subscribed"]:
+            st.warning(
+                f"You've used all {_access['subscription_bid_limit']} bid(s) included in this billing "
+                "cycle's Monthly plan. Buy a pay-as-you-go bid to keep going now, or wait for renewal."
+            )
+        else:
+            st.warning(
+                f"You've used all {_access['trial_limit']} free trial bid(s). "
+                "Upgrade to keep going -- pay per bid, or subscribe monthly. See pricing on the homepage."
+            )
+        _render_upgrade_buttons(current_user, key_prefix="_tab3", already_subscribed=_access["subscribed"])
 
     if st.button("Run Tender Analysis", type="primary", disabled=not ready or _trial_blocked):
         extracted = st.session_state.tender_extracted
