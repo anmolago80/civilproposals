@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     create_engine, Column, String, Integer, DateTime, Boolean, LargeBinary,
-    ForeignKey, Text, select, func, UniqueConstraint,
+    ForeignKey, Text, select, func, UniqueConstraint, inspect, text,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
@@ -91,6 +91,13 @@ class User(Base):
     trial_proposals_limit = Column(Integer, default=1)
 
     is_admin = Column(Boolean, default=False)
+
+    # Set the moment the user ticks "I have read and accept these terms" --
+    # on signup for new accounts, or on the one-time acceptance gate
+    # require_login() shows any returning account that doesn't have this set
+    # yet (existing accounts created before this column existed). NULL means
+    # "hasn't accepted" -- see auth.require_login() and auth.TERMS_TEXT.
+    accepted_terms_at = Column(DateTime, nullable=True)
 
     library_entries = relationship("LibraryEntry", back_populates="user", cascade="all, delete-orphan")
     reference_library_entries = relationship(
@@ -189,6 +196,25 @@ def init_db() -> None:
     """Creates all tables if they don't exist yet. Safe to call on every
     app startup -- idempotent. Call this once near the top of app.py."""
     Base.metadata.create_all(engine)
+    _run_light_migrations()
+
+
+def _run_light_migrations() -> None:
+    """create_all() above only creates tables that don't exist yet -- it
+    does NOT add new columns to a table that's already there (e.g. `users`
+    on the live production database), so a new nullable Column on an
+    existing model (like User.accepted_terms_at) needs an explicit ALTER
+    TABLE the first time this runs against a database created before that
+    column existed. Checks column existence first so this is a no-op (and
+    safe to run on every startup) once the column is there -- works the
+    same way against both the local SQLite fallback and Postgres."""
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+    existing_columns = {c["name"] for c in inspector.get_columns("users")}
+    if "accepted_terms_at" not in existing_columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN accepted_terms_at TIMESTAMP"))
 
 
 def get_session():
