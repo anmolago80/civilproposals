@@ -89,6 +89,7 @@ from modules import (
     methodology_pptx,
     program_pptx,
     proposal_library,
+    reference_library,
     reference_projects as reference_projects_module,
     db,
     auth,
@@ -227,9 +228,32 @@ if IS_SAAS_MODE:
 
 
 def _lib_user_id() -> str:
-    """User id to scope the Proposal Library to. 'local' is a fixed
-    placeholder used only when SAAS_MODE is off (single-user prototype)."""
+    """User id to scope the Proposal Library / Project Reference Library to.
+    'local' is a fixed placeholder used only when SAAS_MODE is off
+    (single-user prototype)."""
     return current_user.id if IS_SAAS_MODE and current_user else "local"
+
+
+def _extract_plain_text_from_bytes(file_bytes: bytes, filename: str):
+    """Same dispatch document_processor.extract_plain_text_from_file() does
+    (pdf/docx/txt -> the right extractor, text-only/fast), but for bytes
+    already sitting in the database (a Proposal Library / Project Reference
+    Library entry) rather than a fresh st.file_uploader object -- there's
+    no UploadedFile to hand it, just raw bytes and a filename."""
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    try:
+        if extension == "pdf":
+            return document_processor.extract_text_from_pdf(file_bytes, filename, include_structure=False)
+        elif extension == "docx":
+            return document_processor.extract_text_from_docx(file_bytes, filename)
+        elif extension == "txt":
+            return document_processor.extract_text_from_txt(file_bytes, filename)
+        else:
+            return document_processor.ExtractedDocument(
+                filename=filename, text="", warning=f"Unsupported file type '.{extension}'.",
+            )
+    except Exception as exc:
+        return document_processor.ExtractedDocument(filename=filename, text="", warning=f"Could not read '{filename}': {exc}")
 
 # Also doubles as the Proposal Library's folder taxonomy (see
 # modules/proposal_library.py) -- an archived proposal is filed under
@@ -1278,23 +1302,55 @@ def _render_export_import_popover_body() -> None:
 
 
 def _render_proposal_library_popover_body() -> None:
-    """Contents of the top banner's "Proposal Library" popover -- browse and
-    download proposals archived from the Export Pack tab ('Archive to
-    Library'). Used to live as an always-collapsed expander at the bottom
-    of Project Setup; moved up here (same popover treatment as "My
-    projects" / "Export / Import") so it's reachable from any tab, not
-    just Project Setup, and reads as one family of "banner-level" actions
-    rather than being buried further down the page."""
+    """Contents of the top banner's "Proposal Library" popover -- upload,
+    browse, and download full proposal packs, organised by discipline.
+    Entries land here either automatically (Export Pack tab -> 'Archive to
+    Library') or via direct upload (below). Used to live as an
+    always-collapsed expander at the bottom of Project Setup; moved up here
+    (same popover treatment as "My projects" / "Export / Import") so it's
+    reachable from any tab."""
+    with st.expander("⬆️ Upload a proposal to the Library"):
+        st.caption(
+            "Add a finished proposal (.docx) straight into the Library, filed under "
+            "whichever discipline you choose below -- the same place proposals land "
+            "automatically via Export Pack -> 'Archive to Library'."
+        )
+        _lib_up_file = st.file_uploader(
+            "Proposal file (.docx)", type=["docx"], key="lib_upload_proposal_file",
+        )
+        _lib_up_col1, _lib_up_col2 = st.columns(2)
+        with _lib_up_col1:
+            _lib_up_type = st.selectbox("Discipline", PROJECT_TYPES, key="lib_upload_proposal_type")
+        with _lib_up_col2:
+            _lib_up_pack = st.selectbox("Pack size", ["Large Scope", "Small Scope"], key="lib_upload_proposal_pack")
+        _lib_up_name = st.text_input(
+            "Project name (optional -- defaults to the filename)", key="lib_upload_proposal_name",
+        )
+        if st.button("Add to Library", key="lib_upload_proposal_btn", disabled=_lib_up_file is None):
+            try:
+                _default_name = _lib_up_file.name.rsplit(".", 1)[0] if _lib_up_file else ""
+                proposal_library.archive_proposal(
+                    _lib_user_id(),
+                    _lib_up_file.getvalue(),
+                    project_type=_lib_up_type,
+                    pack_type="small_scope" if _lib_up_pack == "Small Scope" else "large_scope",
+                    project_name=(_lib_up_name or "").strip() or _default_name,
+                )
+                st.success(f"Added '{_lib_up_file.name}' to the Proposal Library under {_lib_up_type}.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Couldn't upload: {exc}")
+
+    st.divider()
     st.caption(
-        "Proposals you've archived from the Export Pack tab ('Archive to Library'). "
-        "Nothing lands here automatically -- archive a pack once you're happy with it. "
-        "Download any entry with the button below; your browser's own Save As dialog "
-        "lets you pick any folder, including a location on your C: drive."
+        "Browse proposals in the Library -- archived from Export Pack, or uploaded "
+        "directly above. Download any entry, or add it as reference material to "
+        "the project you're currently working on."
     )
     _lib_pack_type = "small_scope" if _is_letter() else "large_scope"
     _lib_pack_label = "Small Scope" if _is_letter() else "Large Scope"
     _lib_type_filter = st.selectbox(
-        "Filter by project type", ["All"] + PROJECT_TYPES, key="lib_setup_type_filter",
+        "Filter by discipline", ["All"] + PROJECT_TYPES, key="lib_setup_type_filter",
     )
     st.caption(
         f"Showing **{_lib_pack_label}** proposals for "
@@ -1309,29 +1365,149 @@ def _render_proposal_library_popover_body() -> None:
     )
     if not _lib_entries:
         st.caption(
-            "Nothing archived yet" + ("" if _lib_type_filter == "All" else f" for {_lib_type_filter}")
+            "Nothing in the Library yet" + ("" if _lib_type_filter == "All" else f" for {_lib_type_filter}")
             + f" ({_lib_pack_label})."
         )
     else:
         for _e in _lib_entries:
-            _lcol1, _lcol2 = st.columns([5, 1])
+            _client_bit = f" | client: {_e['client_name']}" if _e.get("client_name") else ""
+            st.markdown(
+                f"**{_e.get('project_name') or _e.get('tender_name') or 'Untitled'}** -- "
+                f"{_e.get('project_type', '')} | archived {_e.get('archived_at', '')}"
+                f"{_client_bit}"
+            )
+            _lcol1, _lcol2 = st.columns(2)
+            _lib_bytes = None
             with _lcol1:
-                _client_bit = f" | client: {_e['client_name']}" if _e.get("client_name") else ""
-                st.markdown(
-                    f"**{_e.get('project_name') or _e.get('tender_name') or 'Untitled'}** -- "
-                    f"{_e.get('project_type', '')} | archived {_e.get('archived_at', '')}"
-                    f"{_client_bit}"
-                )
-            with _lcol2:
                 try:
                     _lib_bytes = proposal_library.read_entry_bytes(_lib_user_id(), _e["path"])
                     st.download_button(
                         "Download", data=_lib_bytes, file_name=_e.get("filename", "proposal.docx"),
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        key=f"lib_dl_{_e.get('filename')}",
+                        key=f"lib_dl_{_e.get('path')}", width="stretch",
                     )
                 except Exception:
                     st.caption("File unavailable")
+            with _lcol2:
+                # "Add as reference to project" -- pulls this proposal's text into
+                # the CURRENT project's "Previous proposals" company material
+                # (Upload Docs), same effect as uploading it there by hand. Used
+                # to be its own picker buried in Upload Docs; moved here so it
+                # sits right next to the entry it applies to.
+                if st.button("Add as reference to project", key=f"lib_addref_{_e.get('path')}", width="stretch"):
+                    try:
+                        _bytes_for_ref = _lib_bytes if _lib_bytes is not None else proposal_library.read_entry_bytes(_lib_user_id(), _e["path"])
+                        _doc = document_processor.extract_text_from_docx(_bytes_for_ref, _e.get("filename", "proposal.docx"))
+                        if _doc.text:
+                            _key = "previous_proposals"
+                            _existing = st.session_state.company_material_files.get(_key, {})
+                            st.session_state.company_material_files[_key] = document_processor.merge_extracted_material(
+                                _existing, {_e.get("filename", "proposal.docx"): _doc.text},
+                            )
+                            st.session_state.company_material_text[_key] = "\n\n".join(
+                                st.session_state.company_material_files[_key].values()
+                            )
+                            st.success(f"Added '{_e.get('filename')}' as a reference to the current project.")
+                            st.rerun()
+                        else:
+                            st.warning("Couldn't extract any text from that file.")
+                    except Exception as exc:
+                        st.error(f"Couldn't add as reference: {exc}")
+            st.divider()
+
+
+def _render_project_reference_library_popover_body() -> None:
+    """Contents of the top banner's "Project Reference Library" popover --
+    a separate library from Proposal Library, for firm reference-project
+    writeups/case studies (PDF, DOCX, or TXT) uploaded directly, organised
+    by discipline the same way Proposal Library is. Nothing lands here
+    automatically -- there's no "generate a reference project" step in the
+    app to archive from, so upload is the only way in."""
+    with st.expander("⬆️ Upload a reference project"):
+        st.caption(
+            "Add a firm reference project / case study (PDF, DOCX, or TXT) to the "
+            "Library, filed under whichever discipline you choose below."
+        )
+        _ref_up_file = st.file_uploader(
+            "Reference project file", type=["pdf", "docx", "txt"], key="reflib_upload_file",
+        )
+        _ref_up_type = st.selectbox("Discipline", PROJECT_TYPES, key="reflib_upload_type")
+        _ref_up_title = st.text_input(
+            "Title (optional -- defaults to the filename)", key="reflib_upload_title",
+        )
+        if st.button("Add to Reference Library", key="reflib_upload_btn", disabled=_ref_up_file is None):
+            try:
+                _default_title = _ref_up_file.name.rsplit(".", 1)[0] if _ref_up_file else ""
+                reference_library.upload_reference(
+                    _lib_user_id(),
+                    _ref_up_file.getvalue(),
+                    project_type=_ref_up_type,
+                    filename=_ref_up_file.name,
+                    title=(_ref_up_title or "").strip() or _default_title,
+                )
+                st.success(f"Added '{_ref_up_file.name}' to the Project Reference Library under {_ref_up_type}.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Couldn't upload: {exc}")
+
+    st.divider()
+    st.caption(
+        "Browse uploaded reference projects. Download any entry, or add it as "
+        "reference material to the project you're currently working on."
+    )
+    _ref_type_filter = st.selectbox(
+        "Filter by discipline", ["All"] + PROJECT_TYPES, key="reflib_type_filter",
+    )
+    _ref_entries = reference_library.list_library(
+        _lib_user_id(),
+        None if _ref_type_filter == "All" else _ref_type_filter,
+    )
+    if not _ref_entries:
+        st.caption(
+            "Nothing in the Reference Library yet"
+            + ("" if _ref_type_filter == "All" else f" for {_ref_type_filter}") + "."
+        )
+    else:
+        for _e in _ref_entries:
+            st.markdown(
+                f"**{_e.get('title') or _e.get('filename') or 'Untitled'}** -- "
+                f"{_e.get('project_type', '')} | uploaded {_e.get('uploaded_at', '')}"
+            )
+            _rcol1, _rcol2 = st.columns(2)
+            _ref_bytes = None
+            with _rcol1:
+                try:
+                    _ref_bytes = reference_library.read_entry_bytes(_lib_user_id(), _e["path"])
+                    st.download_button(
+                        "Download", data=_ref_bytes, file_name=_e.get("filename", "reference_project"),
+                        key=f"reflib_dl_{_e.get('path')}", width="stretch",
+                    )
+                except Exception:
+                    st.caption("File unavailable")
+            with _rcol2:
+                # "Add to project references" -- pulls this reference project's text
+                # into the CURRENT project's "Project references" company material
+                # (Upload Docs), same effect as uploading it there by hand.
+                if st.button("Add to project references", key=f"reflib_addref_{_e.get('path')}", width="stretch"):
+                    try:
+                        _bytes_for_ref = _ref_bytes if _ref_bytes is not None else reference_library.read_entry_bytes(_lib_user_id(), _e["path"])
+                        _doc = _extract_plain_text_from_bytes(_bytes_for_ref, _e.get("filename", "reference_project"))
+                        if _doc.text:
+                            _key = "project_references"
+                            _existing = st.session_state.company_material_files.get(_key, {})
+                            st.session_state.company_material_files[_key] = document_processor.merge_extracted_material(
+                                _existing, {_e.get("filename", "reference_project"): _doc.text},
+                            )
+                            st.session_state.company_material_text[_key] = "\n\n".join(
+                                st.session_state.company_material_files[_key].values()
+                            )
+                            st.success(f"Added '{_e.get('filename')}' to the current project's references.")
+                            st.rerun()
+                        else:
+                            st.warning(_doc.warning or "Couldn't extract any text from that file.")
+                    except Exception as exc:
+                        st.error(f"Couldn't add to project references: {exc}")
+            st.divider()
 
 
 # Top banner -- static in the browser window's top right corner (per the
@@ -1357,6 +1533,8 @@ with st.container(key="_topright_actions"):
         _render_my_projects_popover_body()
     with st.popover("📁 Proposal Library", width="content"):
         _render_proposal_library_popover_body()
+    with st.popover("📁 Project Reference Library", width="content"):
+        _render_project_reference_library_popover_body()
     with st.popover("⇅ Export / Import", width="content"):
         _render_export_import_popover_body()
     if IS_SAAS_MODE and current_user:
@@ -1497,12 +1675,6 @@ with tabs[0]:
         with scol2:
             st.text_input("Sender phone", key="letter_sender_phone")
             st.text_input("Sender email", key="letter_sender_email")
-
-    st.divider()
-    st.caption(
-        "📁 Looking for the Proposal Library (browse & download archived proposals)? "
-        "It's moved up to the top banner, next to 'My projects'."
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -1645,58 +1817,17 @@ with tabs[1]:
             st.session_state[sig_key] = _files_signature(files)
 
         if key == "previous_proposals":
-            with st.expander("Also select from Library"):
-                st.caption(
-                    "Pull in a proposal you've previously archived (Export Pack tab -> 'Archive "
-                    "to Library') as reference material here, in addition to anything uploaded "
-                    "above -- instead of hunting for the file and re-uploading it, same effect "
-                    "as uploading it would have."
-                )
-                _lib_pp_pack_type = "small_scope" if _is_letter() else "large_scope"
-                _lib_pp_pack_label = "Small Scope" if _is_letter() else "Large Scope"
-                _lib_pp_type = st.selectbox(
-                    "Filter by project type", ["All"] + PROJECT_TYPES, key="lib_prevprop_type_filter",
-                )
-                st.caption(
-                    f"Showing **{_lib_pp_pack_label}** proposals for "
-                    f"**{'all disciplines' if _lib_pp_type == 'All' else _lib_pp_type}** -- matches "
-                    "the pursuit size currently selected in Project Setup."
-                )
-                _lib_pp_entries = proposal_library.list_library(
-                    _lib_user_id(),
-                    None if _lib_pp_type == "All" else _lib_pp_type,
-                    pack_type=_lib_pp_pack_type,
-                )
-                if not _lib_pp_entries:
-                    st.caption(
-                        "Nothing archived in the Proposal Library yet"
-                        + ("" if _lib_pp_type == "All" else f" for {_lib_pp_type}")
-                        + f" ({_lib_pp_pack_label})."
-                    )
-                else:
-                    _lib_pp_labels = {
-                        f"{e.get('project_name') or e.get('tender_name') or 'Untitled'} -- "
-                        f"{e.get('project_type', '')} (archived {e.get('archived_at', '')})": e
-                        for e in _lib_pp_entries
-                    }
-                    _lib_pp_choice = st.selectbox("Archived proposal", list(_lib_pp_labels.keys()), key="lib_prevprop_pick")
-                    if st.button("Add to Previous proposals", key="lib_prevprop_add_btn"):
-                        _entry = _lib_pp_labels[_lib_pp_choice]
-                        try:
-                            _lib_pp_bytes = proposal_library.read_entry_bytes(_lib_user_id(), _entry["path"])
-                            _lib_pp_doc = document_processor.extract_text_from_docx(_lib_pp_bytes, _entry["filename"])
-                            if _lib_pp_doc.text:
-                                existing_files_for_key = st.session_state.company_material_files.get(key, {})
-                                st.session_state.company_material_files[key] = document_processor.merge_extracted_material(
-                                    existing_files_for_key, {_entry["filename"]: _lib_pp_doc.text},
-                                )
-                                _sync_material_text(key)
-                                st.success(f"Added '{_entry['filename']}' from the library.")
-                                st.rerun()
-                            else:
-                                st.warning("Couldn't extract any text from that archived file.")
-                        except Exception as exc:
-                            st.error(f"Couldn't load that library entry: {exc}")
+            st.caption(
+                "📁 To pull in a proposal you've already archived, use the 'Add as reference to "
+                "project' button in the Proposal Library popover (top banner) instead of "
+                "re-uploading it here."
+            )
+        if key == "project_references":
+            st.caption(
+                "📁 To pull in a firm reference project you've uploaded to the Project Reference "
+                "Library, use its 'Add to project references' button in the top banner instead "
+                "of re-uploading it here."
+            )
 
         # The uploaded files themselves are shown by Streamlit's own uploader widget above
         # (each with its own x). Here we only show a one-line status of what's stored plus a
