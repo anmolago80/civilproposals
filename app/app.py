@@ -530,6 +530,62 @@ def _rebuild_structure():
     st.session_state["_sections_built_format"] = st.session_state.proposal_format
 
 
+def _reset_downstream_from_brief() -> None:
+    """Resets every piece of state derived from the tender brief -- call this
+    whenever the brief itself is replaced or cleared (see the Upload Docs
+    tab: a fresh upload that changes the file signature, or the "Clear all"
+    button). Without this, replacing the brief only reset tender_extracted
+    itself, leaving Tender Analysis, Structure, Page Allocation, Draft
+    Responses, Graphics & Design, Team & Resourcing, and Fee Estimate all
+    still holding the PREVIOUS brief's results -- so the sidebar stepper
+    kept showing those steps as done (green) for a brand new project that
+    hadn't actually gone through them yet. Deliberately leaves Project
+    Setup fields (project/client/tender name, etc.) and firm-level company
+    materials (CV library, past proposals, branding) untouched -- neither
+    is derived from the brief itself, so there's no reason to clear them
+    when the brief changes."""
+    downstream_defaults = {
+        "analysis": None,
+        "weighted_criteria": None,
+        "allocations": None,
+        "sections": None,
+        "guidance_notes": None,
+        "compliance_items": None,
+        "gap_items": None,
+        "drafts": None,
+        "executive_summary": None,
+        "team_intro": None,
+        "experience_intro": None,
+        "pitch_review": None,
+        "tender_summary_buffer": None,
+        "graphics": None,
+        "weighting_chart_png": None,
+        "fee_estimates": None,
+        "docx_buffer": None,
+        "divider_images": {},
+        "cover_hero_png": None,
+        "_sections_built_format": None,
+        "resource_plan": [],
+        "discipline_fee_lines": [],
+        "scope_item_fees": [],
+        "org_chart_png": None,
+        "reference_projects": None,
+        "reference_project_photos": {},
+        "reference_project_warnings": [],
+        "program_schedule": {},
+        "program_week_labels": [],
+        "personnel_photos": {},
+        "personnel_inclusion_suggestions": {},
+        "dismissed_disciplines": [],
+        "dismissed_fee_disciplines": [],
+        "fee_seed_total": 0.0,
+        "fee_estimate_manual_total": 0.0,
+        "letter_fee_total_override": 0.0,
+    }
+    for key, value in downstream_defaults.items():
+        st.session_state[key] = value
+
+
 def _structure_format_stale() -> bool:
     """True when sections exist but were generated under a different Proposal
     format than the one currently selected -- see the comment in
@@ -842,17 +898,29 @@ with st.sidebar:
     # rendered in the main content area right before the tabs) -- the user
     # asked for these to be static in the window's top right, not just the
     # top of the (left-hand) sidebar column.
-    st.markdown(branding.brand_html(logo_size=30, wordmark_size="1.05rem", show_beta=IS_SAAS_MODE),
+    st.markdown(branding.brand_html(logo_size=30, wordmark_size="1.05rem", show_beta=IS_SAAS_MODE,
+                                     href="https://civilproposals.com"),
                 unsafe_allow_html=True)
 
     if IS_SAAS_MODE and current_user:
         st.caption(f"Signed in as **{current_user.email}**")
         if _access["subscribed"]:
-            st.success("Plan: Active subscription ($200/mo)")
+            st.success("Plan: Active subscription")
         elif _access["past_due"]:
             st.warning("Payment past due -- update your card to keep access.")
+        elif _access["limit_reached"]:
+            # Orange, same spot as the normal "Free trial: X of Y" info box --
+            # covers both the real paywall (most accounts) and
+            # UNLIMITED_PREVIEW_ACCOUNTS (see auth.get_access_status), which
+            # still see this banner even though they're not actually blocked.
+            st.markdown(
+                '<div style="background:#FFF3E0;color:#B8600A;border:1px solid #F3D9AE;'
+                'border-radius:8px;padding:10px 14px;font-size:.9rem;font-weight:600;">'
+                'Maximum number of free bids reached -- upgrade to keep going.</div>',
+                unsafe_allow_html=True,
+            )
         else:
-            st.info(f"Free trial: {_access['trial_remaining']} of {_access['trial_limit']} proposals left")
+            st.info(f"Free trial: {_access['trial_remaining']} of {_access['trial_limit']} bid(s) left")
 
     # Vertical progress list -- the sidebar's main focus (see
     # branding.vertical_steps_component_html()). It's also the app's real
@@ -1452,6 +1520,12 @@ with tabs[1]:
         if extracted.warning and not extracted.text:
             st.session_state._tender_extract_error = extracted.warning
         else:
+            # A genuinely new/changed brief invalidates everything derived
+            # from the old one -- see _reset_downstream_from_brief(). Runs
+            # before setting the new tender_extracted so the stepper never
+            # shows a stale "done" for steps that haven't run against this
+            # brief yet.
+            _reset_downstream_from_brief()
             st.session_state.tender_extracted = extracted
             st.session_state._tender_extract_error = None
 
@@ -1472,6 +1546,7 @@ with tabs[1]:
             )
         with tcol2:
             if st.button("Clear all", key="clear_tender", help="Remove the uploaded tender document(s) and start over"):
+                _reset_downstream_from_brief()
                 st.session_state.tender_extracted = None
                 st.session_state._tender_extract_error = None
                 st.session_state._tender_files_sig = None
@@ -1774,11 +1849,13 @@ with tabs[2]:
         st.info("Upload a tender brief (Upload Docs) and configure an AI provider in the sidebar to run analysis.")
 
     # This is the metered action: the first time a given project runs Tender
-    # Analysis, it consumes one of the 3 free trial proposals (see
-    # auth.record_proposal_usage). Re-running analysis on the SAME project
-    # (same project/tender/client name) never counts twice. Once the trial
-    # is used up, the button is replaced with an upgrade prompt instead of
-    # silently doing nothing.
+    # Analysis, it consumes the account's free trial bid(s) (see
+    # auth.record_proposal_usage; trial_proposals_limit -- 1 by default, see
+    # db.py). Re-running analysis on the SAME project (same project/tender/
+    # client name) never counts twice. Once the trial is used up, the button
+    # is replaced with an upgrade prompt instead of silently doing nothing --
+    # except for auth.UNLIMITED_PREVIEW_ACCOUNTS, who see the same prompt
+    # but stay unblocked (_access["allowed"] stays true for them).
     _project_key = f"{st.session_state.project_name}|{st.session_state.tender_name}|{st.session_state.client_name}".strip("|")
     _already_counted = False
     if IS_SAAS_MODE and current_user:
@@ -1789,10 +1866,10 @@ with tabs[2]:
             ).first() is not None
     _trial_blocked = IS_SAAS_MODE and current_user and not _access["allowed"] and not _already_counted
 
-    if _trial_blocked:
+    if _trial_blocked or (IS_SAAS_MODE and current_user and _access["limit_reached"] and not _already_counted):
         st.warning(
-            f"You've used all {_access['trial_limit']} free trial proposals. "
-            "Upgrade to keep drafting -- $200/month, cancel anytime."
+            f"You've used all {_access['trial_limit']} free trial bid(s). "
+            "Upgrade to keep going -- pay per bid, or subscribe monthly. See pricing on the homepage."
         )
         if st.button("Upgrade to continue", type="primary", key="_tab3_upgrade_btn"):
             try:

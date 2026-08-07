@@ -40,10 +40,14 @@ BORDER = "#E2E8F0"
 
 
 def brand_html(logo_size: int = 40, wordmark_size: str = "1.5rem", show_beta: bool = True,
-               show_tagline: bool = False) -> str:
+               show_tagline: bool = False, href: str | None = None) -> str:
     """Returns an HTML snippet (for st.markdown(..., unsafe_allow_html=True))
     with the logo mark, "CivilProposals" wordmark, and an optional Beta
-    pill -- the one brand lockup used everywhere in the app."""
+    pill -- the one brand lockup used everywhere in the app.
+
+    Pass href (e.g. the marketing site URL) to wrap the whole lockup in a
+    link -- used in the sidebar so clicking the logo takes the user back to
+    the landing page."""
     logo_img = (
         f'<img src="data:image/png;base64,{LOGO_B64}" '
         f'style="width:{logo_size}px;height:{logo_size}px;border-radius:{logo_size * 0.24:.0f}px;'
@@ -58,7 +62,7 @@ def brand_html(logo_size: int = 40, wordmark_size: str = "1.5rem", show_beta: bo
 
     tagline = (
         '<div style="color:#5A6B7A;font-size:.85rem;margin-top:2px;">'
-        'AI-assisted tender &amp; proposal drafting for civil engineering firms</div>'
+        'AI-assisted tender &amp; proposal preparation for civil engineering firms</div>'
     ) if show_tagline else ""
 
     # Deliberately built as ONE line with no leading whitespace on any part.
@@ -68,7 +72,7 @@ def brand_html(logo_size: int = 40, wordmark_size: str = "1.5rem", show_beta: bo
     # literal text instead of HTML, regardless of unsafe_allow_html. Multi-
     # line, indented triple-quoted HTML strings hit this constantly; a
     # single unindented line sidesteps it entirely.
-    return (
+    lockup = (
         '<div style="display:flex;align-items:center;gap:10px;">'
         f'{logo_img}'
         '<div>'
@@ -80,6 +84,16 @@ def brand_html(logo_size: int = 40, wordmark_size: str = "1.5rem", show_beta: bo
         '</div>'
         '</div>'
     )
+
+    if href:
+        return (
+            f'<a href="{href}" target="_self" style="text-decoration:none;color:inherit;'
+            'cursor:pointer;display:inline-block;">'
+            f'{lockup}'
+            '</a>'
+        )
+
+    return lockup
 
 
 GREEN = "#16A34A"

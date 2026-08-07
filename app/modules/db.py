@@ -84,9 +84,11 @@ class User(Base):
     subscription_updated_at = Column(DateTime, default=_now)
 
     # Usage-based free trial: N free full proposals (Tender Analysis runs),
-    # then payment is required. See auth.get_access_status().
+    # then payment is required. See auth.get_access_status(). Matches the
+    # "1 free bid on sign up" pricing shown on the landing page -- was 3
+    # under the old flat $200/month plan.
     trial_proposals_used = Column(Integer, default=0)
-    trial_proposals_limit = Column(Integer, default=3)
+    trial_proposals_limit = Column(Integer, default=1)
 
     is_admin = Column(Boolean, default=False)
 
