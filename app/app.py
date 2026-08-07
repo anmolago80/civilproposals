@@ -718,13 +718,13 @@ def _render_resource_rows(kind: str, known_names: list) -> None:
             with cols[2]:
                 if not is_support and st.button(
                     "+ member", key=f"res_addsup_{kind}_{i}", help="Add a team member under this lead",
-                ):
+                 type="primary"):
                     add_support_after = i
             with cols[3]:
                 if st.button(
                     "✕", key=f"res_del_{kind}_{i}",
                     help="Remove this discipline (and anyone added under it)" if not is_support else "Remove this team member",
-                ):
+                 type="primary"):
                     remove_index = i
     if add_support_after is not None:
         lead = plan[add_support_after]
@@ -1076,7 +1076,7 @@ with st.sidebar:
                 sign_in_ready = bool(st.session_state.copilot_client_id and st.session_state.copilot_tenant_id)
                 if st.session_state.copilot_access_token:
                     st.success(f"Signed in as {st.session_state.copilot_username}.")
-                    if st.button("Sign out"):
+                    if st.button("Sign out", type="primary"):
                         st.session_state.copilot_access_token = ""
                         st.session_state.copilot_token_cache = ""
                         st.session_state.copilot_username = ""
@@ -1189,11 +1189,14 @@ st.markdown(
 )
 
 def _render_my_projects_popover_body() -> None:
-    """Contents of the top banner's "My projects" popover -- the same
+    """Contents of the top banner's "My Proposals" popover -- the same
     autosave-status + recent-projects-open/delete UI that used to sit
     permanently in the sidebar (see the comment left in its place there),
     just now tucked behind a click instead of always taking up vertical
-    space. Local-disk vs. DB-backed branch exactly as before."""
+    space. Local-disk vs. DB-backed branch exactly as before. Also hosts
+    the "Export / Import" section (see _render_export_import_popover_body)
+    at the bottom, folded in here so the top banner only needs one popover
+    for project-level actions instead of two."""
     if not IS_SAAS_MODE:
         # Local-disk autosave -- only correct for the original single-user
         # desktop prototype. In SAAS_MODE this is replaced by the DB-backed
@@ -1219,14 +1222,14 @@ def _render_my_projects_popover_body() -> None:
             chosen_entry = next(p for p in local_projects if p["display_name"] == chosen)
             lcol1, lcol2 = st.columns(2)
             with lcol1:
-                if st.button("Open", key="_open_local_project"):
+                if st.button("Open", key="_open_local_project", type="primary"):
                     try:
                         loaded_state = local_project_store.load_local(chosen_entry["path"])
                         _apply_loaded_project(loaded_state, f"'{chosen_entry['display_name']}'")
                     except project_store.ProjectLoadError as exc:
                         st.error(str(exc))
             with lcol2:
-                if st.button("Delete", key="_delete_local_project"):
+                if st.button("Delete", key="_delete_local_project", type="primary"):
                     local_project_store.delete_local(chosen_entry["path"])
                     st.rerun()
         else:
@@ -1247,7 +1250,7 @@ def _render_my_projects_popover_body() -> None:
         if st.session_state._last_autosave_error:
             st.warning(
                 f"Auto-save failed: {st.session_state._last_autosave_error} -- your work in this "
-                "tab is NOT saved to your account yet. Use \"Export / Import\" above as a backup, "
+                "tab is NOT saved to your account yet. Use \"Export / Import\" below as a backup, "
                 "and let support know if this keeps happening."
             )
         elif st.session_state._last_autosave_path:
@@ -1262,25 +1265,31 @@ def _render_my_projects_popover_body() -> None:
             chosen_entry = next(p for p in cloud_projects if p["display_name"] == chosen)
             lcol1, lcol2 = st.columns(2)
             with lcol1:
-                if st.button("Open", key="_open_cloud_project"):
+                if st.button("Open", key="_open_cloud_project", type="primary"):
                     try:
                         loaded_state = cloud_project_store.load_cloud(current_user.id, chosen_entry["id"])
                         _apply_loaded_project(loaded_state, f"'{chosen_entry['display_name']}'")
                     except project_store.ProjectLoadError as exc:
                         st.error(str(exc))
             with lcol2:
-                if st.button("Delete", key="_delete_cloud_project"):
+                if st.button("Delete", key="_delete_cloud_project", type="primary"):
                     cloud_project_store.delete_cloud(current_user.id, chosen_entry["id"])
                     st.rerun()
         else:
             st.caption("No saved projects yet -- one will appear here shortly after you start "
                        "one (auto-save kicks in once you enter a project name on Project Setup).")
 
+    st.divider()
+    with st.expander("⇅ Export / Import"):
+        _render_export_import_popover_body()
+
 
 def _render_export_import_popover_body() -> None:
-    """Contents of the top banner's "Export / Import" popover -- unchanged
-    from the sidebar version, just relocated (see the comment left in its
-    place in the sidebar)."""
+    """Contents of the "Export / Import" section nested inside the "My
+    Proposals" popover (see _render_my_projects_popover_body) -- unchanged
+    behaviour from when this was its own top-banner popover, just folded
+    in one level so the top banner only shows My Proposals / Proposal
+    Library / Project Reference Library."""
     st.caption("For sharing a project or keeping a backup outside this computer.")
     loaded_file = st.file_uploader("Load a project file", type=["zip"], key="project_loader")
     if loaded_file is not None and st.session_state._last_loaded_project_name != loaded_file.name:
@@ -1291,14 +1300,14 @@ def _render_export_import_popover_body() -> None:
         except project_store.ProjectLoadError as exc:
             st.error(str(exc))
 
-    if st.button("Prepare project save file"):
+    if st.button("Prepare project save file", type="primary"):
         st.session_state._project_save_bytes = project_store.save_project(st.session_state)
     if st.session_state._project_save_bytes:
         save_filename = (st.session_state.tender_name or "untitled_project").replace(" ", "_")
         st.download_button(
             "💾 Download project file", data=st.session_state._project_save_bytes,
             file_name=f"{save_filename}.tenderproj.zip", mime="application/zip",
-        )
+         type="primary")
 
 
 def _render_proposal_library_popover_body() -> None:
@@ -1307,8 +1316,8 @@ def _render_proposal_library_popover_body() -> None:
     Entries land here either automatically (Export Pack tab -> 'Archive to
     Library') or via direct upload (below). Used to live as an
     always-collapsed expander at the bottom of Project Setup; moved up here
-    (same popover treatment as "My projects" / "Export / Import") so it's
-    reachable from any tab."""
+    (same popover treatment as "My Proposals" / "Project Reference Library")
+    so it's reachable from any tab."""
     with st.expander("⬆️ Upload a proposal to the Library"):
         st.caption(
             "Add a finished proposal (.docx) straight into the Library, filed under "
@@ -1326,7 +1335,7 @@ def _render_proposal_library_popover_body() -> None:
         _lib_up_name = st.text_input(
             "Project name (optional -- defaults to the filename)", key="lib_upload_proposal_name",
         )
-        if st.button("Add to Library", key="lib_upload_proposal_btn", disabled=_lib_up_file is None):
+        if st.button("Add to Library", key="lib_upload_proposal_btn", disabled=_lib_up_file is None, type="primary"):
             try:
                 _default_name = _lib_up_file.name.rsplit(".", 1)[0] if _lib_up_file else ""
                 proposal_library.archive_proposal(
@@ -1385,7 +1394,7 @@ def _render_proposal_library_popover_body() -> None:
                         "Download", data=_lib_bytes, file_name=_e.get("filename", "proposal.docx"),
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         key=f"lib_dl_{_e.get('path')}", width="stretch",
-                    )
+                     type="primary")
                 except Exception:
                     st.caption("File unavailable")
             with _lcol2:
@@ -1394,7 +1403,7 @@ def _render_proposal_library_popover_body() -> None:
                 # (Upload Docs), same effect as uploading it there by hand. Used
                 # to be its own picker buried in Upload Docs; moved here so it
                 # sits right next to the entry it applies to.
-                if st.button("Add as reference to project", key=f"lib_addref_{_e.get('path')}", width="stretch"):
+                if st.button("Add as reference to project", key=f"lib_addref_{_e.get('path')}", width="stretch", type="primary"):
                     try:
                         _bytes_for_ref = _lib_bytes if _lib_bytes is not None else proposal_library.read_entry_bytes(_lib_user_id(), _e["path"])
                         _doc = document_processor.extract_text_from_docx(_bytes_for_ref, _e.get("filename", "proposal.docx"))
@@ -1435,7 +1444,7 @@ def _render_project_reference_library_popover_body() -> None:
         _ref_up_title = st.text_input(
             "Title (optional -- defaults to the filename)", key="reflib_upload_title",
         )
-        if st.button("Add to Reference Library", key="reflib_upload_btn", disabled=_ref_up_file is None):
+        if st.button("Add to Reference Library", key="reflib_upload_btn", disabled=_ref_up_file is None, type="primary"):
             try:
                 _default_title = _ref_up_file.name.rsplit(".", 1)[0] if _ref_up_file else ""
                 reference_library.upload_reference(
@@ -1481,14 +1490,14 @@ def _render_project_reference_library_popover_body() -> None:
                     st.download_button(
                         "Download", data=_ref_bytes, file_name=_e.get("filename", "reference_project"),
                         key=f"reflib_dl_{_e.get('path')}", width="stretch",
-                    )
+                     type="primary")
                 except Exception:
                     st.caption("File unavailable")
             with _rcol2:
                 # "Add to project references" -- pulls this reference project's text
                 # into the CURRENT project's "Project references" company material
                 # (Upload Docs), same effect as uploading it there by hand.
-                if st.button("Add to project references", key=f"reflib_addref_{_e.get('path')}", width="stretch"):
+                if st.button("Add to project references", key=f"reflib_addref_{_e.get('path')}", width="stretch", type="primary"):
                     try:
                         _bytes_for_ref = _ref_bytes if _ref_bytes is not None else reference_library.read_entry_bytes(_lib_user_id(), _e["path"])
                         _doc = _extract_plain_text_from_bytes(_bytes_for_ref, _e.get("filename", "reference_project"))
@@ -1520,23 +1529,23 @@ def _render_project_reference_library_popover_body() -> None:
 # top padding is added to the tab content below so the fixed bar never
 # overlaps a tab's own heading.
 #
-# "My projects" and "Export / Import" live here too now, as two compact
-# popovers -- laid out horizontally alongside Upgrade/Log out (a flex row,
-# see the CSS below) rather than stacked as separate always-expanded
-# sections down the sidebar, which was pushing the banner-worthy actions
-# out of easy reach and growing the sidebar's height for content most
-# visits don't need. Rendered unconditionally (both SaaS and local-disk
-# mode) so the popovers are always available; only Upgrade/Manage billing
-# and Log out stay gated to signed-in SaaS accounts.
+# "My Proposals" (which also folds in "Export / Import" as a nested
+# expander -- see _render_my_projects_popover_body), "Proposal Library" and
+# "Project Reference Library" live here too now, as three compact popovers
+# -- laid out horizontally alongside Upgrade/Log out (a flex row, see the
+# CSS below) rather than stacked as separate always-expanded sections down
+# the sidebar, which was pushing the banner-worthy actions out of easy
+# reach and growing the sidebar's height for content most visits don't
+# need. Rendered unconditionally (both SaaS and local-disk mode) so the
+# popovers are always available; only Upgrade/Manage billing and Log out
+# stay gated to signed-in SaaS accounts.
 with st.container(key="_topright_actions"):
-    with st.popover("📁 My projects", width="content"):
+    with st.popover("📁 My Proposals", width="content"):
         _render_my_projects_popover_body()
     with st.popover("📁 Proposal Library", width="content"):
         _render_proposal_library_popover_body()
     with st.popover("📁 Project Reference Library", width="content"):
         _render_project_reference_library_popover_body()
-    with st.popover("⇅ Export / Import", width="content"):
-        _render_export_import_popover_body()
     if IS_SAAS_MODE and current_user:
         if not _access["subscribed"]:
             if st.button("Upgrade", key="_topright_upgrade_btn"):
@@ -1549,7 +1558,7 @@ with st.container(key="_topright_actions"):
         else:
             portal_url = billing.create_customer_portal_session(current_user)
             if portal_url:
-                st.link_button("Manage", portal_url)
+                st.link_button("Manage", portal_url, type="primary")
         if st.button("Log out", key="_topright_logout_btn"):
             auth.log_out()
             st.rerun()
@@ -1732,7 +1741,7 @@ with tabs[1]:
                 + f"and {len(_ext.annotations)} existing annotation(s)."
             )
         with tcol2:
-            if st.button("Clear all", key="clear_tender", help="Remove the uploaded tender document(s) and start over"):
+            if st.button("Clear all", key="clear_tender", help="Remove the uploaded tender document(s) and start over", type="primary"):
                 _reset_downstream_from_brief()
                 st.session_state.tender_extracted = None
                 st.session_state._tender_extract_error = None
@@ -1841,7 +1850,7 @@ with tabs[1]:
             with scol1:
                 st.caption(f"✅ {label}: {count_bit}{len(existing):,} characters stored.")
             with scol2:
-                if st.button("Clear all", key=f"clear_{key}", help=f"Remove all {label.lower()} and start over"):
+                if st.button("Clear all", key=f"clear_{key}", help=f"Remove all {label.lower()} and start over", type="primary"):
                     _clear_material_category(key)
                     st.rerun()
 
@@ -1860,7 +1869,7 @@ with tabs[1]:
         with pcol1:
             st.caption(f"✅ {len(st.session_state.project_photo_bytes)} project photo(s) loaded -- the first is the cover image{retained}.")
         with pcol2:
-            if st.button("Clear all", key="clear_photos", help="Remove all project photos and start over"):
+            if st.button("Clear all", key="clear_photos", help="Remove all project photos and start over", type="primary"):
                 st.session_state.project_photo_bytes = []
                 st.session_state._photo_files_sig = None
                 st.session_state._photo_uploader_version += 1
@@ -1881,7 +1890,7 @@ with tabs[1]:
         with bcol1:
             st.caption(f"✅ {len(st.session_state.branding_bytes)} branding image(s) loaded{retained}.")
         with bcol2:
-            if st.button("Clear all", key="clear_branding", help="Remove all branding images and start over"):
+            if st.button("Clear all", key="clear_branding", help="Remove all branding images and start over", type="primary"):
                 st.session_state.branding_bytes = []
                 st.session_state._branding_files_sig = None
                 st.session_state._branding_uploader_version += 1
@@ -1915,7 +1924,7 @@ with tabs[1]:
 
     refs_ai_ready = bool(st.session_state.ai_config.get("api_key")) and bool(raw_refs_text)
     if st.button("Draft reference projects from uploaded material", disabled=not refs_ai_ready,
-                 help=None if refs_ai_ready else "Upload 'Project references' material above and set an AI provider in the sidebar first."):
+                 help=None if refs_ai_ready else "Upload 'Project references' material above and set an AI provider in the sidebar first.", type="primary"):
         with st.spinner("Reading project reference material and drafting revised, relevance-led entries..."):
             try:
                 analysis_for_context = st.session_state.analysis
@@ -1965,7 +1974,7 @@ with tabs[1]:
             existing_ref_photo = st.session_state.reference_project_photos.get(proj.title)
             if existing_ref_photo:
                 st.image(existing_ref_photo, width=160)
-            if st.button("Remove this reference project", key=f"ref_remove_{i}"):
+            if st.button("Remove this reference project", key=f"ref_remove_{i}", type="primary"):
                 _remove_ref_index = i
     if _remove_ref_index is not None:
         st.session_state.reference_projects.pop(_remove_ref_index)
@@ -1975,7 +1984,7 @@ with tabs[1]:
         st.markdown("**Add a reference project manually**")
         new_ref_title = st.text_input("Project title")
         new_ref_client = st.text_input("Client")
-        if st.form_submit_button("Add reference project") and new_ref_title.strip():
+        if st.form_submit_button("Add reference project", type="primary") and new_ref_title.strip():
             st.session_state.reference_projects.append(
                 reference_projects_module.ReferenceProject(title=new_ref_title.strip(), client=new_ref_client.strip())
             )
@@ -2133,7 +2142,7 @@ with tabs[3]:
             if names:
                 target = st.selectbox("Section", names, key="weight_override_target")
                 new_weight = st.number_input("New weighting (%)", 0.0, 100.0, step=1.0, key="weight_override_value")
-                if st.button("Apply weighting override"):
+                if st.button("Apply weighting override", type="primary"):
                     updated = weighting_engine.apply_manual_override(criteria, {target: new_weight})
                     st.session_state.weighted_criteria = updated
                     allocations = page_allocation.allocate_pages(updated, st.session_state.analysis)
@@ -2148,7 +2157,7 @@ with tabs[3]:
 
         st.divider()
         st.markdown("#### Compliance matrix")
-        if st.button("Generate Compliance Matrix"):
+        if st.button("Generate Compliance Matrix", type="primary"):
             st.session_state.compliance_items = compliance_matrix.build_compliance_matrix(
                 st.session_state.analysis, sections, _company_materials_flags(),
             )
@@ -2162,7 +2171,7 @@ with tabs[3]:
             )
 
         st.markdown("#### Gap analysis")
-        if st.button("Generate Gap Analysis", disabled=st.session_state.compliance_items is None):
+        if st.button("Generate Gap Analysis", disabled=st.session_state.compliance_items is None, type="primary"):
             st.session_state.gap_items = gap_analysis.analyse_gaps(
                 st.session_state.analysis, st.session_state.compliance_items,
                 st.session_state.weighted_criteria, _company_materials_flags(),
@@ -2206,7 +2215,7 @@ with tabs[4]:
             section_names = [a.section_name for a in allocations]
             target = st.selectbox("Section", section_names, key="page_override_target")
             new_pages = st.number_input("New page count", 1, 50, value=2, step=1, key="page_override_value")
-            if st.button("Apply page override"):
+            if st.button("Apply page override", type="primary"):
                 updated = page_allocation.apply_manual_page_override(allocations, {target: int(new_pages)})
                 st.session_state.allocations = updated
                 new_sections = proposal_structure.build_proposal_structure(
@@ -2318,7 +2327,7 @@ with tabs[5]:
     _pitch_ready = bool(st.session_state.ai_config.get("api_key")) and (
         st.session_state.project_differentiator.strip() or st.session_state.project_sales_pitch.strip()
     )
-    if st.button("Review with AI", disabled=not _pitch_ready, key="review_pitch_btn"):
+    if st.button("Review with AI", disabled=not _pitch_ready, key="review_pitch_btn", type="primary"):
         with st.spinner("Reviewing differentiator & sales pitch..."):
             try:
                 st.session_state.pitch_review = pitch_review_module.review_pitch(
@@ -2354,7 +2363,7 @@ with tabs[5]:
                 if pr.differentiator_refined:
                     st.button(
                         "Use this rewrite", key="use_diff_rewrite", on_click=_apply_differentiator_rewrite,
-                    )
+                     type="primary")
         with rcol2:
             if pr.sales_pitch_comment or pr.sales_pitch_refined:
                 st.markdown("**Sales pitch -- AI comment**")
@@ -2364,7 +2373,7 @@ with tabs[5]:
                 if pr.sales_pitch_refined:
                     st.button(
                         "Use this rewrite", key="use_pitch_rewrite", on_click=_apply_sales_pitch_rewrite,
-                    )
+                     type="primary")
 
     st.markdown("---")
     st.caption(
@@ -2374,7 +2383,7 @@ with tabs[5]:
         "drafted warm and sales-forward rather than dry -- catchy titles, short readable "
         "blocks, grounded in the real brief and the real (included) nominated team."
     )
-    if st.button("Generate Executive Summary (AI)", disabled=not ready):
+    if st.button("Generate Executive Summary (AI)", disabled=not ready, type="primary"):
         with st.spinner("Drafting executive summary..."):
             try:
                 _excluded_names = resourcing.excluded_personnel_names(st.session_state.resource_plan)
@@ -2406,7 +2415,7 @@ with tabs[5]:
             "Team & Resourcing tab -- never invented."
         )
         _team_ready = ready and bool(st.session_state.resource_plan)
-        if st.button("Generate Team Introduction (AI)", disabled=not _team_ready):
+        if st.button("Generate Team Introduction (AI)", disabled=not _team_ready, type="primary"):
             with st.spinner("Drafting team introduction..."):
                 try:
                     _included_people = [
@@ -2444,7 +2453,7 @@ with tabs[5]:
         )
         _experience_ready = ready and bool(st.session_state.reference_projects)
         if st.button("Generate Project Experience Introduction (AI)", disabled=not _experience_ready,
-                     help=None if _experience_ready else "Needs at least one drafted reference project -- see below."):
+                     help=None if _experience_ready else "Needs at least one drafted reference project -- see below.", type="primary"):
             with st.spinner("Drafting project experience introduction..."):
                 try:
                     st.session_state.experience_intro = experience_intro_module.draft_experience_intro(
@@ -2555,7 +2564,7 @@ with tabs[6]:
             with qcol2:
                 q_attr = st.text_input("Attributed to", placeholder="e.g. J. Smith, Project Director, XYZ Council")
                 q_project = st.text_input("Project (optional)", placeholder="e.g. Burnett River Bridge")
-            if st.form_submit_button("Add quote") and q_text.strip():
+            if st.form_submit_button("Add quote", type="primary") and q_text.strip():
                 st.session_state.quotes.append({"text": q_text.strip(), "attribution": q_attr.strip(), "project": q_project.strip()})
 
         if st.session_state.quotes:
@@ -2564,7 +2573,7 @@ with tabs[6]:
                 with col1:
                     st.markdown(f"_{q['text']}_ — **{q['attribution'] or 'unattributed'}**" + (f" ({q['project']})" if q['project'] else ""))
                 with col2:
-                    if st.button("Remove", key=f"remove_quote_{i}"):
+                    if st.button("Remove", key=f"remove_quote_{i}", type="primary"):
                         st.session_state.quotes.pop(i)
                         st.rerun()
 
@@ -2728,7 +2737,7 @@ with tabs[7]:
         ncol1, ncol2 = st.columns([2, 3])
         with ncol1:
             if st.button("Load names from CV library", disabled=not ai_ready,
-                         help=None if ai_ready else "Upload a CV library (Upload Docs) and set an AI provider in the sidebar first."):
+                         help=None if ai_ready else "Upload a CV library (Upload Docs) and set an AI provider in the sidebar first.", type="primary"):
                 with st.spinner("Reading the whole CV library for names (a few seconds per batch)..."):
                     try:
                         names, warns = team_bios.extract_person_names(cv_text, st.session_state.ai_config)
@@ -2777,7 +2786,7 @@ with tabs[7]:
         rcol1, rcol2 = st.columns([2, 3])
         with rcol1:
             if st.button("Re-scan brief for disciplines", disabled=not rescan_ready,
-                         help=None if rescan_ready else "Needs the tender brief (Upload Docs) and an AI provider in the sidebar."):
+                         help=None if rescan_ready else "Needs the tender brief (Upload Docs) and an AI provider in the sidebar.", type="primary"):
                 with st.spinner("Re-reading the brief for every discipline the scope implies..."):
                     try:
                         detected = tender_analyser.detect_disciplines_from_text(brief_text, st.session_state.ai_config)
@@ -2812,7 +2821,7 @@ with tabs[7]:
                 new_disc = st.text_input("Add a discipline", placeholder="e.g. Landscaping, Surveying, Constructability")
             with acol2:
                 st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-                if st.form_submit_button("Add discipline") and new_disc.strip():
+                if st.form_submit_button("Add discipline", type="primary") and new_disc.strip():
                     label = resourcing.canonical_discipline(new_disc.strip())
                     if label == resourcing.ALWAYS_INCLUDED_DISCIPLINE:
                         st.warning(
@@ -2839,7 +2848,7 @@ with tabs[7]:
             with ncol1:
                 extra_name = st.text_input("Person's name", label_visibility="collapsed", placeholder="e.g. Jordan Lee")
             with ncol2:
-                if st.form_submit_button("Add name") and extra_name.strip():
+                if st.form_submit_button("Add name", type="primary") and extra_name.strip():
                     if extra_name.strip() not in st.session_state.resource_extra_names:
                         st.session_state.resource_extra_names.append(extra_name.strip())
                     st.rerun()
@@ -2869,7 +2878,7 @@ with tabs[7]:
             if st.button(
                 "Fill profile fields from CVs", disabled=not _profile_fill_ready,
                 help=None if _profile_fill_ready else "Assign people to roles above, upload a CV library (Upload Docs), and set an AI provider in the sidebar first.",
-            ):
+             type="primary"):
                 with st.spinner("Reading each person's CV for registration status, experience and relevance (a few seconds per batch)..."):
                     try:
                         cv_profiles, warns = team_bios.extract_personnel_profile_fields(
@@ -2950,7 +2959,7 @@ with tabs[7]:
         if st.button(
             "Suggest which personnel to include (AI)", disabled=not _suggest_ready,
             help=None if _suggest_ready else "Assign roles above and set an AI provider in the sidebar first.",
-        ):
+         type="primary"):
             with st.spinner("Reading this project's scope to judge which discipline profiles are worth including..."):
                 try:
                     suggestions = resourcing.suggest_proposal_inclusion(
@@ -3019,7 +3028,7 @@ with tabs[7]:
                 if st.button(
                     "Refresh from CV", key=f"prof_refresh_{ekey}", disabled=not refresh_ready,
                     help=None if refresh_ready else "Assign a name, upload a CV library (Upload Docs), and set an AI provider in the sidebar first.",
-                ):
+                 type="primary"):
                     messages = []  # [(level, text), ...] -- rendered after the rerun, see result_key above
                     with st.spinner(f"Re-reading {name}'s CV..."):
                         try:
@@ -3191,7 +3200,7 @@ with tabs[8]:
                     st.number_input("Ballpark total project value ($, excl. GST)", min_value=0.0, step=500.0, key="fee_seed_total")
                 with seed_col2:
                     st.write("")
-                    if st.button("Seed fee table from total"):
+                    if st.button("Seed fee table from total", type="primary"):
                         st.session_state.scope_item_fees = fee_estimation_engine.seed_scope_item_fees(
                             scope_items, st.session_state.fee_seed_total,
                         )
@@ -3476,7 +3485,7 @@ with tabs[8]:
                         file_name="discipline_fee_build_up.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         help="Includes a Total row and the average rate across the project (total fee / total hours).",
-                    )
+                     type="primary")
                 else:
                     st.caption("Excel export needs the 'openpyxl' package -- run `pip install openpyxl` and reload.")
 
@@ -3492,7 +3501,7 @@ with tabs[8]:
                 st.number_input("Number of weeks", min_value=1, max_value=52, step=1, key="program_num_weeks")
             with pcol2:
                 st.write("")
-                if st.button("Generate default program"):
+                if st.button("Generate default program", type="primary"):
                     st.session_state.program_schedule = program_schedule.build_default_program(
                         scope_items, st.session_state.program_num_weeks,
                     )
@@ -3587,13 +3596,13 @@ with tabs[8]:
                         else:
                             st.warning("Enter hours and rates in the discipline fee build-up table above first.")
                 with bcol2:
-                    if st.button("Estimate from bundled benchmarks", key="letter_benchmark_btn"):
+                    if st.button("Estimate from bundled benchmarks", key="letter_benchmark_btn", type="primary"):
                         fee_cap = st.session_state.analysis.fee_cap if st.session_state.analysis else None
                         estimates = fee_estimation_engine.estimate_fee_split(st.session_state.project_type, fee_cap)
                         st.session_state.fee_estimates = _letter_reconcile_estimates(estimates)
                 with bcol3:
                     refresh_ready = bool(st.session_state.ai_config.get("api_key"))
-                    if st.button("Refresh via AI knowledge (not a live web fetch)", disabled=not refresh_ready, key="letter_refresh_btn"):
+                    if st.button("Refresh via AI knowledge (not a live web fetch)", disabled=not refresh_ready, key="letter_refresh_btn", type="primary"):
                         fee_cap = st.session_state.analysis.fee_cap if st.session_state.analysis else None
                         with st.spinner("Asking the AI provider for its knowledge of published benchmarks..."):
                             estimates = fee_estimation_engine.refresh_estimate_from_web(
@@ -3683,7 +3692,7 @@ with tabs[8]:
                         "Export to Excel", data=letter_pct_xlsx, key="letter_download_pct_fee_xlsx",
                         file_name="indicative_fee_split.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    )
+                     type="primary")
                 else:
                     st.caption("Excel export needs the 'openpyxl' package -- run `pip install openpyxl` and reload.")
 
@@ -3911,7 +3920,7 @@ with tabs[8]:
                     file_name="discipline_fee_build_up.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     help="Includes a Total row and the average rate across the project (total fee / total hours).",
-                )
+                 type="primary")
             else:
                 st.caption("Excel export needs the 'openpyxl' package -- run `pip install openpyxl` and reload.")
 
@@ -4050,7 +4059,7 @@ with tabs[8]:
             st.number_input("Number of weeks", min_value=1, max_value=52, step=1, key="program_num_weeks")
         with pcol2:
             st.write("")
-            if st.button("Generate default program"):
+            if st.button("Generate default program", type="primary"):
                 st.session_state.program_schedule = program_schedule.build_default_program(
                     st.session_state.analysis.scope_items if st.session_state.analysis else [],
                     st.session_state.program_num_weeks,
@@ -4151,14 +4160,14 @@ with tabs[8]:
                     else:
                         st.warning("Enter hours and rates in the discipline fee build-up table above first.")
             with bcol2:
-                if st.button("Estimate from bundled benchmarks", key="benchmark_btn"):
+                if st.button("Estimate from bundled benchmarks", key="benchmark_btn", type="primary"):
                     fee_cap = (str(manual_total) if manual_total > 0
                                else (st.session_state.analysis.fee_cap if st.session_state.analysis else None))
                     estimates = fee_estimation_engine.estimate_fee_split(st.session_state.project_type, fee_cap)
                     st.session_state.fee_estimates = _reconcile_estimates(estimates)
             with bcol3:
                 refresh_ready = bool(st.session_state.ai_config.get("api_key"))
-                if st.button("Refresh via AI knowledge (not a live web fetch)", disabled=not refresh_ready, key="refresh_btn"):
+                if st.button("Refresh via AI knowledge (not a live web fetch)", disabled=not refresh_ready, key="refresh_btn", type="primary"):
                     fee_cap = (str(manual_total) if manual_total > 0
                                else (st.session_state.analysis.fee_cap if st.session_state.analysis else None))
                     with st.spinner("Asking the AI provider for its knowledge of published benchmarks..."):
@@ -4253,7 +4262,7 @@ with tabs[8]:
                     "Export to Excel", data=pct_xlsx, key="download_pct_fee_xlsx",
                     file_name="indicative_fee_split.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
+                 type="primary")
             else:
                 st.caption("Excel export needs the 'openpyxl' package -- run `pip install openpyxl` and reload.")
 
@@ -4471,7 +4480,7 @@ with tabs[9]:
                         data=chart_bytes,
                         file_name="Org_Chart.pptx",
                         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                    )
+                     type="primary")
                     st.caption(
                         "Built from this project's assigned Lead names -- unassigned roles show as red "
                         "\"TBC\". Fill in any remaining names, then paste the finished chart into the DOCX placeholder."
@@ -4507,7 +4516,7 @@ with tabs[9]:
                         data=methodology_bytes,
                         file_name="Methodology_Table.pptx",
                         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                    )
+                     type="primary")
                     st.caption(
                         "Column 2's Key tasks are built from this project's real scope items; columns 3-4 "
                         "are red placeholders for stages the brief doesn't describe. Fill in the remaining "
@@ -4538,7 +4547,7 @@ with tabs[9]:
                         data=program_bytes,
                         file_name="Delivery_Program.pptx",
                         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                    )
+                     type="primary")
                     st.caption(
                         "Built from the delivery program entered in the Fee Estimate tab -- shows a red "
                         "placeholder if no program has been generated there yet."
@@ -4562,7 +4571,7 @@ with tabs[9]:
                     data=st.session_state.tender_summary_buffer,
                     file_name=f"{filename}_tender_summary.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                )
+                 type="primary")
                 st.caption(
                     "Companion internal document -- guidance on the brief's main requirements, plus "
                     "the compliance matrix, gap analysis, review checklist, and user input list where "
@@ -4581,7 +4590,7 @@ with tabs[9]:
             "whenever you're happy with this version. Only the proposal DOCX itself is archived, "
             "not the Tender Summary or the PowerPoint companions above."
         )
-        if st.button("Archive to Library", key="archive_to_library_btn"):
+        if st.button("Archive to Library", key="archive_to_library_btn", type="primary"):
             try:
                 _archived = proposal_library.archive_proposal(
                     _lib_user_id(),
