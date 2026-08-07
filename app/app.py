@@ -206,7 +206,7 @@ st.markdown(
 )
 
 current_user = None
-_access = {"allowed": True, "subscribed": True, "past_due": False, "trial_remaining": 999, "trial_limit": 999}
+_access = {"allowed": True, "subscribed": True, "past_due": False, "trial_remaining": 999, "trial_limit": 999, "bid_credits": 0}
 
 if IS_SAAS_MODE:
     db.init_db()
@@ -232,6 +232,34 @@ def _lib_user_id() -> str:
     'local' is a fixed placeholder used only when SAAS_MODE is off
     (single-user prototype)."""
     return current_user.id if IS_SAAS_MODE and current_user else "local"
+
+
+def _render_upgrade_buttons(user, key_prefix: str) -> None:
+    """Two ways to keep going once the free trial is used up -- reused at
+    both call sites (the top-right Upgrade popover and the Tender Analysis
+    tab's inline upgrade prompt) so the two checkout flows can't drift out
+    of sync. Subscribe: $120/month, unlimited bids while active (see
+    billing.create_checkout_session). Buy 1 bid: $50 one-time, adds a single
+    db.User.bid_credits (see billing.create_bid_checkout_session) --
+    handy for a firm with one more bid to prepare who doesn't want a
+    recurring charge."""
+    ucol1, ucol2 = st.columns(2)
+    with ucol1:
+        if st.button("Subscribe -- $120/mo", key=f"{key_prefix}_sub_btn", type="primary"):
+            try:
+                url = billing.create_checkout_session(user)
+                st.link_button("Continue to payment →", url, type="primary")
+            except Exception as exc:
+                st.error(f"Couldn't start checkout: {exc}")
+                st.caption(billing.debug_key_info())
+    with ucol2:
+        if st.button("Buy 1 bid -- $50", key=f"{key_prefix}_bid_btn"):
+            try:
+                url = billing.create_bid_checkout_session(user)
+                st.link_button("Continue to payment →", url, type="primary")
+            except Exception as exc:
+                st.error(f"Couldn't start checkout: {exc}")
+                st.caption(billing.debug_key_info())
 
 
 def _extract_plain_text_from_bytes(file_bytes: bytes, filename: str):
@@ -951,6 +979,11 @@ with st.sidebar:
                 'Maximum number of free bids reached -- upgrade to keep going.</div>',
                 unsafe_allow_html=True,
             )
+        elif _access["trial_remaining"] <= 0 and _access.get("bid_credits", 0) > 0:
+            # Free trial used up, but they've bought pay-as-you-go bid(s)
+            # (see billing.create_bid_checkout_session) -- not the same as
+            # limit_reached, so a different, non-alarming message.
+            st.info(f"Pay-as-you-go: {_access['bid_credits']} bid credit(s) available")
         else:
             st.info(f"Free trial: {_access['trial_remaining']} of {_access['trial_limit']} bid(s) left")
 
@@ -1555,13 +1588,8 @@ with st.container(key="_topright_actions"):
         _render_project_reference_library_popover_body()
     if IS_SAAS_MODE and current_user:
         if not _access["subscribed"]:
-            if st.button("Upgrade", key="_topright_upgrade_btn"):
-                try:
-                    url = billing.create_checkout_session(current_user)
-                    st.link_button("Continue to payment →", url, type="primary")
-                except Exception as exc:
-                    st.error(f"Couldn't start checkout: {exc}")
-                    st.caption(billing.debug_key_info())
+            with st.popover("Upgrade", width="content"):
+                _render_upgrade_buttons(current_user, key_prefix="_topright")
         else:
             portal_url = billing.create_customer_portal_session(current_user)
             if portal_url:
@@ -2033,13 +2061,7 @@ with tabs[2]:
             f"You've used all {_access['trial_limit']} free trial bid(s). "
             "Upgrade to keep going -- pay per bid, or subscribe monthly. See pricing on the homepage."
         )
-        if st.button("Upgrade to continue", type="primary", key="_tab3_upgrade_btn"):
-            try:
-                url = billing.create_checkout_session(current_user)
-                st.link_button("Continue to payment →", url, type="primary")
-            except Exception as exc:
-                st.error(f"Couldn't start checkout: {exc}")
-                st.caption(billing.debug_key_info())
+        _render_upgrade_buttons(current_user, key_prefix="_tab3")
 
     if st.button("Run Tender Analysis", type="primary", disabled=not ready or _trial_blocked):
         extracted = st.session_state.tender_extracted
