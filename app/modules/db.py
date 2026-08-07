@@ -83,6 +83,19 @@ class User(Base):
     subscription_status = Column(String, default="trial")
     subscription_updated_at = Column(DateTime, default=_now)
 
+    # The Monthly plan's advertised "3 bids included" cap (see
+    # auth.SUBSCRIPTION_MONTHLY_BID_LIMIT) -- how many of THIS Stripe billing
+    # period's 3 bids have been used, and the period-end timestamp Stripe
+    # reported the last time we checked. billing.refresh_subscription_status
+    # compares the live Stripe current_period_end against
+    # subscription_period_end on every call (e.g. every login); a change
+    # means a new billing cycle started, which resets
+    # subscription_bids_used back to 0 -- no webhook needed, since a login
+    # is frequent enough for a monthly cap to mean something. Both stay at
+    # their defaults (unused) for anyone who's never subscribed.
+    subscription_bids_used = Column(Integer, default=0)
+    subscription_period_end = Column(DateTime, nullable=True)
+
     # Usage-based free trial: N free full proposals (Tender Analysis runs),
     # then payment is required. See auth.get_access_status(). Matches the
     # "1 free bid on sign up" pricing shown on the landing page -- was 3
@@ -226,6 +239,12 @@ def _run_light_migrations() -> None:
     if "bid_credits" not in existing_columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE users ADD COLUMN bid_credits INTEGER DEFAULT 0"))
+    if "subscription_bids_used" not in existing_columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN subscription_bids_used INTEGER DEFAULT 0"))
+    if "subscription_period_end" not in existing_columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN subscription_period_end TIMESTAMP"))
 
 
 def get_session():

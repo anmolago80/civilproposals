@@ -40,6 +40,7 @@ redirect handler, not two.
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 
 import stripe
 
@@ -199,7 +200,13 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
 def refresh_subscription_status(user: db.User) -> db.User:
     """Pulls the live subscription status from Stripe and syncs it to the
     DB. Safe to call often (e.g. once per login) -- a no-op if the user has
-    never subscribed."""
+    never subscribed. Also resets the Monthly plan's "3 bids included"
+    quota (db.User.subscription_bids_used, see auth.
+    SUBSCRIPTION_MONTHLY_BID_LIMIT) when Stripe reports a new billing period
+    has started -- detected by comparing the live current_period_end against
+    the value stored from the last check, since this module runs webhook-
+    free and a login-frequency check is what "reset once a month" actually
+    reduces to without one."""
     if not is_configured() or not user.stripe_subscription_id:
         return user
 
@@ -218,11 +225,27 @@ def refresh_subscription_status(user: db.User) -> db.User:
     }
     new_status = status_map.get(sub.get("status"), user.subscription_status)
 
-    if new_status != user.subscription_status:
+    # Naive UTC throughout (not tz-aware) -- matches how SQLite (the local
+    # dev fallback) round-trips DateTime columns, so comparing against
+    # user.subscription_period_end never risks a naive-vs-aware TypeError.
+    period_end_ts = sub.get("current_period_end")
+    new_period_end = (
+        datetime.fromtimestamp(period_end_ts, tz=timezone.utc).replace(tzinfo=None)
+        if period_end_ts else None
+    )
+    period_rolled_over = (
+        new_period_end is not None
+        and (user.subscription_period_end is None or new_period_end > user.subscription_period_end)
+    )
+
+    if new_status != user.subscription_status or period_rolled_over:
         with db.get_session() as s:
             db_user = s.query(db.User).filter(db.User.id == user.id).first()
             if db_user:
                 db_user.subscription_status = new_status
+                if period_rolled_over:
+                    db_user.subscription_bids_used = 0
+                    db_user.subscription_period_end = new_period_end
                 s.commit()
                 s.refresh(db_user)
                 return db_user
