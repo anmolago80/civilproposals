@@ -93,6 +93,9 @@ class User(Base):
     is_admin = Column(Boolean, default=False)
 
     library_entries = relationship("LibraryEntry", back_populates="user", cascade="all, delete-orphan")
+    reference_library_entries = relationship(
+        "ReferenceLibraryEntry", back_populates="user", cascade="all, delete-orphan",
+    )
     proposal_usage = relationship("ProposalUsage", back_populates="user", cascade="all, delete-orphan")
     saved_projects = relationship("SavedProject", back_populates="user", cascade="all, delete-orphan")
 
@@ -134,6 +137,28 @@ class LibraryEntry(Base):
     docx_bytes = Column(LargeBinary, nullable=False)
 
     user = relationship("User", back_populates="library_entries")
+
+
+class ReferenceLibraryEntry(Base):
+    """A firm 'reference project' (case study / past-experience writeup) the
+    user has uploaded directly to the Project Reference Library -- separate
+    from LibraryEntry (which holds full proposals archived from Export
+    Pack). Organised by project_type (discipline) the same way LibraryEntry
+    is, so both libraries share the same filtering pattern. See
+    modules/reference_library.py."""
+    __tablename__ = "reference_library_entries"
+
+    id = Column(String, primary_key=True, default=_uid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+
+    title = Column(String, default="")
+    project_type = Column(String, default="Unspecified")
+    tags = Column(String, default="")  # comma-separated free tags, user-entered
+    filename = Column(String, default="")
+    uploaded_at = Column(DateTime, default=_now)
+    file_bytes = Column(LargeBinary, nullable=False)
+
+    user = relationship("User", back_populates="reference_library_entries")
 
 
 class SavedProject(Base):
