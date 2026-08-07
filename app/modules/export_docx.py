@@ -27,7 +27,7 @@ from datetime import datetime
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ALIGN_VERTICAL
 from docx.enum.section import WD_SECTION
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
@@ -83,6 +83,8 @@ def build_docx(
     fee_estimate_indicative_amounts: dict | None = None,
     team_intro=None,
     experience_intro=None,
+    differentiator_text: str | None = None,
+    sales_pitch_text: str | None = None,
 ) -> io.BytesIO:
     theme = _theme_colours(project_info.get("proposal_theme"))
     font = body_font or DEFAULT_FONT
@@ -96,7 +98,7 @@ def build_docx(
     _add_toc(doc)
     doc.add_page_break()
 
-    _build_executive_summary(doc, executive_summary, project_info, theme)
+    _build_executive_summary(doc, executive_summary, project_info, theme, differentiator_text=differentiator_text)
     doc.add_page_break()
 
     _build_page_allocation_plan(doc, sections, theme)
@@ -114,7 +116,8 @@ def build_docx(
                              discipline_fee_lines=discipline_fee_lines,
                              project_info=project_info,
                              team_intro=team_intro,
-                             experience_intro=experience_intro)
+                             experience_intro=experience_intro,
+                             sales_pitch_text=sales_pitch_text)
 
     buffer = io.BytesIO()
     doc.save(buffer)
@@ -223,6 +226,8 @@ def build_letter_docx(
     cover_theme_image_bytes: bytes | None = None,
     fee_estimates: list | None = None,
     discipline_fee_lines: list | None = None,
+    differentiator_text: str | None = None,
+    sales_pitch_text: str | None = None,
 ) -> io.BytesIO:
     """
     Builds the Small Scope Proposal Response Pack -- the leaner, content-agnostic
@@ -270,7 +275,7 @@ def build_letter_docx(
     _build_cover_page(doc, project_info, cover_image_bytes, cover_theme_image_bytes, theme)
     _add_company_footer_line(doc.sections[-1].footer, project_info)
 
-    _build_executive_summary(doc, executive_summary, project_info, theme)
+    _build_executive_summary(doc, executive_summary, project_info, theme, differentiator_text=differentiator_text)
     doc.add_page_break()
 
     doc.add_heading("1. Introduction", level=1)
@@ -280,7 +285,7 @@ def build_letter_docx(
     _build_letter_scope_of_work(doc, analysis.scope_items)
 
     doc.add_heading("3. Methodology and Deliverables", level=1)
-    _build_letter_methodology(doc, methodology_text, theme)
+    _build_letter_methodology(doc, methodology_text, theme, sales_pitch_text=sales_pitch_text)
 
     doc.add_heading("4. Project Team", level=1)
     _build_letter_team(doc, resource_plan, personnel_photos, theme)
@@ -337,20 +342,26 @@ def _add_company_footer_line(footer, project_info: dict) -> None:
     run.italic = True
 
 
-def _build_letter_methodology(doc: Document, methodology_text: str, theme: dict | None):
+def _build_letter_methodology(doc: Document, methodology_text: str, theme: dict | None,
+                               sales_pitch_text: str | None = None):
     """Renders the AI-drafted "Methodology and Deliverables" section -- same
     continuous-prose, bold-**subheading** convention as every other AI section
     draft in this tool (see draft_generator.py), reusing _add_draft_paragraph
-    for the bold-subheading-as-heading treatment."""
+    for the bold-subheading-as-heading treatment. sales_pitch_text: the user's
+    own "why choose us" text from Project Setup -- pure upside/sales copy, so
+    it renders at the end of this section whenever present, independently of
+    whether the methodology itself has been drafted yet."""
     theme = theme or _theme_colours(None)
     methodology_text = (methodology_text or "").strip()
     if not methodology_text:
         _add_placeholder_paragraph(
             doc, "[NO METHODOLOGY DRAFTED YET -- generate first-pass drafts in the Draft Responses step]",
         )
+        _add_pull_quote_box(doc, sales_pitch_text, theme, eyebrow="Why choose us")
         return
     for para_text in [p.strip() for p in methodology_text.split("\n\n") if p.strip()]:
         _add_draft_paragraph(doc, para_text, theme)
+    _add_pull_quote_box(doc, sales_pitch_text, theme, eyebrow="Why choose us")
 
 
 def _add_letter_body_text(doc: Document, text: str, placeholder: str, theme: dict | None = None):
@@ -660,11 +671,16 @@ def _add_toc(doc: Document):
         run._r.append(el)
 
 
-def _build_executive_summary(doc: Document, exec_summary, project_info: dict | None, theme: dict | None):
+def _build_executive_summary(doc: Document, exec_summary, project_info: dict | None, theme: dict | None,
+                              differentiator_text: str | None = None):
     """Renders the unweighted Executive Summary as the first real content page
     after the cover/TOC -- a short warm intro, then catchy-titled, sales-forward
     blocks in a two-column magazine layout. exec_summary is an
-    executive_summary.ExecutiveSummary (or None if not drafted yet)."""
+    executive_summary.ExecutiveSummary (or None if not drafted yet).
+    differentiator_text: the user's own "what sets us apart" text from Project
+    Setup -- pure upside/sales copy, not something that needs a red placeholder
+    wall when missing, so it renders (via _add_pull_quote_box) whenever present,
+    independently of whether an AI executive summary has been drafted yet."""
     theme = theme or _theme_colours(None)
     doc.add_heading("Executive summary", level=1)
 
@@ -676,6 +692,7 @@ def _build_executive_summary(doc: Document, exec_summary, project_info: dict | N
             doc, "[NO EXECUTIVE SUMMARY DRAFTED YET -- generate one in the Draft Responses step]",
         )
         doc.add_paragraph()
+        _add_pull_quote_box(doc, differentiator_text, theme, eyebrow="What sets us apart")
         return
 
     if intro:
@@ -703,6 +720,8 @@ def _build_executive_summary(doc: Document, exec_summary, project_info: dict | N
                 body_run.font.color.rgb = RED
                 body_run.italic = True
         _end_columns(doc)
+
+    _add_pull_quote_box(doc, differentiator_text, theme, eyebrow="What sets us apart")
 
     note = doc.add_paragraph()
     note.paragraph_format.space_before = Pt(6)
@@ -893,6 +912,7 @@ def _build_proposal_response(
     discipline_fee_lines: list | None = None, project_info: dict | None = None,
     team_intro=None,
     experience_intro=None,
+    sales_pitch_text: str | None = None,
 ):
     divider_images = divider_images or {}
     resource_plan = resource_plan or []
@@ -1014,6 +1034,13 @@ def _build_proposal_response(
         else:
             doc.add_paragraph("[NO DRAFT GENERATED YET -- run Draft Responses for this section]").italic = True
 
+        # 5b. The sales pitch, pinned to the very end of the Methodology
+        # section's content (after the table and the AI draft body, not
+        # alongside them) -- same "pure upside copy, render whenever present"
+        # treatment as the differentiator in _build_executive_summary.
+        if _is_methodology_section(section.title):
+            _add_pull_quote_box(doc, sales_pitch_text, theme, eyebrow="Why choose us")
+
         # 6. Remaining graphic placeholders (full width).
         section_graphics = graphics_by_section.get(section.title, [])
         if divider_png:
@@ -1112,6 +1139,82 @@ def _add_callout_box(doc: Document, text: str, theme: dict | None):
     run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
     run.font.size = Pt(12)
     run.font.bold = True
+    doc.add_paragraph()
+
+
+def _tint_colour(rgb: RGBColor, amount: float) -> RGBColor:
+    """Lightens an RGBColor toward white by `amount` (0 = unchanged, 1 = white)
+    -- used to derive the pull-quote box's light panel from the theme's dark
+    heading colour, so it stays legible under every theme (including
+    Minimalist, whose "primary" is itself a light background colour)."""
+    r, g, b = rgb[0], rgb[1], rgb[2]
+    return RGBColor(
+        int(r + (255 - r) * amount),
+        int(g + (255 - g) * amount),
+        int(b + (255 - b) * amount),
+    )
+
+
+def _add_pull_quote_box(doc: Document, text: str, theme: dict | None, eyebrow: str | None = None):
+    """The differentiator (end of Executive Summary) / sales pitch (end of
+    Methodology) pull-quote card -- deliberately different from
+    _add_callout_box's single-colour band, which is already used everywhere
+    for every section's auto-extracted lead sentence, so this reads as
+    distinct, stand-out sales copy rather than blending in as "just another
+    callout". A solid tab on the left carries a large quote mark; a light
+    tinted panel on the right carries an optional small uppercase eyebrow
+    label and the bold body text. Built from theme["heading"] (not
+    theme["primary"]) so the tab stays a legible dark fill under every theme,
+    including Minimalist, whose "primary" is a light background colour, not a
+    text-safe dark one. text is never invented -- this is only ever the
+    user's own typed differentiator/sales-pitch text, so it's skipped
+    entirely when empty rather than showing a placeholder."""
+    text = (text or "").strip()
+    if not text:
+        return
+    theme = theme or _theme_colours(None)
+    tab_colour = theme["heading"]
+    panel_colour = _tint_colour(tab_colour, 0.92)
+
+    table = doc.add_table(rows=1, cols=2)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.autofit = False
+    table.allow_autofit = False
+    left_w, right_w = Cm(2.4), Cm(14.2)
+    for row in table.rows:
+        for cell, w in zip(row.cells, (left_w, right_w)):
+            cell.width = w
+    for col, w in zip(table.columns, (left_w, right_w)):
+        col.width = w
+
+    left_cell, right_cell = table.rows[0].cells
+    _shade_cell(left_cell, str(tab_colour))
+    _set_cell_margins(left_cell, top=200, bottom=200, left=100, right=100)
+    left_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    mark_p = left_cell.paragraphs[0]
+    mark_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    mark_run = mark_p.add_run("“")
+    mark_run.font.size = Pt(44)
+    mark_run.font.bold = True
+    mark_run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+
+    _shade_cell(right_cell, str(panel_colour))
+    _set_cell_margins(right_cell, top=200, bottom=200, left=260, right=260)
+    right_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    first_p = right_cell.paragraphs[0]
+    if eyebrow:
+        first_p.paragraph_format.space_after = Pt(5)
+        eyebrow_run = first_p.add_run(eyebrow.upper())
+        eyebrow_run.font.size = Pt(9.5)
+        eyebrow_run.font.bold = True
+        eyebrow_run.font.color.rgb = theme["accent"]
+        body_p = right_cell.add_paragraph()
+    else:
+        body_p = first_p
+    body_run = body_p.add_run(text)
+    body_run.font.size = Pt(12.5)
+    body_run.font.bold = True
+    body_run.font.color.rgb = tab_colour
     doc.add_paragraph()
 
 
