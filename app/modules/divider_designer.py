@@ -351,6 +351,9 @@ def render_full_page_divider(
     photo_bytes: bytes | None = None,
     section_label: str | None = None,
     font_paths: dict | None = None,
+    quote_text: str | None = None,
+    quote_attribution: str | None = None,
+    photo_caption: str | None = None,
     size: tuple[int, int] = (PAGE_W, PAGE_H),
 ) -> bytes | None:
     """
@@ -364,6 +367,16 @@ def render_full_page_divider(
         with a solid colour band across the bottom carrying the title and number
         (like the "Delivering the service 02" page).
 
+    `quote_text`/`quote_attribution` (from the section's Quote picker in
+    Graphics & Design) render in their own zone on the right -- level with
+    the title in the coloured band for the photo look, upper-right for the
+    solid-colour look (where level-with-title would sit on top of the big
+    ghost number). Applies to BOTH looks, regardless of which of the four
+    Layout options was picked -- all photo-based layouts share the one photo
+    template here. `photo_caption` (also from Graphics & Design, only used
+    when there's a photo) renders bottom-right of the photo itself, plain
+    white text with a thin dark outline for legibility, no background box.
+
     Returns PNG bytes, or None on any failure (caller falls back to the banner or
     a text divider). `section_label` is the big number/letter (e.g. "02").
     """
@@ -373,9 +386,11 @@ def render_full_page_divider(
         wants_photo = layout != "Solid colour"
         photo = _load_cropped_photo(photo_bytes, w, int(h * 0.72)) if (wants_photo and photo_bytes) else None
         if photo is not None:
-            img = _full_page_photo(photo, title, colours, section_label, font_paths, size)
+            img = _full_page_photo(photo, title, colours, section_label, font_paths, size,
+                                    quote_text, quote_attribution, photo_caption)
         else:
-            img = _full_page_solid(title, colours, section_label, font_paths, size)
+            img = _full_page_solid(title, colours, section_label, font_paths, size,
+                                    quote_text, quote_attribution)
         buffer = io.BytesIO()
         img.convert("RGB").save(buffer, format="PNG")
         buffer.seek(0)
@@ -384,7 +399,7 @@ def render_full_page_divider(
         return None
 
 
-def _full_page_solid(title, colours, section_label, font_paths, size):
+def _full_page_solid(title, colours, section_label, font_paths, size, quote_text=None, quote_attribution=None):
     w, h = size
     img = Image.new("RGBA", (w, h), colours["primary"] + (255,))
     # Diagonal darker wedge bottom-right for depth (subtle, like the examples).
@@ -399,14 +414,29 @@ def _full_page_solid(title, colours, section_label, font_paths, size):
     ty = int(h * 0.62)
     draw.rectangle([90, ty - 34, 90 + 150, ty - 34 + 10], fill=colours["accent"])
     _draw_page_title(draw, title, (90, ty), w - 260, font_paths)
+
+    # Quote -- no photo band to anchor to here, so it gets its own zone in
+    # the upper-right of the page (title lives low-left, the big ghost
+    # number sits mid-right, so upper-right is the one open area that reads
+    # as "the same coloured page, on the right" without sitting on top of
+    # either of those).
+    quote_box_x = int(w * 0.55)
+    _draw_divider_quote(draw, quote_text, quote_attribution, colours, font_paths,
+                         (quote_box_x, int(h * 0.14)), w - 90 - quote_box_x, max_lines=4)
     return img
 
 
-def _full_page_photo(photo, title, colours, section_label, font_paths, size):
+def _full_page_photo(photo, title, colours, section_label, font_paths, size,
+                      quote_text=None, quote_attribution=None, photo_caption=None):
     w, h = size
     band_top = int(h * 0.70)
     img = Image.new("RGBA", (w, h), colours["primary"] + (255,))
     img.paste(photo, (0, 0))
+
+    # Photo caption -- bottom-right of the photo area, drawn before the band
+    # so it reads as sitting "on the photo".
+    _draw_photo_caption(img, photo_caption, font_paths, band_top, size)
+
     # Solid colour band across the bottom carrying the text.
     draw = ImageDraw.Draw(img)
     draw.rectangle([0, band_top, w, h], fill=colours["primary"] + (255,))
@@ -419,7 +449,14 @@ def _full_page_photo(photo, title, colours, section_label, font_paths, size):
     # Title near the top of the band, left-aligned, kept clear of the number zone.
     ty = band_top + 70
     draw.rectangle([90, ty - 34, 90 + 150, ty - 34 + 9], fill=colours["accent"])
-    _draw_page_title(draw, title, (90, ty), int(w * 0.60), font_paths)
+    _draw_page_title(draw, title, (90, ty), int(w * 0.56), font_paths)
+
+    # Quote -- right side of the band, level with the title. The band is
+    # tall enough here that up to 3 lines + attribution comfortably clears
+    # the big number (anchored to the very bottom of the page).
+    quote_box_x = int(w * 0.60)
+    _draw_divider_quote(draw, quote_text, quote_attribution, colours, font_paths,
+                         (quote_box_x, ty - 24), w - 90 - quote_box_x, max_lines=3)
     return img
 
 
@@ -485,6 +522,75 @@ def _page_font(font_paths, bold=False, size=48):
             except Exception:
                 pass
     return _font(bold=bold, size=size)
+
+
+def _wrap_and_truncate(draw, text: str, font, max_width: int, max_lines: int) -> list[str]:
+    """Like _wrap_text, but if the text doesn't fit in max_lines, the last
+    shown line is trimmed and given a trailing "…" instead of just stopping
+    mid-sentence -- used for the divider quote, which has a fixed amount of
+    room to work with (see _draw_divider_quote)."""
+    lines = _wrap_text(draw, text, font, max_width)
+    if len(lines) <= max_lines:
+        return lines
+
+    shown = lines[:max_lines]
+    last = shown[-1]
+    while draw.textlength(last + "…", font=font) > max_width and " " in last:
+        last = last.rsplit(" ", 1)[0]
+    shown[-1] = last.rstrip(",.;:") + "…"
+    return shown
+
+
+def _draw_divider_quote(draw, quote_text, quote_attribution, colours, font_paths, xy, max_width, max_lines=3):
+    """Renders a section divider's picked quote (see Graphics & Design's
+    per-section Quote picker) into its own zone: a small quote mark, up to
+    max_lines wrapped/truncated lines, then the attribution in the theme's
+    accent colour. `xy` is the top-left corner of that zone -- callers
+    (_full_page_photo, _full_page_solid) already position it on the right
+    side of the divider, clear of the title and the big section number.
+    No-ops if quote_text is empty, so callers can pass it through unchecked."""
+    if not quote_text or not quote_text.strip():
+        return
+    x, y = xy
+    mark_font = _page_font(font_paths, bold=True, size=40)
+    # Italic isn't in font_paths (only "regular"/"bold" -- see _page_font),
+    # so the quote body always uses the bundled italic, same as the thin-
+    # banner "Photo + quote" layout does (_layout_photo_quote above).
+    quote_font = _font(bold=False, italic=True, size=23)
+    attr_font = _page_font(font_paths, bold=True, size=19)
+    line_h = 28
+
+    draw.text((x, y), "“", font=mark_font, fill=colours["accent"] + (255,))
+    ty = y + 36
+    wrapped = _wrap_and_truncate(draw, quote_text.strip(), quote_font, max_width - 18, max_lines)
+    for line in wrapped:
+        draw.text((x + 18, ty), line, font=quote_font, fill=WHITE)
+        ty += line_h
+    if quote_attribution and quote_attribution.strip():
+        ty += 6
+        draw.text((x + 18, ty), f"— {quote_attribution.strip()}", font=attr_font,
+                   fill=colours["accent"] + (255,))
+
+
+def _draw_photo_caption(img, caption, font_paths, band_top, size):
+    """Renders a section divider's picked photo title (see Graphics &
+    Design's per-section "Photo title" field) bottom-right of the photo
+    area, above the coloured band -- plain white bold text, no background
+    box (a thin dark outline around the letters keeps it readable over a
+    busy/light photo without needing a solid scrim behind it). Mutates img
+    in place. No-ops if caption is empty, so callers can pass it through
+    unchecked."""
+    if not caption or not caption.strip():
+        return
+    w, _h = size
+    text = caption.strip()
+    draw = ImageDraw.Draw(img)
+    font = _page_font(font_paths, bold=True, size=28)
+    tw = draw.textlength(text, font=font)
+    margin = 34
+    x = w - margin - tw
+    y = band_top - margin - 34
+    draw.text((x, y), text, font=font, fill=WHITE, stroke_width=2, stroke_fill=(0, 0, 0, 190))
 
 
 # ---------------------------------------------------------------------------
