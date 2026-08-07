@@ -4363,6 +4363,8 @@ with tabs[9]:
                     cover_theme_image_bytes=st.session_state.cover_hero_png,
                     fee_estimates=st.session_state.fee_estimates,
                     discipline_fee_lines=st.session_state.discipline_fee_lines,
+                    differentiator_text=st.session_state.project_differentiator,
+                    sales_pitch_text=st.session_state.project_sales_pitch,
                 )
                 st.session_state.docx_buffer = buffer
 
@@ -4445,6 +4447,8 @@ with tabs[9]:
                     fee_estimate_indicative_amounts=_fee_indicative_amounts,
                     team_intro=st.session_state.team_intro,
                     experience_intro=st.session_state.experience_intro,
+                    differentiator_text=st.session_state.project_differentiator,
+                    sales_pitch_text=st.session_state.project_sales_pitch,
                 )
                 st.session_state.docx_buffer = buffer
 
