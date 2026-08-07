@@ -16,6 +16,8 @@ not an invented fact about the firm.
 
 from __future__ import annotations
 
+import re
+
 from pydantic import BaseModel
 
 from modules.ai_interface import call_ai_json
@@ -35,7 +37,25 @@ it speak to this brief's real drivers, is anything vague or generic, what's the 
 would sharpen it most. Direct and useful, like an experienced bid manager marking it up, not \
 generic praise.
 2. A tightened, submission-ready rewrite -- same underlying claims the user wrote, better angled \
-and worded, ready to paste straight into the proposal.
+and worded, ready to paste straight into the proposal. This rewrite renders in the document as a \
+short highlighted pull-quote box, not a paragraph, so it MUST be a maximum of THREE sentences \
+total -- shorter is better if the claim lands in one or two.
+
+Write the rewrite for fast, System-1 reading, using the attention-grabbing techniques from \
+Kahneman's "Thinking, Fast and Slow" -- applied to presentation, never to the underlying facts:
+- Lead with the single most concrete, specific claim already in the user's text (a number, a \
+named outcome, a stated track record). Concrete claims are processed faster and judged more \
+credible than vague ones -- if the user gave you a specific detail, put it first, not buried.
+- Prefer short, plain, low-effort sentences over long or jargon-heavy ones. Cognitive ease reads \
+as more trustworthy; a sentence a reader has to work to parse loses them.
+- Cut hedging language ("we believe", "we aim to", "we strive to", "we try to") -- confident, \
+unqualified statements are judged as more credible. State the claim, don't qualify it.
+- If the user's own text already implies a real stake or consequence for the client (a risk \
+avoided, a deadline that matters, a cost overrun prevented), keep that concrete framing rather \
+than flattening it into generic reassurance -- loss-framed, concrete stakes are more memorable \
+and more persuasive than abstract benefit statements.
+These are rewriting techniques applied to the SAME underlying claims the user already wrote -- \
+never add a number, project, credential, or fact that isn't already present in their text.
 
 If an input was not supplied (empty), leave both its comment and its rewrite as empty strings -- \
 do not invent content to review or rewrite."""
@@ -63,6 +83,20 @@ Return a JSON object:
   "sales_pitch_comment": string,
   "sales_pitch_refined": string
 }}"""
+
+
+def _cap_sentences(text: str, max_sentences: int = 3) -> str:
+    """Safety net behind the prompt's own "max three sentences" instruction --
+    the rewrite renders inside the pull-quote box in the document (see
+    export_docx._add_pull_quote_box), so this guarantees it always fits even
+    if the model runs long. Never adds anything, only trims trailing
+    sentences beyond the cap."""
+    text = (text or "").strip()
+    if not text:
+        return text
+    parts = re.split(r"(?<=[.!?])\s+", text)
+    parts = [p for p in parts if p.strip()]
+    return " ".join(parts[:max_sentences]).strip()
 
 
 class PitchReview(BaseModel):
@@ -100,7 +134,7 @@ def review_pitch(
 
     return PitchReview(
         differentiator_comment=(data.get("differentiator_comment") or "").strip(),
-        differentiator_refined=(data.get("differentiator_refined") or "").strip(),
+        differentiator_refined=_cap_sentences(data.get("differentiator_refined") or ""),
         sales_pitch_comment=(data.get("sales_pitch_comment") or "").strip(),
-        sales_pitch_refined=(data.get("sales_pitch_refined") or "").strip(),
+        sales_pitch_refined=_cap_sentences(data.get("sales_pitch_refined") or ""),
     )
