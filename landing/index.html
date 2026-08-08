@@ -217,6 +217,26 @@
     padding:20px 24px;max-width:680px;margin:44px auto 0;font-size:.92rem;color:#7A4A0A;
   }
 
+  /* FAQ -- native <details>/<summary>, no JS needed. Styled as a stack of
+     bordered cards matching .feature-card/.step-card's look, with a
+     rotating "+" -> "x" marker instead of the browser's default triangle. */
+  .faq-list{max-width:740px;margin:0 auto;}
+  .faq-item{
+    background:#fff;border:1px solid var(--border);border-radius:14px;
+    padding:2px 26px;margin-bottom:14px;
+  }
+  .faq-item summary{
+    padding:19px 0;font-weight:700;font-size:1.02rem;cursor:pointer;
+    list-style:none;display:flex;justify-content:space-between;align-items:center;gap:16px;
+  }
+  .faq-item summary::-webkit-details-marker{display:none;}
+  .faq-item summary::after{
+    content:'+';font-size:1.5rem;font-weight:800;color:var(--blue);flex-shrink:0;
+    line-height:1;transition:transform .15s;
+  }
+  .faq-item[open] summary::after{transform:rotate(45deg);}
+  .faq-item p{color:var(--text-muted);font-size:.95rem;line-height:1.75;padding-bottom:20px;margin-top:-4px;}
+
   /* Site footer -- dark, multi-column, matching the brand blue used
      elsewhere (var(--ink), the same dark navy as the promo-strip). */
   .site-footer{background:var(--ink);color:#fff;margin-top:0;}
@@ -244,7 +264,7 @@
 
 <nav class="wrap">
   <div class="logo"><img src="assets/logo_mark.png" alt="CivilProposals"> CivilProposals <span class="beta-tag">Beta</span></div>
-  <a class="nav-cta" href="https://app.civilproposals.com">Get Started</a>
+  <a class="nav-cta" href="https://app.civilproposals.com">Try it free</a>
 </nav>
 
 <header class="hero">
@@ -256,7 +276,7 @@
       first pass drafts, and a designed Word document to hand to your proposal writers.
     </p>
     <div class="hero-ctas">
-      <a class="btn-primary" href="https://app.civilproposals.com">Try for free</a>
+      <a class="btn-primary" href="https://app.civilproposals.com">Upload your first brief free</a>
       <a class="btn-secondary" href="#pricing">See pricing</a>
     </div>
     <p class="hero-note">Currently in Beta: early access, actively evolving based on real firm feedback.</p>
@@ -469,7 +489,7 @@
           <li><span class="check">✓</span> Designed Word export</li>
           <li><span class="check">✓</span> See exactly what you get before you pay anything</li>
         </ul>
-        <a class="btn-secondary" style="display:block;" href="https://app.civilproposals.com">Try for free</a>
+        <a class="btn-secondary" style="display:block;" href="https://app.civilproposals.com">Upload your first brief free</a>
       </div>
 
       <div class="pricing-card">
@@ -482,7 +502,7 @@
           <li><span class="check">✓</span> Compliance matrix, fee & program tools</li>
           <li><span class="check">✓</span> Nothing to cancel: use it as often as you like</li>
         </ul>
-        <a class="btn-secondary" style="display:block;" href="https://app.civilproposals.com">Get Started</a>
+        <a class="btn-secondary" style="display:block;" href="https://app.civilproposals.com">Buy 1 bid -- $50</a>
       </div>
 
       <div class="pricing-card featured">
@@ -497,7 +517,7 @@
           <li><span class="check">✓</span> Compliance matrix, gap analysis, fee & program tools</li>
           <li><span class="check">✓</span> Cancel anytime</li>
         </ul>
-        <a class="btn-primary" style="display:block;" href="https://app.civilproposals.com">Get Started</a>
+        <a class="btn-primary" style="display:block;" href="https://app.civilproposals.com">Subscribe -- $120/mo</a>
       </div>
     </div>
 
@@ -505,6 +525,65 @@
       <strong>🧪 Beta:</strong> CivilProposals is new and actively evolving: pricing, features,
       and behaviour may change as we learn from real firms using it. We'd genuinely appreciate
       feedback on anything that breaks, confuses, or is missing.
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <span class="section-label">FAQ</span>
+    <h2 class="section-title">Questions you might have</h2>
+    <p class="section-sub">The things people usually ask before trying it.</p>
+
+    <div class="faq-list">
+      <details class="faq-item">
+        <summary>Is this just ChatGPT with extra steps?</summary>
+        <p>No. General chat tools don't know how tender evaluation actually works: which parts of
+        a brief are mandatory, how weightings map to page allocation, or what a compliance matrix
+        needs to cover. CivilProposals is purpose-built around that: it extracts scoring criteria
+        straight from your brief, builds a weighted structure to match, and keeps a reusable
+        library of your firm's own past proposals and CVs, so your next bid gets faster too, not
+        just this one.</p>
+      </details>
+
+      <details class="faq-item">
+        <summary>Will it invent staff, certifications, or project experience I never gave it?</summary>
+        <p>No. Every draft is grounded only in what you've actually uploaded or entered. Anything
+        the tool doesn't genuinely know, a certification, a past project, a specific number,
+        becomes a clearly marked placeholder for you to fill in, never a guess dressed up as
+        fact.</p>
+      </details>
+
+      <details class="faq-item">
+        <summary>How secure is what I upload?</summary>
+        <p>Your tender briefs and company material are stored under your account only; other
+        firms using CivilProposals can't see them. We use Claude (Anthropic) to power the AI
+        drafting, and your data is never used to train their models. We're still a beta product
+        and haven't completed formal compliance certifications like SOC 2 yet, so if that's a
+        hard requirement for your firm, reach out before signing up and we'll be upfront about
+        where things stand.</p>
+      </details>
+
+      <details class="faq-item">
+        <summary>Who's responsible if something in the draft is wrong?</summary>
+        <p>You are, the same as you'd be with a first draft from a junior team member.
+        CivilProposals produces a first pass, not a submission-ready document; your normal review
+        process should still catch and correct anything before it goes to a client. Full detail
+        in our <a href="terms-of-service.html" style="color:var(--blue);font-weight:700;">Terms of
+        Service</a>.</p>
+      </details>
+
+      <details class="faq-item">
+        <summary>Do I need a credit card to try it?</summary>
+        <p>No. Your first full bid is free, no card required. You'll only need to pay if you want
+        to run a second one: $50 for a single bid, or $120/month for 3.</p>
+      </details>
+
+      <details class="faq-item">
+        <summary>Can I cancel the Monthly plan anytime?</summary>
+        <p>Yes, anytime, directly from your account, no phone call or email required. You'll keep
+        access through the end of whatever billing period you've already paid for.</p>
+      </details>
     </div>
   </div>
 </section>
