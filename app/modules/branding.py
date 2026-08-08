@@ -218,29 +218,72 @@ html, body {{ margin:0; padding:0; background:transparent; font-family:-apple-sy
     }});
   }});
 
+  // Guards restoreIfNeeded()/syncActive() against fighting each other --
+  // see the comment inside restoreIfNeeded() for the failure mode this
+  // closes off. While `restoring` is true we've issued a corrective click
+  // and are waiting for the real tab strip to actually reflect it.
+  var restoring = false;
+  var restoreTarget = -1;
+  var restoreDeadline = 0;
+
   // Streamlit's real tab strip occasionally resets itself to the FIRST tab
   // on a rerun it had no business touching -- most reliably reproduced by
-  // uploading a file anywhere in the app. From the user's side that looks
-  // like "I uploaded my file and got bounced back to Project Setup with no
-  // confirmation," which is exactly the kind of thing that makes a working
-  // upload look broken. This component is recreated fresh on every rerun
-  // (a brand new iframe), so on each (re)mount we compare the real tab
-  // strip's current selection against the step the user actually last
-  // navigated to (persisted in the parent window's sessionStorage, updated
-  // both here and in navStep() above) and silently click it back if a stray
-  // reset snuck in. The only way to change the real tab selection at all is
-  // through navStep() above (the real tabs are invisible/unclickable by the
-  // user directly), so any mismatch here can only be one of these
-  // unintended resets, never a legitimate navigation we'd be fighting.
+  // uploading a file anywhere in the app, and also seen right after a hard
+  // browser refresh while deep in the app (several full reruns fire in
+  // quick succession while the session reconnects/restores, and each one
+  // can remount the tab strip back to its default). From the user's side
+  // that looks like the sidebar step list and the actual page content
+  // disagreeing about which section is open. This component is recreated
+  // fresh on every rerun (a brand new iframe), so on each (re)mount we
+  // compare the real tab strip's current selection against the step the
+  // user actually last navigated to (persisted in the parent window's
+  // sessionStorage, updated both here and in navStep() above) and silently
+  // click it back if a stray reset snuck in. The only way to change the
+  // real tab selection at all is through navStep() above (the real tabs
+  // are invisible/unclickable by the user directly), so any mismatch here
+  // can only be one of these unintended resets, never a legitimate
+  // navigation we'd be fighting.
   function restoreIfNeeded(){{
     try {{
       var saved = window.parent.sessionStorage.getItem(STORAGE_KEY);
       if (saved === null) return;
       var savedIdx = parseInt(saved, 10);
       var activeIdx = currentActiveIndex();
-      if (activeIdx !== -1 && activeIdx !== savedIdx) {{
+      if (activeIdx === -1) return; // real tab strip not mounted yet
+
+      if (restoring) {{
+        // We already clicked savedIdx and are waiting for React to
+        // actually apply it. Clicking a tab doesn't flip aria-selected
+        // synchronously -- there's a brief window where the DOM still
+        // reads the OLD selection right after tabs[i].click() returns.
+        // syncActive() runs immediately after this on every poll tick, and
+        // it used to unconditionally persist whatever it read to
+        // sessionStorage -- so it would catch that stale pre-click read
+        // and stomp the target we just asked to restore, sending
+        // restoreIfNeeded() off to "restore" back to the WRONG index on
+        // the next tick. That ping-pong (visible content briefly showing
+        // whatever tab the stale read pointed at, sidebar showing the
+        // real target) is what produced the mismatched screenshots this
+        // was fixing. Holding off here until the click actually lands
+        // closes that race.
+        if (activeIdx === restoreTarget) {{
+          restoring = false;
+        }} else if (Date.now() > restoreDeadline) {{
+          var tabs = getTabs();
+          if (tabs[restoreTarget]) {{ tabs[restoreTarget].click(); }}
+          restoreDeadline = Date.now() + 700;
+        }}
+        return;
+      }}
+
+      if (activeIdx !== savedIdx) {{
         var tabs = getTabs();
-        if (tabs[savedIdx]) {{ tabs[savedIdx].click(); }}
+        if (tabs[savedIdx]) {{
+          restoring = true;
+          restoreTarget = savedIdx;
+          restoreDeadline = Date.now() + 700;
+          tabs[savedIdx].click();
+        }}
       }}
     }} catch (e) {{ /* real tab strip not ready yet -- next poll picks it up */ }}
   }}
@@ -252,7 +295,11 @@ html, body {{ margin:0; padding:0; background:transparent; font-family:-apple-sy
         var idx = parseInt(r.getAttribute('data-cp-step'), 10);
         r.classList.toggle('cp-step-active', idx === activeIdx);
       }});
-      if (activeIdx !== -1) {{
+      // Don't persist a read taken while a corrective click is still
+      // in-flight -- see the comment in restoreIfNeeded(). A stale
+      // pre-click read here would overwrite the very target we're
+      // mid-restore towards.
+      if (activeIdx !== -1 && !restoring) {{
         try {{ window.parent.sessionStorage.setItem(STORAGE_KEY, String(activeIdx)); }} catch (e) {{}}
       }}
     }} catch (e) {{ /* real tab strip not ready yet -- next poll picks it up */ }}
