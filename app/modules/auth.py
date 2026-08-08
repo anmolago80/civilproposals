@@ -43,6 +43,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -340,14 +341,25 @@ def request_password_reset(email: str) -> str:
             reset_url = f"{APP_BASE_URL}/?reset_token={token}"
             try:
                 email_utils.send_password_reset_email(user.email, reset_url)
-            except Exception:
-                # Swallowed on purpose -- see the docstring above. A
-                # delivery failure for one address isn't something the
-                # person submitting this form (who might not even be that
-                # address's real owner) can do anything about, and
-                # surfacing it would leak account existence just as much as
-                # a plain "no such account" message would.
-                pass
+                # Printed to stderr (Railway captures this in the service's
+                # deploy logs) -- NOT shown to the end user, same reasoning
+                # as the except branch below: the person submitting this
+                # form isn't necessarily who they're requesting a reset
+                # for, so nothing about send success/failure belongs in the
+                # UI. This is purely so a real delivery problem (bad API
+                # key, Resend rejecting the request, etc.) leaves a trace
+                # you can actually go find in Railway's logs, instead of
+                # vanishing the way the swallowed exception below used to.
+                print(f"[password_reset] Resend accepted the request for {user.email}", file=sys.stderr)
+            except Exception as exc:
+                # Still swallowed from the CALLER's perspective (the "sent"
+                # return value below never changes) -- see the docstring
+                # above for why. But logged here rather than silently
+                # dropped, so a real failure (bad/missing API key, Resend
+                # rejecting the request, a network error, etc.) is at least
+                # visible to you in Railway's logs instead of leaving zero
+                # trace anywhere.
+                print(f"[password_reset] FAILED to send to {user.email}: {exc}", file=sys.stderr)
     return "sent"
 
 
