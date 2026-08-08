@@ -396,7 +396,10 @@ def _render_terms_gate(user: db.User) -> None:
     ever returning normally."""
     from modules import branding
 
-    st.markdown(branding.brand_html(logo_size=44, wordmark_size="1.5rem", show_beta=True), unsafe_allow_html=True)
+    st.markdown(
+        branding.brand_html(logo_size=44, wordmark_size="1.5rem", show_beta=True, href="https://civilproposals.com"),
+        unsafe_allow_html=True,
+    )
     st.markdown("### Before you continue")
     st.write(
         "Please review and accept the terms below -- this only takes a second, and you "
@@ -457,7 +460,7 @@ def require_login() -> db.User:
         # indented multi-line blocks as literal Markdown code blocks even
         # with unsafe_allow_html=True.
         headline_html = (
-            branding.brand_html(logo_size=52, wordmark_size="1.9rem", show_beta=True)
+            branding.brand_html(logo_size=52, wordmark_size="1.9rem", show_beta=True, href="https://civilproposals.com")
             + '<div style="margin-top:22px;font-size:2rem;font-weight:800;letter-spacing:-0.02em;color:#0F172A;line-height:1.2;">Built by Civil Engineers, for Civil Engineers</div>'
             + '<div style="margin-top:12px;color:#5A6B7A;font-size:1.02rem;line-height:1.6;max-width:560px;">'
             + 'We know the challenges you face every day because we face them too. Whether it&#39;s a small '
