@@ -160,7 +160,34 @@ def _clear_cookie_token() -> None:
     parts = [f"{COOKIE_NAME}=", "expires=Thu, 01 Jan 1970 00:00:00 GMT", "path=/", "SameSite=Lax"]
     if _is_secure_request():
         parts.append("Secure")
-    _write_cookie_js("; ".join(parts))
+    cookie_str = "; ".join(parts)
+    # Deliberately NOT using _write_cookie_js() here (unlike _set_cookie_token
+    # above) -- logout needs one extra thing login doesn't: a REAL browser
+    # navigation reload, not just Streamlit's own st.rerun(). Reported bug:
+    # after clicking "Log out", the top-right "My Proposals" / "Proposal
+    # Library" / "Project Reference Library" actions bar (a keyed
+    # st.container in app.py, pinned via `position: fixed` CSS so it can
+    # float over the whole viewport) kept visually appearing on top of the
+    # login screen even though the script run that renders the login screen
+    # never re-declares that container at all. st.rerun() only replays the
+    # Python script and diffs the resulting element tree -- it doesn't
+    # guarantee the browser discards every previously-mounted DOM node, and
+    # a keyed container pinned outside normal document flow is exactly the
+    # kind of element that can survive a diff it should have been removed
+    # by. A full page reload sidesteps the question of exactly why the diff
+    # missed it -- a fresh navigation always starts from a completely empty
+    # DOM, the same guarantee manually closing and reopening the tab gives.
+    # window.parent.location.reload(), not window.location.reload(): this
+    # script runs inside the sandboxed iframe components.html() mounts it
+    # in, so window.location here refers to that iframe, not the actual app
+    # page -- reloading it would do nothing visible. The cookie clear is set
+    # first, synchronously, in the same script, so the fresh page load that
+    # follows sees an already-cleared cookie rather than racing it.
+    components.html(
+        f"<script>document.cookie = {json.dumps(cookie_str)}; "
+        f"window.parent.location.reload();</script>",
+        height=0,
+    )
 
 
 # ---------------------------------------------------------------------------
