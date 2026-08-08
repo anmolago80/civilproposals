@@ -603,9 +603,10 @@ def require_login() -> db.User:
 
         beta_html = (
             '<div style="margin-top:26px;padding:16px 18px;background:#FFF8EE;border:1px solid #F3D9AE;border-radius:12px;font-size:.88rem;color:#7A4A0A;">'
-            "🧪 <strong>This product is in Beta.</strong> Features, pricing, and behaviour may still change, "
-            "and you may run into rough edges -- always review AI-drafted content before it goes into a real "
-            "submission. We'd genuinely appreciate feedback on anything that breaks or feels off."
+            "🚀 <strong>Beta Access.</strong> This product is currently in beta. Features and pricing may "
+            "change, and occasional issues may occur. Always review and verify AI generated content before "
+            "using it in tender submissions or other formal documentation. If something doesn't look right, "
+            "please let us know."
             "</div>"
         )
         st.markdown(beta_html, unsafe_allow_html=True)
