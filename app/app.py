@@ -225,6 +225,15 @@ if IS_SAAS_MODE:
             pass
         st.query_params.clear()
 
+    # Password-reset link (see auth.request_password_reset /
+    # render_password_reset_screen) -- checked BEFORE require_login()
+    # deliberately: someone resetting a forgotten password is, by
+    # definition, not logged in and can't get past that gate normally.
+    # render_password_reset_screen() always st.stop()s, so it fully
+    # replaces the rest of this script run when a reset_token is present.
+    if _qp.get("reset_token"):
+        auth.render_password_reset_screen(_qp.get("reset_token"))
+
     current_user = auth.require_login()  # renders login/signup and st.stop()s if not logged in
     current_user = billing.refresh_subscription_status(current_user)
     _access = auth.get_access_status(current_user)

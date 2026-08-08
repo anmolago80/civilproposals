@@ -40,6 +40,7 @@ Design notes:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from datetime import datetime, timedelta, timezone
@@ -49,7 +50,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
-from modules import db
+from modules import db, email_utils
 
 APP_SECRET_KEY = os.environ.get("APP_SECRET_KEY", "").strip()
 if not APP_SECRET_KEY:
@@ -58,10 +59,22 @@ if not APP_SECRET_KEY:
     # deploy invalidates every logged-in user's cookie.
     APP_SECRET_KEY = "dev-only-insecure-secret-change-me"
 
+# Same default/behaviour as billing.APP_BASE_URL -- duplicated rather than
+# imported from there on purpose, so auth.py doesn't have to depend on
+# billing.py (which pulls in the stripe SDK) just for one constant.
+APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8501").rstrip("/")
+
 COOKIE_NAME = "civilproposals_session"
 COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60  # 30 days
 
 _serializer = URLSafeTimedSerializer(APP_SECRET_KEY, salt="civilproposals-auth")
+
+# A separate serializer (distinct salt) for password-reset links -- kept
+# apart from the session-cookie serializer above so the two token kinds can
+# never be confused for one another even though they share the same
+# underlying secret key.
+_reset_serializer = URLSafeTimedSerializer(APP_SECRET_KEY, salt="civilproposals-pwreset")
+RESET_TOKEN_MAX_AGE_SECONDS = 60 * 60  # 1 hour
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +109,51 @@ def verify_token(token: str) -> str | None:
         return data.get("uid")
     except (BadSignature, SignatureExpired, Exception):
         return None
+
+
+# ---------------------------------------------------------------------------
+# Password-reset tokens -- separate from the session tokens above (see
+# _reset_serializer). Used by the emailed reset link (see
+# request_password_reset() / render_password_reset_screen()).
+# ---------------------------------------------------------------------------
+
+def _password_fingerprint(password_hash: str) -> str:
+    """A short, one-way fingerprint of a user's CURRENT bcrypt hash, folded
+    into every reset token issued for them. This is what makes a reset
+    token single-use without needing any extra DB column or "used" table:
+    the moment the token is actually used (reset_password() below), the
+    user's password_hash changes, so this fingerprint no longer matches --
+    the same token (or any other still-unexpired token issued before that
+    point, e.g. from clicking an old email twice) fails verification on
+    its next use. Truncated SHA-256, not the raw bcrypt hash itself -- no
+    reason to put even a hash of the password hash's full value in a URL
+    that might end up in a browser history or a proxy log."""
+    return hashlib.sha256(password_hash.encode("utf-8")).hexdigest()[:16]
+
+
+def make_reset_token(user: db.User) -> str:
+    return _reset_serializer.dumps({"uid": user.id, "pwh": _password_fingerprint(user.password_hash)})
+
+
+def verify_reset_token(token: str) -> db.User | None:
+    """Returns the User the token was issued for if it's valid, not
+    expired (see RESET_TOKEN_MAX_AGE_SECONDS), AND not already used --
+    otherwise None. Deliberately doesn't distinguish these failure reasons
+    to the caller (see render_password_reset_screen(), which shows one
+    generic "invalid or expired" message either way) -- there's no benefit
+    to a stranger knowing which one it was."""
+    if not token:
+        return None
+    try:
+        data = _reset_serializer.loads(token, max_age=RESET_TOKEN_MAX_AGE_SECONDS)
+    except (BadSignature, SignatureExpired, Exception):
+        return None
+    user = get_user_by_id(data.get("uid", ""))
+    if not user:
+        return None
+    if _password_fingerprint(user.password_hash) != data.get("pwh"):
+        return None
+    return user
 
 
 # ---------------------------------------------------------------------------
@@ -245,6 +303,65 @@ def accept_terms(user: db.User) -> None:
         db_user = s.query(db.User).filter(db.User.id == user.id).first()
         if db_user:
             db_user.accepted_terms_at = datetime.now(timezone.utc)
+            s.commit()
+
+
+# ---------------------------------------------------------------------------
+# Password reset -- request a link (emailed via Resend, see email_utils.py),
+# then set a new password from that link. See render_password_reset_screen()
+# below for the UI side, called from app.py before require_login() (the
+# whole point is this has to work for someone who can't log in).
+# ---------------------------------------------------------------------------
+
+def request_password_reset(email: str) -> str:
+    """Looks up the account and, if one exists and Resend is configured,
+    emails a 1-hour reset link. Returns "sent" in every case except one --
+    including when no account matches that email -- and "not_configured"
+    only when email_utils.is_configured() is False.
+
+    That "sent" no matter what (for a real vs. nonexistent email) is
+    deliberate: telling a caller "no account with that email" is a
+    textbook user-enumeration leak (it confirms which emails have accounts
+    on this app), worth avoiding even for a small beta. "not_configured" is
+    the one case that's NOT hidden the same way, and that's deliberate
+    too, in the other direction -- that failure is about YOUR setup, not
+    about a particular user's email, so there's no enumeration risk in
+    surfacing it, and hiding it would leave a real user waiting forever for
+    an email that can never arrive with no indication why. See app.py's
+    "Forgot password?" form for how the two returned strings map to what's
+    actually shown."""
+    email = (email or "").strip().lower()
+    if not email_utils.is_configured():
+        return "not_configured"
+    if email:
+        user = get_user_by_email(email)
+        if user:
+            token = make_reset_token(user)
+            reset_url = f"{APP_BASE_URL}/?reset_token={token}"
+            try:
+                email_utils.send_password_reset_email(user.email, reset_url)
+            except Exception:
+                # Swallowed on purpose -- see the docstring above. A
+                # delivery failure for one address isn't something the
+                # person submitting this form (who might not even be that
+                # address's real owner) can do anything about, and
+                # surfacing it would leak account existence just as much as
+                # a plain "no such account" message would.
+                pass
+    return "sent"
+
+
+def reset_password(user: db.User, new_password: str) -> None:
+    """Sets a new password for an already-identified user (the caller --
+    render_password_reset_screen() -- has already verified the reset token
+    and the new password's length before this is called). Changing
+    password_hash here is also what invalidates every reset token issued
+    before this point, including the one just used -- see
+    _password_fingerprint()."""
+    with db.get_session() as s:
+        db_user = s.query(db.User).filter(db.User.id == user.id).first()
+        if db_user:
+            db_user.password_hash = hash_password(new_password)
             s.commit()
 
 
@@ -497,6 +614,21 @@ def require_login() -> db.User:
                 else:
                     st.error("Incorrect email or password.")
 
+            with st.popover("Forgot password?"):
+                st.caption("Enter your account email and we'll send a link to reset your password.")
+                with st.form("forgot_password_form"):
+                    forgot_email = st.text_input("Email", key="_forgot_pw_email")
+                    forgot_submitted = st.form_submit_button("Send reset link")
+                if forgot_submitted:
+                    status = request_password_reset(forgot_email)
+                    if status == "not_configured":
+                        st.error("Password reset isn't set up yet -- contact support directly for now.")
+                    else:
+                        st.success(
+                            "If an account exists for that email, we've sent a reset link -- check your inbox "
+                            "(and spam folder). It's valid for 1 hour."
+                        )
+
         with tab_signup:
             with st.form("signup_form"):
                 name = st.text_input("Your name")
@@ -527,6 +659,65 @@ def require_login() -> db.User:
                         st.rerun()
                     except ValueError as e:
                         st.error(str(e))
+
+    st.stop()
+
+
+def render_password_reset_screen(token: str) -> None:
+    """Shown INSTEAD OF the normal login screen when the URL carries a
+    ?reset_token=... -- see app.py, which checks for this query param and
+    calls this function before require_login() ever runs, precisely
+    because someone resetting a forgotten password can't log in first.
+    Always st.stop()s, same contract as require_login()."""
+    from modules import branding
+
+    st.markdown(
+        branding.brand_html(logo_size=44, wordmark_size="1.5rem", show_beta=True, href="https://civilproposals.com"),
+        unsafe_allow_html=True,
+    )
+
+    # Checked BEFORE verify_reset_token() below, on purpose: a successful
+    # reset changes the user's password_hash, which is exactly what makes
+    # the token single-use (see _password_fingerprint()) -- so on the rerun
+    # right after a successful reset, re-verifying the same token here
+    # would now correctly fail as "already used" and show the wrong
+    # (error) branch instead of the success message. This flag lets the
+    # success screen render without ever re-checking the now-intentionally-
+    # invalidated token.
+    if st.session_state.get("_password_reset_done"):
+        st.success("Password updated -- you can log in with your new password now.")
+        if st.button("Continue to log in", type="primary"):
+            st.session_state.pop("_password_reset_done", None)
+            st.query_params.clear()
+            st.rerun()
+        st.stop()
+
+    user = verify_reset_token(token)
+    if not user:
+        st.error(
+            "This reset link is invalid, expired, or has already been used. Request a new one from the "
+            "login screen."
+        )
+        if st.button("Back to login"):
+            st.query_params.clear()
+            st.rerun()
+        st.stop()
+
+    st.markdown("### Set a new password")
+    st.caption(f"Resetting the password for **{user.email}**.")
+    with st.form("reset_password_form"):
+        new_password = st.text_input("New password", type="password", help="At least 8 characters.")
+        confirm_password = st.text_input("Confirm new password", type="password")
+        submitted = st.form_submit_button("Set new password", type="primary")
+    if submitted:
+        if len(new_password or "") < 8:
+            st.error("Password must be at least 8 characters.")
+        elif new_password != confirm_password:
+            st.error("Passwords don't match -- please re-enter them.")
+        else:
+            reset_password(user, new_password)
+            st.session_state["_password_reset_done"] = True
+            st.rerun()
 
     st.stop()
 
