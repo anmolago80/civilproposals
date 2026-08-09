@@ -1628,13 +1628,19 @@ with st.container(key="_topright_actions"):
     with st.popover("📁 Project Reference Library", width="content"):
         _render_project_reference_library_popover_body()
     if IS_SAAS_MODE and current_user:
-        if not _access["subscribed"]:
-            with st.popover("Upgrade", width="content"):
-                _render_upgrade_buttons(current_user, key_prefix="_topright")
-        else:
+        if _access["subscribed"] or _access["past_due"]:
+            # past_due means there's already a real Stripe subscription, just
+            # with a failing card -- "Manage" (Stripe's Customer Portal,
+            # where they can update payment details) is what actually fixes
+            # that. It used to fall into the "Upgrade" branch below instead,
+            # which offered to start a SECOND subscription and never
+            # surfaced the one place that lets them fix the first one.
             portal_url = billing.create_customer_portal_session(current_user)
             if portal_url:
                 st.link_button("Manage", portal_url, type="primary")
+        else:
+            with st.popover("Upgrade", width="content"):
+                _render_upgrade_buttons(current_user, key_prefix="_topright")
         if st.button("Log out", key="_topright_logout_btn"):
             auth.log_out()
             st.rerun()
@@ -2098,7 +2104,16 @@ with tabs[2]:
     _trial_blocked = IS_SAAS_MODE and current_user and not _access["allowed"] and not _already_counted
 
     if _trial_blocked or (IS_SAAS_MODE and current_user and _access["limit_reached"] and not _already_counted):
-        if _access["subscribed"]:
+        if _access["past_due"]:
+            # Same monthly quota as an active subscriber (see
+            # auth.get_access_status), but the actionable fix here is fixing
+            # payment, not buying more -- lead with that.
+            st.warning(
+                "Your payment is past due, and you've also used this cycle's "
+                f"{_access['subscription_bid_limit']} included bid(s). Update your payment method to keep "
+                "your subscription active, or buy a pay-as-you-go bid to keep going right now."
+            )
+        elif _access["subscribed"]:
             st.warning(
                 f"You've used all {_access['subscription_bid_limit']} bid(s) included in this billing "
                 "cycle's Monthly plan. Buy a pay-as-you-go bid to keep going now, or wait for renewal."
@@ -2108,7 +2123,8 @@ with tabs[2]:
                 f"You've used all {_access['trial_limit']} free trial bid(s). "
                 "Upgrade to keep going -- pay per bid, or subscribe monthly. See pricing on the homepage."
             )
-        _render_upgrade_buttons(current_user, key_prefix="_tab3", already_subscribed=_access["subscribed"])
+        _render_upgrade_buttons(current_user, key_prefix="_tab3",
+                                 already_subscribed=_access["subscribed"] or _access["past_due"])
 
     if st.button("Run Tender Analysis", type="primary", disabled=not ready or _trial_blocked):
         extracted = st.session_state.tender_extracted

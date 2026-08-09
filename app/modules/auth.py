@@ -791,12 +791,25 @@ def get_access_status(user: db.User) -> dict:
     bid_credits (pay-as-you-go purchases) still work on top of it, same as
     for a non-subscriber.
 
-    PAST_DUE is a short payment-recovery grace period -- deliberately left
-    uncapped (always allowed) rather than also enforcing the monthly quota
-    on top of an already-failing card; this is unchanged from before.
+    PAST_DUE now gets the same treatment as ACTIVE -- capped at the same
+    monthly quota, with bid_credits still stacking on top. It used to be
+    left fully uncapped (always allowed, no quota check at all) on the
+    theory that it's a short payment-recovery grace period and a failing
+    card shouldn't also lose you your quota. In practice that "short" grace
+    period had no actual time limit: Stripe's own "unpaid" status (what
+    Stripe uses once it's stopped retrying, before the subscription is
+    actually canceled) maps to this same past_due bucket in
+    billing.refresh_subscription_status, and whether/when Stripe moves past
+    that to "canceled" depends on a dunning setting in the Stripe dashboard,
+    not on anything this app controls. That made "grace period" potentially
+    unbounded -- unlimited free usage for as long as a card kept failing.
+    Capping it at the normal quota keeps the actual goal (don't cut someone
+    off the instant a payment hiccups) without the unbounded-free-usage gap.
 
     bid_credits is the pay-as-you-go balance (see db.User.bid_credits) --
-    real, paid credits from $50 one-time Stripe Checkouts.
+    real, paid credits from $50 one-time Stripe Checkouts. Unaffected by
+    subscription_status entirely: they never expire and stack on top of
+    whichever quota (trial, active, or past_due) applies above.
 
     "limit_reached" mirrors "not allowed" for everyone except
     UNLIMITED_ACCOUNTS, who never see it go true -- see "unlimited" below.
@@ -806,12 +819,9 @@ def get_access_status(user: db.User) -> dict:
     bid_credits = max(0, user.bid_credits or 0)
     subscription_bids_remaining = max(0, SUBSCRIPTION_MONTHLY_BID_LIMIT - (user.subscription_bids_used or 0))
 
-    if user.subscription_status == "active":
+    if user.subscription_status in ("active", "past_due"):
         allowed = is_unlimited or subscription_bids_remaining > 0 or bid_credits > 0
         limit_reached = not allowed
-    elif user.subscription_status == "past_due":
-        allowed = True  # grace period, unchanged
-        limit_reached = False
     else:
         allowed = is_unlimited or trial_remaining > 0 or bid_credits > 0
         limit_reached = not allowed
