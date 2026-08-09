@@ -536,10 +536,13 @@ def _render_terms_gate(user: db.User) -> None:
     )
     st.markdown(
         f'<div style="margin-top:6px;padding:16px 18px;background:#F8FAFC;border:1px solid #E2E8F0;'
-        f'border-radius:10px;font-size:.92rem;color:#334155;line-height:1.6;max-width:640px;">{TERMS_TEXT}</div>',
+        f'border-radius:10px;font-size:.92rem;color:#334155;line-height:1.6;max-width:640px;">{TERMS_TEXT} '
+        f'This is a summary of the AI-output disclaimer in our '
+        f'<a href="https://civilproposals.com/terms-of-service.html" target="_blank">Terms of Service</a>, '
+        f'which governs your use of CivilProposals in full.</div>',
         unsafe_allow_html=True,
     )
-    accepted = st.checkbox("I have read and accept these terms.", key="_terms_gate_checkbox")
+    accepted = st.checkbox("I have read and accept these terms and the Terms of Service.", key="_terms_gate_checkbox")
     gate_col1, gate_col2 = st.columns([1, 4])
     with gate_col1:
         if st.button("Accept and continue", type="primary", disabled=not accepted, key="_terms_gate_accept_btn"):
@@ -654,10 +657,13 @@ def require_login() -> db.User:
                            f"Then pay per bid, or subscribe monthly -- see pricing on the homepage.")
                 with st.expander("Terms you're agreeing to"):
                     st.markdown(
-                        f'<div style="font-size:.85rem;color:#475569;line-height:1.6;">{TERMS_TEXT}</div>',
+                        f'<div style="font-size:.85rem;color:#475569;line-height:1.6;">{TERMS_TEXT} '
+                        f'This is a summary of the AI-output disclaimer in our '
+                        f'<a href="https://civilproposals.com/terms-of-service.html" target="_blank">Terms of Service</a>, '
+                        f'which governs your use of CivilProposals in full.</div>',
                         unsafe_allow_html=True,
                     )
-                agreed_terms = st.checkbox("I have read and accept the terms above.", key="signup_terms_checkbox")
+                agreed_terms = st.checkbox("I have read and accept the terms above and the Terms of Service.", key="signup_terms_checkbox")
                 submitted = st.form_submit_button("Create account", type="primary", use_container_width=True)
             if submitted:
                 if password != confirm_password:
