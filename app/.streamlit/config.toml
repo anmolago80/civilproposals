@@ -14,6 +14,11 @@ font = "sans serif"
 headless = true
 enableCORS = false
 enableXsrfProtection = true
+# Served behind civilproposals.com/app via a Cloudflare Pages Function
+# reverse proxy (landing/functions/app/[[path]].js) -- no more app.
+# subdomain. Streamlit needs to know its own base path so it generates
+# correct asset/websocket URLs under /app/... instead of /...
+baseUrlPath = "app"
 
 [browser]
 gatherUsageStats = false
