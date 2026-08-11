@@ -122,6 +122,102 @@ DNS changes usually propagate within a few minutes on Cloudflare, sometimes up t
 
 ---
 
+## 6. Background jobs (multi-user concurrency)
+
+**Why this exists:** Streamlit runs every visitor's session as a thread
+inside one shared Python process. Tender Analysis and Draft Generation are
+this app's two slowest, heaviest operations (AI calls that can run tens of
+seconds, with Draft Generation firing several in parallel) — running them
+inline in the web process meant one customer's long analysis could
+measurably slow down every *other* customer's concurrent session on the
+same process. `app/modules/job_queue.py` moves that work into a separate
+background worker process instead, using Redis + [RQ](https://python-rq.org/).
+
+This is opt-in and safe to skip: until `REDIS_URL` is set on the app
+service, both operations keep running exactly as they always have (inline,
+synchronous, with the same progress bars). Nothing breaks if you deploy the
+code change alone and add the worker later.
+
+**Setup (two new pieces of infra, both in the same Railway project):**
+
+1. **Add Redis**: in the `gentle-magic` project → **+ New** → **Database**
+   → **Add Redis**. Railway provisions it and exposes a connection URL as
+   that service's `REDIS_URL` variable.
+2. **Share `REDIS_URL` with both the app and the worker**: open the
+   `civilproposals` service → **Variables** → add `REDIS_URL` referencing
+   the Redis service, e.g. `${{Redis.REDIS_URL}}` (Railway autocompletes
+   this once Redis exists in the project). You'll set the same reference on
+   the worker service below.
+3. **Create the worker service**: **+ New** → **GitHub repo** → the same
+   `civilproposals` repo again (a second service from the same source, like
+   the app service already is). Configure it:
+   - **Root Directory**: `app` (same as the main app service)
+   - **Start command**: `python worker.py` (override the auto-detected
+     Streamlit start command — this is *why* it has to be a second service
+     rather than reusing the existing one: Railway runs one start command
+     per service, and this needs its own)
+   - **Variables**: `DATABASE_URL` referencing the same Postgres (e.g.
+     `${{Postgres.DATABASE_URL}}`) and `REDIS_URL` referencing the same
+     Redis as step 2. It does **not** need `ANTHROPIC_API_KEY` or any other
+     AI provider key — every AI call a job makes uses whichever key the
+     requesting user pasted into their own session (this app is BYOK), not
+     a key configured on the server.
+4. Deploy both. Check the worker service's **Deploy Logs** for `*** Listening
+   on civilproposals...` — that confirms it connected to Redis and is ready
+   to pick up jobs.
+
+**Before trusting this with live customers**, please test it yourself end
+to end (this was built and smoke-tested against a local Redis instance in
+an isolated sandbox with synthetic jobs, not against your live Railway
+Postgres/Redis or a real AI provider call — that combination can't be
+verified from here):
+
+- [ ] With the worker deployed and `REDIS_URL` set on the app service, run
+      a real Tender Analysis and a real Draft Generation as a logged-in test
+      user → confirm both complete and populate the same way they did before
+- [ ] Watch the worker's Deploy Logs while that runs → confirm you see it
+      pick up and finish the job (not silently idle)
+- [ ] Open two browser sessions as two different test accounts, kick off a
+      Draft Generation in one, and confirm the *other* session's UI stays
+      fully responsive (this is the actual problem being solved — worth
+      seeing it work, not just trusting the code)
+- [ ] Temporarily stop the worker service and confirm a queued job surfaces
+      a clear error after a few minutes rather than spinning forever (this
+      exercises the "worker isn't running" failure path)
+- [ ] Redeploy the app service with `REDIS_URL` intentionally left unset (or
+      test this on a fresh clone before adding Redis) → confirm both
+      operations still work exactly as before, inline — this is the fallback
+      path a rollback would land on
+
+**Everything NOT yet covered by this queue**, still running inline in the
+main web process today: executive summary / team intro / project
+experience intro drafting, CV library reading, discipline re-scanning,
+benchmark research, and DOCX/PPTX document export (`export_docx.py`,
+`org_chart_pptx.py`, `methodology_pptx.py`, `program_pptx.py`). These are
+individually lighter than Tender Analysis/Draft Generation, but the same
+`_run_job_or_inline` pattern in `app.py` extends to any of them the same
+way if usage shows they need it too — worth revisiting once you can see
+real concurrent usage patterns rather than guessing which of these actually
+bites first.
+
+**A lower-risk, complementary option** worth knowing about: Railway
+supports running multiple **replicas** of the `civilproposals` service
+(Service Settings → **Scale** → Regions/replicas), which spreads different
+users' sessions across separate processes instead of one. It's a pure
+infrastructure toggle (no code change, deployable immediately) and reduces
+how often two heavy customers ever share a process at all. The tradeoff:
+Streamlit keeps each session's in-memory state (uploads, drafts,
+analysis — anything not yet in the "Recent projects" autosave) on
+whichever replica that browser tab first connected to; if a user's
+connection ever gets rerouted to a different replica mid-session (a
+reconnect after a network blip, for instance), that in-memory state is
+gone on the new replica and they'd need to reload their autosaved project.
+Worth turning on alongside the job queue, not instead of it, and worth
+watching for that specific symptom (an unexpected "your work disappeared"
+report) if you do.
+
+---
+
 ## Go-live checklist (steps 11–15 from the original plan)
 
 - [ ] Landing page loads at civilproposals.com and the "Get Started" button reaches the app

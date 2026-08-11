@@ -213,6 +213,35 @@ class SavedProject(Base):
     user = relationship("User", back_populates="saved_projects")
 
 
+class Job(Base):
+    """A thin, permanent index of who owns which background job (see
+    modules/job_queue.py) -- NOT where the job's actual input or output
+    lives. Those stay in Redis, under RQ's own TTL, because the two jobs
+    this app currently queues (Tender Analysis, Draft Generation) both take
+    the user's own pasted AI provider API key as an input (BYOK -- see
+    ai_config in app.py, never stored in this database anywhere else
+    either), so this table must not become a second, longer-lived place
+    that key ends up written to. What this table IS for: letting the
+    Streamlit process that enqueued a job (which may not be the same
+    worker-thread invocation that polls it later, if the user's browser
+    reconnects) look up "is this job id actually mine?" before it's ever
+    allowed to ask Redis for that job's status or result -- an RQ job id is
+    just an opaque string that could end up in a log line, not a secret, so
+    ownership has to be re-checked server-side on every poll.
+
+    id is the RQ job's own id (see job_queue.enqueue) -- no separate uuid
+    layer on top of it."""
+    __tablename__ = "jobs"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    job_type = Column(String, nullable=False)  # "tender_analysis" | "draft_generation"
+    status = Column(String, default="queued")  # queued | started | finished | failed
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+    error_message = Column(Text, default="")
+
+
 def init_db() -> None:
     """Creates all tables if they don't exist yet. Safe to call on every
     app startup -- idempotent. Call this once near the top of app.py."""

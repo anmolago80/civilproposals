@@ -95,6 +95,7 @@ from modules import (
     auth,
     billing,
     branding,
+    job_queue,
 )
 
 AUTOSAVE_INTERVAL_SECONDS = 20
@@ -560,6 +561,60 @@ def _init_state():
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
+
+def _run_job_or_inline(job_type, func, args=(), kwargs=None, progress=None,
+                        queued_text="Queued...", running_text="Working...",
+                        inline_extra_kwargs=None):
+    """
+    Runs func(*args, **kwargs) either in the background job queue (see
+    modules/job_queue.py) or inline in this process, and either way blocks
+    until it's done and returns func's return value -- every call site
+    keeps its existing "click button, wait, see result" behaviour. The only
+    thing that changes is WHERE the AI-call/CPU time is actually spent.
+
+    The queue is used only when all of these are true: this is a logged-in
+    SaaS user (current_user is set -- local/dev use with SAAS_MODE=false
+    has no account to own a job), AND a Redis-backed queue is actually
+    configured (job_queue.redis_available()) -- i.e. the worker service
+    from DEPLOY.md's "Background jobs" section has been deployed. Otherwise
+    this falls back to calling func directly, exactly as every one of these
+    call sites always worked before background jobs existed, using
+    inline_extra_kwargs for anything that only makes sense in-process (a
+    live progress_callback closure can't be pickled across the process
+    boundary to a worker, so it's never passed to the queued path).
+
+    Deliberately never a hard dependency on the queue: turning it on is
+    just setting REDIS_URL and deploying the worker service, nothing here
+    has to change, and this app never breaks just because that hasn't
+    happened yet.
+    """
+    kwargs = kwargs or {}
+    use_queue = IS_SAAS_MODE and current_user and job_queue.redis_available()
+
+    if not use_queue:
+        return func(*args, **kwargs, **(inline_extra_kwargs or {}))
+
+    job_id = job_queue.enqueue(current_user.id, job_type, func, *args, **kwargs)
+    if progress:
+        progress.progress(0.05, text=queued_text)
+
+    elapsed = 0.0
+    poll_interval = 1.5
+    while True:
+        status = job_queue.get_status(job_id, current_user.id)
+        if status["status"] == "finished":
+            return status["result"]
+        if status["status"] in ("failed", "not_found"):
+            raise RuntimeError(status["error"] or "The background job failed.")
+        if progress:
+            # Indeterminate-ish: creeps toward 90% over ~3 minutes rather
+            # than claiming a precision this polling loop doesn't have --
+            # queued jobs have no live per-chunk/per-section count to show
+            # (see this function's docstring), just "still working".
+            progress.progress(min(0.05 + elapsed / 180.0, 0.9), text=running_text)
+        time.sleep(poll_interval)
+        elapsed += poll_interval
 
 
 def _project_info() -> dict:
@@ -2134,8 +2189,21 @@ with tabs[2]:
             progress.progress((done + 1) / max(total, 1), text=f"Analysing part {done + 1}/{total}...")
 
         try:
-            analysis = tender_analyser.analyse_tender(
-                extracted.text, extracted.annotations, st.session_state.ai_config, _progress_cb,
+            # Runs on the background job worker for logged-in SaaS users
+            # once REDIS_URL is configured (see modules/job_queue.py and
+            # DEPLOY.md's "Background jobs" section) -- this is the
+            # single slowest AI call in the app for a long brief, and
+            # running it inline in the main web process was blocking
+            # every other concurrently-connected user's Streamlit session
+            # while it ran. Falls back to running inline (same as always)
+            # with the same granular per-chunk progress bar when the
+            # queue isn't available yet -- see _run_job_or_inline.
+            analysis = _run_job_or_inline(
+                "tender_analysis", tender_analyser.analyse_tender,
+                args=(extracted.text, extracted.annotations, st.session_state.ai_config),
+                progress=progress,
+                queued_text="Queued for analysis...", running_text="Analysing...",
+                inline_extra_kwargs={"progress_callback": _progress_cb},
             )
             st.session_state.analysis = analysis
             progress.progress(1.0, text="Done.")
@@ -2386,10 +2454,18 @@ with tabs[5]:
                     }
                     _material_for_draft["cv_library"] = "\n\n".join(_kept_cv_files.values())
 
-            new_drafts = draft_generator.generate_all_drafts(
-                targets, st.session_state.analysis,
-                _material_for_draft, st.session_state.ai_config, _progress_cb,
-                team_context=draft_generator.format_team_context(st.session_state.resource_plan),
+            # Same background-job pattern as Tender Analysis (see that call
+            # site's comment and _run_job_or_inline) -- this is the other
+            # genuinely slow, heavy operation in the app (up to
+            # MAX_CONCURRENT_DRAFTS AI calls in flight at once for a big
+            # pack), so it gets the same treatment.
+            new_drafts = _run_job_or_inline(
+                "draft_generation", draft_generator.generate_all_drafts,
+                args=(targets, st.session_state.analysis, _material_for_draft, st.session_state.ai_config),
+                kwargs={"team_context": draft_generator.format_team_context(st.session_state.resource_plan)},
+                progress=progress,
+                queued_text="Queued for drafting...", running_text="Drafting...",
+                inline_extra_kwargs={"progress_callback": _progress_cb},
             )
             st.session_state.drafts = {**(st.session_state.drafts or {}), **new_drafts}
             progress.progress(1.0, text="Done.")

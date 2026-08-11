@@ -22,3 +22,7 @@ bcrypt>=4.1
 itsdangerous>=2.2
 extra-streamlit-components>=0.1.71
 stripe>=10.0
+
+# --- Added for background jobs (multi-user concurrency) ---
+redis>=5.0
+rq>=1.16
