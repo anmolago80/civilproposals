@@ -1,0 +1,16 @@
+name = "civilproposals"
+compatibility_date = "2026-08-11"
+main = "./_worker.js"
+
+[assets]
+# The landing page's own static files (this file lives in the same
+# "landing" directory that's configured as the project's Root directory in
+# the Cloudflare dashboard, so "." means "this directory").
+directory = "."
+binding = "ASSETS"
+# Everything under /app runs the Worker (_worker.js) first instead of
+# going straight to static assets -- that's what lets /app/* reverse-proxy
+# through to the Streamlit app on Railway instead of 404ing as a missing
+# static file. Every other path (/, /privacy-policy.html, etc.) still goes
+# straight to static assets as before.
+run_worker_first = ["/app", "/app/*"]
