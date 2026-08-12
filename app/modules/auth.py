@@ -843,26 +843,44 @@ def get_access_status(user: db.User) -> dict:
 def record_proposal_usage(user: db.User, project_key: str, project_name: str = "") -> bool:
     """
     Call this once, the first time a user runs Tender Analysis for a given
-    project (project_key should be a stable identifier for that project --
-    e.g. project name + tender name). If this project hasn't already been
-    counted, spends one credit, in priority order:
-      - ACTIVE subscription: the current billing period's monthly quota
-        (SUBSCRIPTION_MONTHLY_BID_LIMIT) first, then a purchased
-        pay-as-you-go bid_credit once that's used up.
+    project (project_key should be a stable identifier for that project AND
+    that document -- see app.py's Tender Analysis tab, which folds in a hash
+    of the brief text itself, not just the user-typed project/tender/client
+    names; those alone would let someone keep the project name, swap in a
+    different brief, and re-analyse for free). If this project+document
+    hasn't already been counted, spends one credit, in priority order:
+      - ACTIVE or PAST_DUE subscription: the current billing period's
+        monthly quota (SUBSCRIPTION_MONTHLY_BID_LIMIT) first, then a
+        purchased pay-as-you-go bid_credit once that's used up. PAST_DUE is
+        deliberately treated exactly like ACTIVE here -- see
+        get_access_status()'s docstring for why it used to be left
+        unmetered (an unbounded free-usage gap) and no longer is.
       - Otherwise (trial/canceled): the free trial credit first, then a
         bid_credit once the trial is exhausted.
-      - PAST_DUE: neither balance is touched -- short grace period, see
-        get_access_status.
     Returns True if this call actually consumed a credit of some kind
-    (idempotent otherwise -- re-analysing the same project never
-    double-counts, and this also returns True in that "nothing left to
-    spend" edge case since the project itself still got recorded -- the
+    (idempotent otherwise -- re-analysing the exact same project+document
+    never double-counts, and this also returns True in that "nothing left
+    to spend" edge case since the project itself still got recorded -- the
     caller is expected to have already checked get_access_status().allowed
     before letting this run at all).
+
+    A blank/empty project_key is refused outright (raises ValueError)
+    rather than silently returning False: a silent no-op here previously
+    meant a proposal that skipped naming a project was never recorded and
+    never spent a credit, which in turn meant get_access_status() kept
+    reporting the trial as unused forever -- i.e. unlimited free analyses
+    for anyone who left Project Setup blank. The caller (app.py) is
+    responsible for not letting Tender Analysis run at all without a
+    project name in the first place; this is the defense-in-depth backstop
+    in case some other code path ever calls this without one.
     """
     project_key = (project_key or "").strip().lower()
     if not project_key:
-        return False
+        raise ValueError(
+            "record_proposal_usage() requires a non-empty project_key -- refusing to silently "
+            "skip metering. The caller must require a project name before allowing the metered "
+            "action to run at all."
+        )
 
     with db.get_session() as s:
         db_user = s.query(db.User).filter(db.User.id == user.id).first()
@@ -876,13 +894,13 @@ def record_proposal_usage(user: db.User, project_key: str, project_name: str = "
             return False
 
         s.add(db.ProposalUsage(user_id=db_user.id, project_key=project_key, project_name=project_name))
-        if db_user.subscription_status == "active":
+        if db_user.subscription_status in ("active", "past_due"):
             sub_remaining = max(0, SUBSCRIPTION_MONTHLY_BID_LIMIT - (db_user.subscription_bids_used or 0))
             if sub_remaining > 0:
                 db_user.subscription_bids_used = (db_user.subscription_bids_used or 0) + 1
             elif (db_user.bid_credits or 0) > 0:
                 db_user.bid_credits = db_user.bid_credits - 1
-        elif db_user.subscription_status != "past_due":
+        else:
             trial_remaining = max(0, DEFAULT_TRIAL_LIMIT - (db_user.trial_proposals_used or 0))
             if trial_remaining > 0:
                 db_user.trial_proposals_used = (db_user.trial_proposals_used or 0) + 1

@@ -15,6 +15,7 @@ always know where you are.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 from datetime import datetime
@@ -217,14 +218,46 @@ if IS_SAAS_MODE:
 
     # Stripe redirects back here with ?checkout=success&session_id=... after
     # a successful Checkout -- verify with Stripe directly (never trust the
-    # query string alone) and activate the subscription.
+    # query string alone) and activate the subscription. This URL is
+    # revisitable (browser history, refresh, back button) and
+    # handle_checkout_redirect() is itself idempotent against replays (see
+    # db.ProcessedCheckoutSession) -- but a real error verifying with Stripe
+    # (network blip, Stripe outage, a DB hiccup) must NEVER be swallowed
+    # here: someone who was just charged and hits that error deserves a
+    # clear message and a way to recover, not a silently-cleared URL that
+    # looks like nothing happened. See DEPLOY.md/support notes -- if this
+    # keeps failing for a real paying customer, reconcile manually in Stripe
+    # + the admin panel using the session_id shown in the error.
     _qp = st.query_params
     if _qp.get("checkout") == "success" and _qp.get("session_id"):
+        _checkout_session_id = _qp.get("session_id")
+        _checkout_error = None
         try:
-            billing.handle_checkout_redirect(_qp.get("session_id"))
-        except Exception:
-            pass
-        st.query_params.clear()
+            _checkout_user = billing.handle_checkout_redirect(_checkout_session_id)
+        except Exception as _exc:
+            _checkout_user = None
+            _checkout_error = str(_exc)
+
+        if _checkout_user is not None:
+            st.query_params.clear()
+            st.toast("Payment confirmed -- thanks!", icon="✅")
+        elif _checkout_error is not None:
+            # A genuine verification error, not just "this session wasn't
+            # actually paid" -- keep the query params so refreshing the page
+            # retries, and tell the customer exactly what to do if it keeps
+            # happening instead of leaving them with no signal at all.
+            st.error(
+                "We couldn't confirm your payment just now, so nothing's been applied to your "
+                "account yet. If you were just charged, please refresh this page to retry. If it "
+                "keeps failing, email hello@civilproposals.com with this reference so we can apply "
+                f"it manually: `{_checkout_session_id}`"
+            )
+        else:
+            # handle_checkout_redirect() returned None without raising --
+            # e.g. the Checkout Session genuinely wasn't paid (someone
+            # revisiting a cancelled/expired checkout link). Nothing to
+            # apply, nothing to warn about -- just drop the query params.
+            st.query_params.clear()
 
     # Password-reset link (see auth.request_password_reset /
     # render_password_reset_screen) -- checked BEFORE require_login()
@@ -2059,9 +2092,12 @@ with tabs[1]:
             "uploading alone doesn't create them yet."
         )
 
-    refs_ai_ready = bool(st.session_state.ai_config.get("api_key")) and bool(raw_refs_text)
+    refs_ai_ready = bool(st.session_state.ai_config.get("api_key")) and bool(raw_refs_text) and _access["allowed"]
     if st.button("Draft reference projects from uploaded material", disabled=not refs_ai_ready,
-                 help=None if refs_ai_ready else "Upload 'Project references' material above and set an AI provider in the sidebar first.", type="primary"):
+                 help=None if refs_ai_ready else (
+                     "You're out of bids -- see the Tender Analysis tab to upgrade." if not _access["allowed"]
+                     else "Upload 'Project references' material above and set an AI provider in the sidebar first."
+                 ), type="primary"):
         with st.spinner("Reading project reference material and drafting revised, relevance-led entries..."):
             try:
                 analysis_for_context = st.session_state.analysis
@@ -2136,19 +2172,49 @@ with tabs[2]:
     st.subheader("Tender Analysis")
     st.caption("Extracts scope, objectives, mandatory requirements, evaluation criteria, weightings, page limits, deliverables, forms, and risks from the uploaded brief.")
 
-    ready = st.session_state.tender_extracted is not None and bool(st.session_state.ai_config.get("api_key"))
+    # A project name is required before Tender Analysis can run at all --
+    # not just a UX nicety. It's the identity that anchors the paywall: see
+    # _project_key below, which auth.record_proposal_usage() uses to decide
+    # whether this run has already been billed. Without a name (blank
+    # Project Setup), that key used to collapse to an empty string, which
+    # record_proposal_usage() silently refused to record at all -- meaning
+    # trial_proposals_used never incremented and get_access_status() kept
+    # reporting a fresh, unused trial forever. Requiring a name here closes
+    # that off at the one place it can be closed for good, rather than
+    # relying on record_proposal_usage() alone (which now raises instead of
+    # silently no-op'ing, but by then it's too late to stop the AI call).
+    _has_project_name = bool((st.session_state.project_name or "").strip())
+    ready = (
+        st.session_state.tender_extracted is not None
+        and bool(st.session_state.ai_config.get("api_key"))
+        and _has_project_name
+    )
     if not ready:
-        st.info("Upload a tender brief (Upload Docs) and configure an AI provider in the sidebar to run analysis.")
+        if st.session_state.tender_extracted is not None and not _has_project_name:
+            st.info("Enter a project name on the Project Setup tab before running Tender Analysis.")
+        else:
+            st.info("Upload a tender brief (Upload Docs) and configure an AI provider in the sidebar to run analysis.")
 
-    # This is the metered action: the first time a given project runs Tender
-    # Analysis, it consumes the account's free trial bid(s) (see
+    # This is the metered action: the first time a given project+document
+    # runs Tender Analysis, it consumes the account's free trial bid(s) (see
     # auth.record_proposal_usage; auth.DEFAULT_TRIAL_LIMIT -- 1, see
-    # auth.get_access_status). Re-running analysis on the SAME project (same
-    # project/tender/client name) never counts twice. Once the trial is used
-    # up, the button is replaced with an upgrade prompt instead of silently
-    # doing nothing -- except for auth.UNLIMITED_ACCOUNTS, who never hit
-    # limit_reached at all (see get_access_status) so never see this prompt.
-    _project_key = f"{st.session_state.project_name}|{st.session_state.tender_name}|{st.session_state.client_name}".strip("|")
+    # auth.get_access_status). Re-running analysis on the SAME project AND
+    # SAME document never counts twice. The key folds in a hash of the
+    # brief's own extracted text (not just the user-typed project/tender/
+    # client names) on purpose -- keying on the typed names alone would let
+    # someone keep "Project A" as the name, swap in a completely different
+    # tender brief, and re-run for free indefinitely; the hash means a
+    # materially different document is always a new, billable project even
+    # under an unchanged name. Once the trial is used up, the button is
+    # replaced with an upgrade prompt instead of silently doing nothing --
+    # except for auth.UNLIMITED_ACCOUNTS, who never hit limit_reached at all
+    # (see get_access_status) so never see this prompt.
+    _brief_text_for_key = st.session_state.tender_extracted.text if st.session_state.tender_extracted else ""
+    _brief_hash = hashlib.sha256(_brief_text_for_key.encode("utf-8")).hexdigest()[:16] if _brief_text_for_key else ""
+    _project_key = (
+        f"{st.session_state.project_name}|{st.session_state.tender_name}|"
+        f"{st.session_state.client_name}|{_brief_hash}"
+    ).strip("|")
     _already_counted = False
     if IS_SAAS_MODE and current_user:
         with db.get_session() as _s:
@@ -2405,9 +2471,16 @@ with tabs[5]:
     else:
         st.caption("First-pass draft content per section, with red guidance notes and a list of what still needs real user input.")
 
-    ready = st.session_state.sections is not None and bool(st.session_state.ai_config.get("api_key"))
+    ready = (
+        st.session_state.sections is not None
+        and bool(st.session_state.ai_config.get("api_key"))
+        and _access["allowed"]
+    )
     if not ready:
-        st.info("Generate the Proposal Structure and configure an AI provider in the sidebar first.")
+        if st.session_state.sections is not None and not _access["allowed"]:
+            st.info("You're out of bids -- see the Tender Analysis tab to upgrade before drafting more.")
+        else:
+            st.info("Generate the Proposal Structure and configure an AI provider in the sidebar first.")
 
     if _structure_format_stale():
         st.warning(
@@ -2494,7 +2567,7 @@ with tabs[5]:
         )
     _pitch_ready = bool(st.session_state.ai_config.get("api_key")) and (
         st.session_state.project_differentiator.strip() or st.session_state.project_sales_pitch.strip()
-    )
+    ) and _access["allowed"]
     if st.button("Review with AI", disabled=not _pitch_ready, key="review_pitch_btn", type="primary"):
         with st.spinner("Reviewing differentiator & sales pitch..."):
             try:
@@ -2507,6 +2580,8 @@ with tabs[5]:
                 st.error(f"Pitch review failed: {exc}")
     if not st.session_state.ai_config.get("api_key"):
         st.caption("Configure an AI provider in the sidebar first.")
+    elif not _access["allowed"]:
+        st.caption("You're out of bids -- see the Tender Analysis tab to upgrade.")
 
     st.markdown("**Sharpen further with follow-up questions**")
     st.caption(
@@ -2545,7 +2620,8 @@ with tabs[5]:
                     for i, q in enumerate(pq.sales_pitch_questions):
                         st.text_input(q, key=f"pitch_qa_{i}")
 
-            if st.button("Sharpen with my answers", key="sharpen_with_answers_btn", type="primary"):
+            if st.button("Sharpen with my answers", key="sharpen_with_answers_btn", type="primary",
+                         disabled=not _access["allowed"]):
                 with st.spinner("Sharpening with your answers..."):
                     try:
                         _diff_qa = [
@@ -2975,11 +3051,14 @@ with tabs[7]:
 
         # Pull accurate names straight from the CV library text (AI).
         cv_text = st.session_state.company_material_text.get("cv_library", "")
-        ai_ready = bool(st.session_state.ai_config.get("api_key")) and bool(cv_text.strip())
+        ai_ready = bool(st.session_state.ai_config.get("api_key")) and bool(cv_text.strip()) and _access["allowed"]
         ncol1, ncol2 = st.columns([2, 3])
         with ncol1:
             if st.button("Load names from CV library", disabled=not ai_ready,
-                         help=None if ai_ready else "Upload a CV library (Upload Docs) and set an AI provider in the sidebar first.", type="primary"):
+                         help=None if ai_ready else (
+                             "You're out of bids -- see the Tender Analysis tab to upgrade." if not _access["allowed"]
+                             else "Upload a CV library (Upload Docs) and set an AI provider in the sidebar first."
+                         ), type="primary"):
                 with st.spinner("Reading the whole CV library for names (a few seconds per batch)..."):
                     try:
                         names, warns = team_bios.extract_person_names(cv_text, st.session_state.ai_config)
@@ -3024,11 +3103,14 @@ with tabs[7]:
         # analysis missed and infers those the scope implies (e.g. environmental,
         # constructability, rail) without re-running the whole analysis.
         brief_text = st.session_state.tender_extracted.text if st.session_state.tender_extracted else ""
-        rescan_ready = bool(st.session_state.ai_config.get("api_key")) and bool(brief_text.strip())
+        rescan_ready = bool(st.session_state.ai_config.get("api_key")) and bool(brief_text.strip()) and _access["allowed"]
         rcol1, rcol2 = st.columns([2, 3])
         with rcol1:
             if st.button("Re-scan brief for disciplines", disabled=not rescan_ready,
-                         help=None if rescan_ready else "Needs the tender brief (Upload Docs) and an AI provider in the sidebar.", type="primary"):
+                         help=None if rescan_ready else (
+                             "You're out of bids -- see the Tender Analysis tab to upgrade." if not _access["allowed"]
+                             else "Needs the tender brief (Upload Docs) and an AI provider in the sidebar."
+                         ), type="primary"):
                 with st.spinner("Re-reading the brief for every discipline the scope implies..."):
                     try:
                         detected = tender_analyser.detect_disciplines_from_text(brief_text, st.session_state.ai_config)
@@ -3107,7 +3189,10 @@ with tabs[7]:
         # gets a single profile/editor, not duplicates. Matches the deduped export exactly.
         _profile_entries = resourcing.personnel_profiles_deduped(st.session_state.resource_plan)
         _assigned_profile_names = [e["name"] for e in _profile_entries if e["name"]]
-        _profile_fill_ready = bool(st.session_state.ai_config.get("api_key")) and bool(cv_text.strip()) and bool(_assigned_profile_names)
+        _profile_fill_ready = (
+            bool(st.session_state.ai_config.get("api_key")) and bool(cv_text.strip())
+            and bool(_assigned_profile_names) and _access["allowed"]
+        )
         _overwrite_profiles = st.checkbox(
             "Overwrite existing values (re-read from CVs, replacing what's there)",
             value=False, key="_profile_fill_overwrite",
@@ -3119,7 +3204,10 @@ with tabs[7]:
         with pfcol1:
             if st.button(
                 "Fill profile fields from CVs", disabled=not _profile_fill_ready,
-                help=None if _profile_fill_ready else "Assign people to roles above, upload a CV library (Upload Docs), and set an AI provider in the sidebar first.",
+                help=None if _profile_fill_ready else (
+                    "You're out of bids -- see the Tender Analysis tab to upgrade." if not _access["allowed"]
+                    else "Assign people to roles above, upload a CV library (Upload Docs), and set an AI provider in the sidebar first."
+                ),
              type="primary"):
                 with st.spinner("Reading each person's CV for registration status, experience and relevance (a few seconds per batch)..."):
                     try:
@@ -3197,10 +3285,16 @@ with tabs[7]:
             "(project leadership), every other tick can be pre-set from an AI read of this project's "
             "scope below, and you can always override any tick by hand."
         )
-        _suggest_ready = bool(st.session_state.ai_config.get("api_key")) and bool(st.session_state.resource_plan)
+        _suggest_ready = (
+            bool(st.session_state.ai_config.get("api_key")) and bool(st.session_state.resource_plan)
+            and _access["allowed"]
+        )
         if st.button(
             "Suggest which personnel to include (AI)", disabled=not _suggest_ready,
-            help=None if _suggest_ready else "Assign roles above and set an AI provider in the sidebar first.",
+            help=None if _suggest_ready else (
+                "You're out of bids -- see the Tender Analysis tab to upgrade." if not _access["allowed"]
+                else "Assign roles above and set an AI provider in the sidebar first."
+            ),
          type="primary"):
             with st.spinner("Reading this project's scope to judge which discipline profiles are worth including..."):
                 try:
@@ -3266,10 +3360,16 @@ with tabs[7]:
                     "Include in proposal", value=a.include_in_proposal, key=f"prof_include_{ekey}",
                 )
             with hcol2:
-                refresh_ready = bool(st.session_state.ai_config.get("api_key")) and bool(name) and bool(cv_text.strip())
+                refresh_ready = (
+                    bool(st.session_state.ai_config.get("api_key")) and bool(name)
+                    and bool(cv_text.strip()) and _access["allowed"]
+                )
                 if st.button(
                     "Refresh from CV", key=f"prof_refresh_{ekey}", disabled=not refresh_ready,
-                    help=None if refresh_ready else "Assign a name, upload a CV library (Upload Docs), and set an AI provider in the sidebar first.",
+                    help=None if refresh_ready else (
+                        "You're out of bids -- see the Tender Analysis tab to upgrade." if not _access["allowed"]
+                        else "Assign a name, upload a CV library (Upload Docs), and set an AI provider in the sidebar first."
+                    ),
                  type="primary"):
                     messages = []  # [(level, text), ...] -- rendered after the rerun, see result_key above
                     with st.spinner(f"Re-reading {name}'s CV..."):
@@ -3843,8 +3943,12 @@ with tabs[8]:
                         estimates = fee_estimation_engine.estimate_fee_split(st.session_state.project_type, fee_cap)
                         st.session_state.fee_estimates = _letter_reconcile_estimates(estimates)
                 with bcol3:
-                    refresh_ready = bool(st.session_state.ai_config.get("api_key"))
-                    if st.button("Refresh via AI knowledge (not a live web fetch)", disabled=not refresh_ready, key="letter_refresh_btn", type="primary"):
+                    refresh_ready = bool(st.session_state.ai_config.get("api_key")) and _access["allowed"]
+                    if st.button("Refresh via AI knowledge (not a live web fetch)", disabled=not refresh_ready,
+                                 help=None if refresh_ready else (
+                                     "You're out of bids -- see the Tender Analysis tab to upgrade." if not _access["allowed"]
+                                     else "Configure an AI provider in the sidebar first."
+                                 ), key="letter_refresh_btn", type="primary"):
                         fee_cap = st.session_state.analysis.fee_cap if st.session_state.analysis else None
                         with st.spinner("Asking the AI provider for its knowledge of published benchmarks..."):
                             estimates = fee_estimation_engine.refresh_estimate_from_web(
@@ -4408,8 +4512,12 @@ with tabs[8]:
                     estimates = fee_estimation_engine.estimate_fee_split(st.session_state.project_type, fee_cap)
                     st.session_state.fee_estimates = _reconcile_estimates(estimates)
             with bcol3:
-                refresh_ready = bool(st.session_state.ai_config.get("api_key"))
-                if st.button("Refresh via AI knowledge (not a live web fetch)", disabled=not refresh_ready, key="refresh_btn", type="primary"):
+                refresh_ready = bool(st.session_state.ai_config.get("api_key")) and _access["allowed"]
+                if st.button("Refresh via AI knowledge (not a live web fetch)", disabled=not refresh_ready,
+                             help=None if refresh_ready else (
+                                 "You're out of bids -- see the Tender Analysis tab to upgrade." if not _access["allowed"]
+                                 else "Configure an AI provider in the sidebar first."
+                             ), key="refresh_btn", type="primary"):
                     fee_cap = (str(manual_total) if manual_total > 0
                                else (st.session_state.analysis.fee_cap if st.session_state.analysis else None))
                     with st.spinner("Asking the AI provider for its knowledge of published benchmarks..."):

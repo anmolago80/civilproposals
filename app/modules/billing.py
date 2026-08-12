@@ -168,7 +168,20 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
     ("subscription" activates the monthly plan; "payment" is a pay-as-you-go
     bid purchase, credited as +1 db.User.bid_credits) -- rather than needing
     two separate redirect handlers wired to two different query params.
-    Returns the updated user, or None if the session couldn't be verified."""
+
+    Idempotent against replays of the same session_id (see
+    db.ProcessedCheckoutSession) -- this URL is a plain GET that survives in
+    browser history/bookmarks/refresh, so without this check, re-visiting it
+    would re-apply the purchase every single time (another +1 bid_credit, or
+    silently re-running the subscription branch). A Stripe API error (network
+    issue, Stripe outage) is allowed to raise here rather than being caught
+    -- see app.py's caller, which distinguishes "genuinely wasn't paid"
+    (returns None, not an error) from "couldn't verify" (raises, shown to
+    the customer with a retry path) on purpose; swallowing errors in here
+    would make that distinction impossible for the caller to make.
+
+    Returns the updated user, or None if the session wasn't actually paid or
+    didn't carry a recognisable user id."""
     if not stripe.api_key or not session_id:
         return None
 
@@ -181,6 +194,15 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
         return None
 
     with db.get_session() as s:
+        already = s.query(db.ProcessedCheckoutSession).filter(
+            db.ProcessedCheckoutSession.session_id == session_id,
+        ).first()
+        if already:
+            # Already applied -- return the user's current state (not a
+            # re-application) so the caller still sees a "success" outcome
+            # for a plain refresh/replay, without spending anything twice.
+            return s.query(db.User).filter(db.User.id == already.user_id).first()
+
         db_user = s.query(db.User).filter(db.User.id == user_id).first()
         if not db_user:
             return None
@@ -192,6 +214,7 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
             # Pay-as-you-go: always +1 -- create_bid_checkout_session always
             # requests quantity=1, so there's no line-item quantity to read.
             db_user.bid_credits = (db_user.bid_credits or 0) + 1
+        s.add(db.ProcessedCheckoutSession(session_id=session_id, user_id=db_user.id))
         s.commit()
         s.refresh(db_user)
         return db_user

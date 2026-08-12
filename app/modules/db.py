@@ -144,6 +144,24 @@ class ProposalUsage(Base):
     user = relationship("User", back_populates="proposal_usage")
 
 
+class ProcessedCheckoutSession(Base):
+    """Idempotency guard for billing.handle_checkout_redirect(). Stripe's
+    success redirect (?checkout=success&session_id=...) is a plain GET URL
+    that survives in browser history, bookmarks, and a plain page refresh --
+    without this table, every re-visit of that URL would re-apply whatever
+    the session paid for (another +1 bid_credit, or re-activating a
+    subscription that may have since changed). One row per Stripe Checkout
+    Session id we've ever actually applied; handle_checkout_redirect() checks
+    for an existing row before crediting anything, and writes one in the
+    same transaction as the credit itself, so a second call with the same
+    session_id is a safe no-op rather than a second free bid."""
+    __tablename__ = "processed_checkout_sessions"
+
+    session_id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    processed_at = Column(DateTime, default=_now)
+
+
 class LibraryEntry(Base):
     """DB-backed replacement for the local library/<project_type>/ folder in
     modules/proposal_library.py -- one row per archived proposal pack,
