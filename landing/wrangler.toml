@@ -32,9 +32,8 @@ LEAD_NOTIFY_EMAIL = "hello@civilproposals.com"
 # "./landing").
 directory = "."
 binding = "ASSETS"
-# Everything under /app runs the Worker (_worker.js) first instead of
-# going straight to static assets -- that's what lets /app/* reverse-proxy
-# through to the Streamlit app on Railway instead of 404ing as a missing
-# static file. Every other path (/, /privacy-policy.html, etc.) still goes
-# straight to static assets as before.
-run_worker_first = ["/app", "/app/*"]
+# `true` routes EVERY request through the Worker's fetch() first (see
+# ../wrangler.toml for the full explanation) -- needed so the www -> apex
+# redirect in _worker.js actually gets a chance to run for paths outside
+# /app, not just those two.
+run_worker_first = true

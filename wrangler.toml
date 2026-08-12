@@ -50,9 +50,14 @@ zone_name = "civilproposals.com"
 # falling back to static-only zero-config mode.
 directory = "./landing"
 binding = "ASSETS"
-# Everything under /app runs the Worker (_worker.js) first instead of
-# going straight to static assets -- that's what lets /app/* reverse-proxy
-# through to the Streamlit app on Railway instead of 404ing as a missing
-# static file. Every other path (/, /privacy-policy.html, etc.) still goes
-# straight to static assets as before.
-run_worker_first = ["/app", "/app/*"]
+# `true` routes EVERY request through the Worker's fetch() first, falling
+# back to env.ASSETS.fetch() at the bottom of _worker.js for anything that
+# isn't /app/* or POST /api/lead. This used to be a path array scoped to
+# just ["/app", "/app/*"] -- that was fine while the Worker only needed to
+# handle the Railway proxy, but it silently broke the www -> apex redirect
+# added later: a request for www.civilproposals.com/ never matched that
+# array, so Cloudflare served the static HTML directly and _worker.js's
+# fetch() (where the redirect check lives) never ran at all. Confirmed via
+# a real browser test -- visiting www.civilproposals.com loaded the page
+# instead of bouncing to the apex domain.
+run_worker_first = true
