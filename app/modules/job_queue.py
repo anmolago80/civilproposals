@@ -30,8 +30,8 @@ Design notes:
 - The RQ job's OWN id is used as this app's job id everywhere -- no separate
   uuid layer. db.Job is a thin, permanent index: which user owns which job
   id, and its last-known status. It is NOT where job inputs or outputs
-  live -- see db.Job's docstring for why (short version: BYOK API keys are
-  an input to both jobs this module runs, and this table must not become a
+  live -- see db.Job's docstring for why (short version: API keys are an
+  input to both jobs this module runs, and this table must not become a
   second, longer-lived place one of those ends up written to).
 - Job arguments and the job's return value live in Redis, via RQ's own
   mechanism (job.args / job.result), governed by RESULT_TTL_SECONDS /
@@ -42,6 +42,23 @@ Design notes:
   not a secret (it's a URL/query-param-shaped string that could leak into
   logs), so ownership must be re-checked server-side on every poll, not
   just trusted from whatever id the client last had in memory.
+- run_tender_analysis_job() / run_draft_generation_job() below exist
+  specifically so the Anthropic API key never has to be part of a queued
+  job's pickled payload in SaaS mode. This queue is ONLY ever used in SaaS
+  mode (see app.py's _run_job_or_inline: use_queue requires IS_SAAS_MODE),
+  where ai_config's api_key is always the same single server-side
+  ANTHROPIC_API_KEY -- the sidebar field that lets a desktop/BYOK user
+  paste their own key is hidden entirely in SaaS mode (see app.py), so
+  there's no per-user key to preserve here, only one shared production
+  credential. Enqueuing the real key with every job meant it sat in Redis,
+  in plaintext, for up to RESULT_TTL_SECONDS on every single queued job --
+  a Redis compromise would have hand-charged spend on this account's
+  Anthropic key, uncapped, to anyone who read it out. app.py now passes a
+  REDACTED ai_config (api_key="") into the queue instead, and these two
+  wrapper functions re-fill it from THIS PROCESS's own ANTHROPIC_API_KEY
+  env var right before calling the real analysis/drafting function -- so
+  the worker service needs that variable set now (it didn't before; see
+  worker.py's docstring and DEPLOY.md).
 """
 
 from __future__ import annotations
@@ -53,7 +70,7 @@ from rq import Queue
 from rq.job import Job as RQJob
 from rq.exceptions import NoSuchJobError
 
-from modules import db
+from modules import db, draft_generator, tender_analyser
 
 REDIS_URL = os.environ.get("REDIS_URL", "").strip()
 QUEUE_NAME = "civilproposals"
@@ -170,6 +187,46 @@ def _update_job_row(job_id: str, status: str, error_message: str) -> None:
             row.status = status
             row.error_message = (error_message or "")[:2000]
             s.commit()
+
+
+def _resolve_server_api_key(ai_config: dict) -> dict:
+    """Takes the (deliberately redacted, api_key="") ai_config dict that
+    actually gets pickled into the job payload (see this module's docstring)
+    and returns a copy with api_key re-filled from THIS PROCESS's -- i.e.
+    the worker process's -- own ANTHROPIC_API_KEY env var, right before the
+    real analysis/drafting call. Only fills in a key when one isn't already
+    present, so this stays harmless (a no-op) if it's ever handed a
+    non-redacted config -- though in practice that never happens, since this
+    queue is only ever used in SaaS mode, where ai_config's api_key is
+    always this same single server-side key to begin with (see app.py)."""
+    if ai_config.get("api_key"):
+        return ai_config
+    return {
+        **ai_config,
+        "provider": ai_config.get("provider") or "anthropic",
+        "api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
+    }
+
+
+def run_tender_analysis_job(document_text: str, annotations, ai_config: dict, **kwargs):
+    """Queued-job entry point for tender_analyser.analyse_tender -- app.py
+    enqueues THIS function for the SaaS/queued path (instead of enqueuing
+    analyse_tender directly) specifically so the real Anthropic key never
+    has to be part of the pickled job payload. `ai_config` arrives here
+    redacted (api_key="") and gets re-filled from this worker process's own
+    ANTHROPIC_API_KEY env var immediately below, right before the real call
+    -- see this module's docstring for the full rationale."""
+    return tender_analyser.analyse_tender(
+        document_text, annotations, _resolve_server_api_key(ai_config), **kwargs
+    )
+
+
+def run_draft_generation_job(sections, analysis, company_material_text: dict, ai_config: dict, **kwargs):
+    """Queued-job entry point for draft_generator.generate_all_drafts -- same
+    rationale and mechanism as run_tender_analysis_job() above."""
+    return draft_generator.generate_all_drafts(
+        sections, analysis, company_material_text, _resolve_server_api_key(ai_config), **kwargs
+    )
 
 
 def _short_error(exc_info: str | None) -> str | None:

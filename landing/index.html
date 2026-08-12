@@ -130,6 +130,14 @@
   .hero-sub{
     font-size:1.14rem;color:var(--text-muted);max-width:600px;margin:0 auto 34px;font-weight:500;
   }
+  /* Mobile step-down -- 3rem (48px) is fine on desktop but overwhelms a
+     phone viewport and forces awkward line breaks; scale the whole hero
+     block down together so it stays proportional. */
+  @media(max-width:600px){
+    h1.hero-h1{font-size:2.05rem;}
+    .hero-sub{font-size:1rem;}
+    .promo-strip p{font-size:1.2rem;}
+  }
   .hero-ctas{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;}
   .btn-primary{
     background:var(--blue);color:#fff;padding:15px 30px;border-radius:11px;
@@ -228,16 +236,20 @@
   .step-card ol{margin-left:22px;color:var(--text-muted);font-size:.98rem;}
   .step-card ol li{padding:4px 0;}
 
-  /* Honest product-fact cards, styled like civils.ai's stat cards -- real
-     facts about the product/pricing, not fabricated usage metrics (there's
-     no live customer data yet to cite truthfully). */
+  /* Honest product-fact cards -- real facts about the product/pricing, not
+     fabricated usage metrics (there's no live customer data yet to cite
+     truthfully). Deliberately NOT styled as quotes/testimonials (no
+     quotation marks, no italics) -- that styling implied these were
+     sourced or attributed claims when they're actually our own estimates;
+     the "(estimate)" label on the number itself is the honest version. */
   .fact-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;}
   @media(max-width:800px){.fact-grid{grid-template-columns:1fr;}}
   .fact-card{background:#fff;border:1px solid var(--border);border-radius:16px;padding:28px;}
   .fact-icon{font-size:1.3rem;margin-bottom:10px;}
   .fact-number{font-size:2.1rem;font-weight:800;letter-spacing:-0.02em;}
+  .fact-number .fact-estimate-tag{font-size:.6rem;font-weight:700;color:var(--text-muted);letter-spacing:.02em;vertical-align:middle;margin-left:2px;}
   .fact-label{font-weight:700;color:var(--ink);margin:2px 0 10px;font-size:.95rem;}
-  .fact-card p{color:var(--text-muted);font-size:.9rem;font-style:italic;}
+  .fact-card p{color:var(--text-muted);font-size:.9rem;}
 
   /* Pricing */
   .pricing-card{
@@ -339,7 +351,6 @@
       <a class="btn-primary" href="https://app.civilproposals.com">Upload your first brief free</a>
       <a class="btn-secondary" href="#pricing">See pricing</a>
     </div>
-    <p class="hero-note">Currently in Beta: early access, actively evolving based on real firm feedback.</p>
 
     <div class="hero-shot-frame">
       <img src="assets/app_screenshot_workspace.jpg" alt="CivilProposals workspace showing tracked progress and a live fee estimate">
@@ -510,21 +521,21 @@
     <div class="fact-grid">
       <div class="fact-card">
         <div class="fact-icon">💰</div>
-        <div class="fact-number">$2,400</div>
-        <div class="fact-label">avg. cost to prepare a small proposal</div>
-        <p>"Typical in-house preparation time, at standard billing rates."</p>
+        <div class="fact-number">$2,400<span class="fact-estimate-tag">(estimate)</span></div>
+        <div class="fact-label">typical cost to prepare a small proposal</div>
+        <p>Based on typical in-house preparation time at standard billing rates -- not a figure from a specific client.</p>
       </div>
       <div class="fact-card">
         <div class="fact-icon">⚡</div>
-        <div class="fact-number">50%</div>
+        <div class="fact-number">50%<span class="fact-estimate-tag">(estimate)</span></div>
         <div class="fact-label">of that work, done for you</div>
-        <p>"Formatting, structure, and first pass preparation, handled automatically."</p>
+        <p>Our estimate for formatting, structure, and first-pass drafting handled automatically -- actual time saved varies by tender.</p>
       </div>
       <div class="fact-card">
-        <div class="fact-icon">🧪</div>
-        <div class="fact-number">Beta</div>
-        <div class="fact-label">actively evolving</div>
-        <p>"Built and refined directly from real firms' feedback."</p>
+        <div class="fact-icon">📄</div>
+        <div class="fact-number">Word export</div>
+        <div class="fact-label">ready to hand to your bid manager</div>
+        <p>A structured, formatted .docx, not a wall of AI chat text -- open it straight into your firm's own template.</p>
       </div>
     </div>
   </div>
@@ -646,6 +657,22 @@
         <p>Yes, anytime, directly from your account, no phone call or email required. You'll keep
         access through the end of whatever billing period you've already paid for.</p>
       </details>
+    </div>
+  </div>
+</section>
+
+
+<!-- Closing CTA -- the FAQ section previously flowed straight into the soft
+     "get tips" email capture below with no direct call to action, so the
+     most engaged reader (someone who scrolled all the way through pricing
+     and FAQ) had to scroll back up to actually start. This gives that
+     reader something to click right where they are. -->
+<section style="background:var(--surface);">
+  <div class="wrap" style="max-width:640px;text-align:center;">
+    <h2 class="section-title">Ready to see your first brief turned into a draft?</h2>
+    <p class="section-sub">Your first full bid is free, no card required.</p>
+    <div class="hero-ctas">
+      <a class="btn-primary" href="https://app.civilproposals.com">Upload your first brief free</a>
     </div>
   </div>
 </section>

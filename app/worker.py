@@ -14,10 +14,17 @@ Run locally with:  python worker.py
 On Railway: create a second service from the same repo, with start command
 `python worker.py`, and give it the same REDIS_URL and DATABASE_URL
 environment variables as the web service (see DEPLOY.md's "Background
-jobs" section for the full setup). It does NOT need any AI provider API key
-of its own -- every AI call a job makes uses whichever key the requesting
-user pasted into their own session (BYOK), passed through as part of the
-job's arguments.
+jobs" section for the full setup). It ALSO needs its own ANTHROPIC_API_KEY
+env var set (same value as the web service's) -- this queue is only ever
+used in SaaS mode, where every job runs against the one shared server-side
+Anthropic key, never a per-user BYOK key (that field is hidden entirely in
+SaaS mode; see app.py). The web process deliberately never pickles that key
+into the job payload it sends to Redis (a Redis compromise would otherwise
+mean uncapped spend on this account's Anthropic key, sitting there in
+plaintext) -- instead it enqueues a REDACTED config and this worker process
+re-fills the real key from its own env right before making the AI call.
+See modules/job_queue.py's docstring (run_tender_analysis_job() /
+run_draft_generation_job() / _resolve_server_api_key()) for the mechanism.
 """
 
 from __future__ import annotations

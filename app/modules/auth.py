@@ -50,6 +50,7 @@ import bcrypt
 import streamlit as st
 import streamlit.components.v1 as components
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+from sqlalchemy.exc import IntegrityError
 
 from modules import db, email_utils
 
@@ -283,7 +284,18 @@ def create_user(email: str, password: str, name: str = "", firm_name: str = "") 
         s.add(user)
         s.commit()
         s.refresh(user)
-        return user
+
+    # Best-effort welcome email -- signup itself already succeeded (the
+    # commit above went through), so a Resend hiccup here must never look
+    # like signup failed. Previously a new account got zero confirmation
+    # email at all; this was the first of the missing conversion-loop
+    # emails.
+    try:
+        email_utils.send_welcome_email(user.email, user.name)
+    except Exception as exc:
+        print(f"[welcome_email] failed for {user.email}: {exc}", file=sys.stderr)
+
+    return user
 
 
 def authenticate(email: str, password: str) -> db.User | None:
@@ -604,15 +616,18 @@ def require_login() -> db.User:
         )
         st.markdown(headline_html, unsafe_allow_html=True)
 
-        beta_html = (
-            '<div style="margin-top:26px;padding:16px 18px;background:#FFF8EE;border:1px solid #F3D9AE;border-radius:12px;font-size:.88rem;color:#7A4A0A;">'
-            "🚀 <strong>Beta Access.</strong> This product is currently in beta. Features and pricing may "
-            "change, and occasional issues may occur. Always review and verify AI generated content before "
-            "using it in tender submissions or other formal documentation. If something doesn't look right, "
-            "please let us know."
-            "</div>"
-        )
-        st.markdown(beta_html, unsafe_allow_html=True)
+        # A "🚀 Beta Access" banner used to sit here, repeating "this
+        # product is currently in beta" on a screen every returning user
+        # (trial or paying) sees on every single login -- one more
+        # disclosure beyond the three places this audit asked to keep (the
+        # nav badge above, the pricing section's beta note, and the
+        # security FAQ answer). Its actual legal substance (review AI
+        # output before relying on it, we're not liable for errors) is
+        # already covered by TERMS_TEXT below, which every account accepts
+        # at signup and sees captioned in the sidebar on every screen
+        # afterward -- removing this didn't remove any real disclosure,
+        # just a redundant repetition of it at the highest-commitment
+        # moment in the whole product.
 
     with right:
         tab_login, tab_signup = st.tabs(["Log in", "Create account"])
@@ -894,6 +909,7 @@ def record_proposal_usage(user: db.User, project_key: str, project_name: str = "
             return False
 
         s.add(db.ProposalUsage(user_id=db_user.id, project_key=project_key, project_name=project_name))
+        _just_used_last_trial_bid = False
         if db_user.subscription_status in ("active", "past_due"):
             sub_remaining = max(0, SUBSCRIPTION_MONTHLY_BID_LIMIT - (db_user.subscription_bids_used or 0))
             if sub_remaining > 0:
@@ -904,7 +920,40 @@ def record_proposal_usage(user: db.User, project_key: str, project_name: str = "
             trial_remaining = max(0, DEFAULT_TRIAL_LIMIT - (db_user.trial_proposals_used or 0))
             if trial_remaining > 0:
                 db_user.trial_proposals_used = (db_user.trial_proposals_used or 0) + 1
+                _just_used_last_trial_bid = (trial_remaining == 1) and (db_user.bid_credits or 0) == 0
             elif (db_user.bid_credits or 0) > 0:
                 db_user.bid_credits = db_user.bid_credits - 1
-        s.commit()
-        return True
+        try:
+            s.commit()
+        except IntegrityError:
+            # The (user_id, project_key) unique constraint on ProposalUsage
+            # (see that model's docstring) just caught exactly the race the
+            # "already = ...; if already: return False" check above can't
+            # fully close on its own: a Streamlit double-rerun (a
+            # double-click, or a rerun triggered mid-click by something else
+            # on the page) running this function twice before either commit
+            # lands, both seeing "no row yet." The first commit to actually
+            # reach the database won -- this one lost, so roll back every
+            # change just staged in this session (the credit deduction
+            # above included) rather than let it partially apply, and treat
+            # it the same as the already-recorded case above: no error
+            # shown to the user, no second credit spent.
+            s.rollback()
+            return False
+        user_email = db_user.email
+
+    # Best-effort "you're out of free trial, here's how to keep going"
+    # nudge -- fires exactly once, the moment the trial actually runs out
+    # (not on every subsequent blocked attempt). Previously nothing ever
+    # told a trial user this happened beyond the in-app paywall message
+    # they'd only see if they came back -- this was the missing
+    # "$50/bid, here's the upgrade path" follow-up. Sent outside the
+    # session block above (after commit) so an email hiccup can never roll
+    # back or block the actual usage-recording transaction.
+    if _just_used_last_trial_bid:
+        try:
+            email_utils.send_trial_used_email(user_email)
+        except Exception as exc:
+            print(f"[trial_used_email] failed for {user_email}: {exc}", file=sys.stderr)
+
+    return True

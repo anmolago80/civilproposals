@@ -60,13 +60,21 @@ def list_cloud_projects(user_id: str) -> list[dict]:
         ]
 
 
-def save_cloud(user_id: str, state, project_name: str) -> str:
-    """Serialises state via project_store.save_project() and upserts it
-    against (user_id, slug) -- reusing the same project name overwrites the
-    existing row rather than creating a new one, same as the local version.
-    Returns the slug saved under."""
+def save_cloud(user_id: str, project_name: str, blob: bytes) -> str:
+    """Upserts the given (already-serialized, see project_store.save_project())
+    bytes against (user_id, slug) -- reusing the same project name
+    overwrites the existing row rather than creating a new one, same as the
+    local version. Returns the slug saved under.
+
+    Used to serialize `state` itself via project_store.save_project()
+    internally -- the caller (app.py's _maybe_autosave()) now does that
+    once up front instead, so it can hash the result and skip this
+    function's DB write entirely when nothing's actually changed since the
+    last autosave. That write is the expensive part at scale (a network
+    round trip writing a multi-MB blob to Postgres, potentially every
+    AUTOSAVE_INTERVAL_SECONDS for every active user), so avoiding a
+    redundant one matters more here than in the local-disk equivalent."""
     slug = _slugify(project_name)
-    blob = project_store.save_project(state)
     now = datetime.now(timezone.utc)
     with db.get_session() as s:
         existing = (

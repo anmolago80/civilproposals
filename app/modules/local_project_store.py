@@ -65,13 +65,19 @@ def list_local_projects() -> list[dict]:
     return entries
 
 
-def save_local(state, project_name: str) -> str:
-    """Writes state to PROJECTS_DIR/<slug>.tenderproj.zip (creating the folder
-    on first use) and returns the path written to."""
+def save_local(project_name: str, blob: bytes) -> str:
+    """Writes the given (already-serialized, see project_store.save_project())
+    bytes to PROJECTS_DIR/<slug>.tenderproj.zip (creating the folder on
+    first use) and returns the path written to. Used to serialize `state`
+    itself via project_store.save_project() -- the caller (app.py's
+    _maybe_autosave()) now does that once up front instead, so it can hash
+    the result and skip the write entirely when nothing's actually changed
+    since the last autosave, without this function silently re-doing that
+    same serialization work a second time."""
     PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
     slug = _slugify(project_name)
     path = PROJECTS_DIR / f"{slug}.tenderproj.zip"
-    path.write_bytes(project_store.save_project(state))
+    path.write_bytes(blob)
     return str(path)
 
 

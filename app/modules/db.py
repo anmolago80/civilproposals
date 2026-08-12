@@ -132,8 +132,25 @@ class ProposalUsage(Base):
     """One row per distinct proposal (project) a user has run Tender Analysis
     on. Existence of a row for (user_id, project_key) is what "already
     counted toward the trial" means -- re-running analysis on the same
-    project doesn't consume another trial credit."""
+    project doesn't consume another trial credit.
+
+    The unique constraint below is what actually makes that safe under
+    concurrency. auth.record_proposal_usage() checks "does a row already
+    exist?" and, if not, inserts one and spends a credit -- but a Streamlit
+    double-rerun (a double-click, or a rerun triggered mid-click by
+    something else on the page) can run that whole function twice before
+    either commit lands, so both calls see "no row yet" and both insert,
+    burning two credits for one bid. The unique index this constraint
+    creates (see _run_light_migrations()'s CREATE UNIQUE INDEX for the
+    existing-database retrofit -- create_all() alone only applies this to
+    a brand new table) makes the second INSERT fail at the database level
+    instead of silently succeeding; record_proposal_usage() catches that
+    IntegrityError and treats it as "already recorded," the same outcome
+    the check-first-then-insert path was supposed to guarantee on its own."""
     __tablename__ = "proposal_usage"
+    __table_args__ = (
+        UniqueConstraint("user_id", "project_key", name="uq_proposal_usage_user_project_key"),
+    )
 
     id = Column(String, primary_key=True, default=_uid)
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
@@ -292,6 +309,29 @@ def _run_light_migrations() -> None:
     if "subscription_period_end" not in existing_columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE users ADD COLUMN subscription_period_end TIMESTAMP"))
+
+    # Retrofit the (user_id, project_key) unique constraint onto
+    # proposal_usage -- see ProposalUsage's docstring for why this exists
+    # (closing the double-click / double-rerun double-charge race).
+    # create_all() only applies a model's UniqueConstraint when it creates
+    # the table fresh, so an existing production table needs this done
+    # explicitly. A production database that's already hit the race being
+    # fixed here may already contain duplicate (user_id, project_key) rows,
+    # and CREATE UNIQUE INDEX would simply fail against those -- so any
+    # duplicates are cleaned up first (keeping the oldest row of each
+    # duplicate set, since that's the one that actually corresponds to the
+    # credit that should have been spent; the extra row(s) were the bug).
+    # "IF NOT EXISTS" makes both statements safe to run on every startup.
+    if "proposal_usage" in inspector.get_table_names():
+        with engine.begin() as conn:
+            conn.execute(text(
+                "DELETE FROM proposal_usage WHERE id NOT IN "
+                "(SELECT MIN(id) FROM proposal_usage GROUP BY user_id, project_key)"
+            ))
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_proposal_usage_user_project_key "
+                "ON proposal_usage (user_id, project_key)"
+            ))
 
 
 def get_session():

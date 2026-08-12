@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -101,9 +102,30 @@ from modules import (
 
 AUTOSAVE_INTERVAL_SECONDS = 20
 
+# Throttle for billing.refresh_subscription_status() and
+# billing.create_customer_portal_session() -- both make a live Stripe API
+# call, and both used to run unconditionally on every single Streamlit
+# rerun (which fires on nearly every click/keystroke across the whole app,
+# not just billing-related ones). For a subscriber that meant every
+# interaction anywhere in the app cost a live network round trip to Stripe
+# before the page could even render, and made subscribers -- the paying
+# customers -- the ones with the slowest experience. Neither check needs
+# to be that fresh: subscription status changes at most a few times a
+# month (a payment failing, a billing period rolling over), so re-checking
+# every few minutes of active use is still fast enough to show a stale
+# status for at most that long, in exchange for cutting the Stripe call
+# rate from "every rerun" to "at most once per interval."
+SUBSCRIPTION_REFRESH_INTERVAL_SECONDS = 300
+
 _PAGE_ICON_PATH = Path(__file__).resolve().parent / "assets" / "brand" / "logo_mark_32.png"
 st.set_page_config(
-    page_title="CivilProposals (Beta)",
+    # "Beta" used to be in the browser tab title too -- one more repetition
+    # of the same disclosure the nav badge (branding.brand_html's
+    # show_beta) already makes on every screen, right at the moment
+    # someone's paying $120/mo. The nav badge, the pricing section's beta
+    # note, and the security FAQ answer are the three places this audit
+    # asked to keep; this was one of the ones to cut.
+    page_title="CivilProposals",
     page_icon=str(_PAGE_ICON_PATH) if _PAGE_ICON_PATH.exists() else "📐",
     layout="wide",
 )
@@ -116,6 +138,39 @@ st.set_page_config(
 # behaviour (no login, no trial limit, BYO AI key) -- see README_SAAS.md.
 # ---------------------------------------------------------------------------
 IS_SAAS_MODE = os.environ.get("SAAS_MODE", "true").strip().lower() != "false"
+
+# Used at ~11 gating points across the app when st.session_state.ai_config's
+# api_key is empty. In the desktop/BYOK build this correctly points at the
+# sidebar's "Anthropic API key" field -- but that field only renders when
+# `not IS_SAAS_MODE` (see the `if not IS_SAAS_MODE:` gate in the sidebar
+# further down), so telling a SaaS customer to go set it there was pointing
+# them at a control they can't see, left over from before this app had a
+# SaaS mode at all. In a correctly configured SaaS deploy this branch
+# should never actually fire -- ANTHROPIC_API_KEY is set server-side and
+# auto-fills ai_config at session start (see _ENV_ANTHROPIC_KEY above) -- so
+# if it does fire, the server-side key is missing/misconfigured, which a
+# customer can't fix themselves; the message points them at support instead
+# of a UI control that doesn't exist for them.
+_AI_HINT_CLAUSE = (
+    "set an AI provider in the sidebar first" if not IS_SAAS_MODE
+    else "try again in a moment -- if it keeps happening, email hello@civilproposals.com"
+)
+_AI_HINT_SENTENCE = (
+    "Configure an AI provider in the sidebar first." if not IS_SAAS_MODE
+    else "AI features aren't available right now -- please email hello@civilproposals.com so we can look into it."
+)
+
+
+def _show_error(action: str, exc: Exception) -> None:
+    """Shared by every AI/upload/export failure path in this file (~19
+    call sites). Used to be `st.error(f"{{action}}: {{exc}}")` at each one --
+    showing a customer the raw exception straight from whatever failed
+    (an AI provider's raw API error body, a library's internal message, a
+    stack-trace fragment) instead of something they can actually act on.
+    Full detail still goes to stderr (visible in Railway's Deploy Logs),
+    just not onto a page a paying customer is looking at."""
+    print(f"[{action}] {exc}", file=sys.stderr)
+    st.error(f"{action} -- please try again. If it keeps happening, email hello@civilproposals.com and we'll take a look.")
 
 # Design pass: hide Streamlit's default chrome (hamburger menu, "Deploy"
 # button, footer) so the app reads as a branded product, then layer on a
@@ -269,7 +324,15 @@ if IS_SAAS_MODE:
         auth.render_password_reset_screen(_qp.get("reset_token"))
 
     current_user = auth.require_login()  # renders login/signup and st.stop()s if not logged in
-    current_user = billing.refresh_subscription_status(current_user)
+    # Throttled per SUBSCRIPTION_REFRESH_INTERVAL_SECONDS (see that
+    # constant's comment) -- was an unconditional live Stripe call on every
+    # single rerun. "_sub_refresh_ts" is keyed to this browser tab's
+    # session, not persisted, so a brand new session (fresh login, or the
+    # first rerun after a deploy) always refreshes once immediately.
+    _now_ts = time.time()
+    if _now_ts - st.session_state.get("_sub_refresh_ts", 0.0) >= SUBSCRIPTION_REFRESH_INTERVAL_SECONDS:
+        current_user = billing.refresh_subscription_status(current_user)
+        st.session_state["_sub_refresh_ts"] = _now_ts
     _access = auth.get_access_status(current_user)
 
 
@@ -290,34 +353,55 @@ def _render_upgrade_buttons(user, key_prefix: str, already_subscribed: bool = Fa
     billing.create_checkout_session) -- hidden when already_subscribed,
     since subscribing again makes no sense. Buy 1 bid: $50 one-time, adds a
     single db.User.bid_credits (see billing.create_bid_checkout_session) --
-    works on top of either the trial or an active subscription's quota."""
+    works on top of either the trial or an active subscription's quota.
+
+    Each option is a single st.link_button straight to the Stripe Checkout
+    URL, created eagerly right here at render time. This used to be a
+    two-step flow (a plain st.button that, once clicked, rendered a SECOND
+    st.link_button below it) -- that had a real bug: the link_button only
+    ever existed on the exact script run where the first button was
+    clicked, because Streamlit reruns the whole script on every
+    interaction. The instant anything else caused a rerun (including this
+    same component re-rendering inside the top-right popover, which can
+    close and reopen on its own), the "Continue to payment" link vanished
+    with no trace and no visible next step -- maximum friction at the exact
+    moment someone was trying to pay. A single link_button removes that
+    round trip entirely: one click opens Stripe directly. The trade-off is
+    a live Stripe API call (creating a Checkout Session) every time this
+    prompt renders, even for someone who never clicks -- acceptable, since
+    unused Checkout Sessions cost nothing and simply expire on Stripe's
+    side; if this ever needs to avoid that, cache the created URL in
+    st.session_state per key_prefix for a few minutes instead."""
     if already_subscribed:
-        if st.button("Buy 1 bid -- $50", key=f"{key_prefix}_bid_btn"):
-            try:
-                url = billing.create_bid_checkout_session(user)
-                st.link_button("Continue to payment →", url, type="primary")
-            except Exception as exc:
-                st.error(f"Couldn't start checkout: {exc}")
-                st.caption(billing.debug_key_info())
+        try:
+            bid_url = billing.create_bid_checkout_session(user)
+            st.link_button("Buy 1 bid -- $50 →", bid_url, key=f"{key_prefix}_bid_btn", type="primary")
+        except Exception as exc:
+            # debug_key_info() used to be shown here via st.caption() --
+            # useful while Andrew was first wiring up Stripe, but it's
+            # internal setup diagnostics (masked key/price-ID info), not
+            # something a customer hitting a checkout error should ever
+            # see. Logged server-side instead; see debug_key_info()'s own
+            # docstring if this needs diagnosing again later.
+            print(f"[checkout] {exc} | {billing.debug_key_info()}", file=sys.stderr)
+            st.error("Couldn't start checkout -- please try again. If it keeps happening, email hello@civilproposals.com.")
         return
 
     ucol1, ucol2 = st.columns(2)
     with ucol1:
-        if st.button("Subscribe -- $120/mo", key=f"{key_prefix}_sub_btn", type="primary"):
-            try:
-                url = billing.create_checkout_session(user)
-                st.link_button("Continue to payment →", url, type="primary")
-            except Exception as exc:
-                st.error(f"Couldn't start checkout: {exc}")
-                st.caption(billing.debug_key_info())
+        try:
+            sub_url = billing.create_checkout_session(user)
+            st.link_button("Subscribe -- $120/mo →", sub_url, key=f"{key_prefix}_sub_btn", type="primary")
+        except Exception as exc:
+            print(f"[checkout] {exc} | {billing.debug_key_info()}", file=sys.stderr)
+            st.error("Couldn't start checkout -- please try again. If it keeps happening, email hello@civilproposals.com.")
     with ucol2:
-        if st.button("Buy 1 bid -- $50", key=f"{key_prefix}_bid_btn"):
-            try:
-                url = billing.create_bid_checkout_session(user)
-                st.link_button("Continue to payment →", url, type="primary")
-            except Exception as exc:
-                st.error(f"Couldn't start checkout: {exc}")
-                st.caption(billing.debug_key_info())
+        try:
+            bid_url = billing.create_bid_checkout_session(user)
+            st.link_button("Buy 1 bid -- $50 →", bid_url, key=f"{key_prefix}_bid_btn")
+        except Exception as exc:
+            print(f"[checkout] {exc} | {billing.debug_key_info()}", file=sys.stderr)
+            st.error("Couldn't start checkout -- please try again. If it keeps happening, email hello@civilproposals.com.")
 
 
 def _extract_plain_text_from_bytes(file_bytes: bytes, filename: str):
@@ -598,7 +682,7 @@ def _init_state():
 
 def _run_job_or_inline(job_type, func, args=(), kwargs=None, progress=None,
                         queued_text="Queued...", running_text="Working...",
-                        inline_extra_kwargs=None):
+                        inline_extra_kwargs=None, queue_func=None, queue_args=None):
     """
     Runs func(*args, **kwargs) either in the background job queue (see
     modules/job_queue.py) or inline in this process, and either way blocks
@@ -617,6 +701,14 @@ def _run_job_or_inline(job_type, func, args=(), kwargs=None, progress=None,
     live progress_callback closure can't be pickled across the process
     boundary to a worker, so it's never passed to the queued path).
 
+    queue_func/queue_args let a call site enqueue a DIFFERENT function/args
+    than the ones it runs inline with -- used by both current call sites to
+    enqueue a job_queue.run_*_job() wrapper with a redacted ai_config
+    (api_key="") instead of func/args' real one, so the real server
+    Anthropic key never ends up pickled into Redis (see job_queue.py's
+    docstring). Falls back to func/args when not given, so this stays a
+    no-op for any future call site that doesn't need the distinction.
+
     Deliberately never a hard dependency on the queue: turning it on is
     just setting REDIS_URL and deploying the worker service, nothing here
     has to change, and this app never breaks just because that hasn't
@@ -628,13 +720,28 @@ def _run_job_or_inline(job_type, func, args=(), kwargs=None, progress=None,
     if not use_queue:
         return func(*args, **kwargs, **(inline_extra_kwargs or {}))
 
-    job_id = job_queue.enqueue(current_user.id, job_type, func, *args, **kwargs)
+    enqueue_func = queue_func or func
+    enqueue_args = args if queue_args is None else queue_args
+    job_id = job_queue.enqueue(current_user.id, job_type, enqueue_func, *enqueue_args, **kwargs)
     if progress:
         progress.progress(0.05, text=queued_text)
 
+    # Hard ceiling on how long this waits, in case a job is enqueued but
+    # never picked up (e.g. the worker service -- see modules/worker.py --
+    # is down or was never deployed) or somehow never resolves. Without
+    # this, that "queued" status is indistinguishable from "still working"
+    # forever, and the caller's `while True` would poll indefinitely with
+    # the progress bar stuck creeping toward 90% -- which, to whoever's
+    # sitting there watching their one free trial bid, looks exactly like
+    # the product being broken, not like a transient infra problem. Set
+    # comfortably above job_queue.JOB_TIMEOUT_SECONDS (RQ's own 15-minute
+    # execution ceiling once a worker actually starts the job) so a
+    # legitimately long-running job is never preempted before RQ itself
+    # would have given up on it.
+    MAX_WAIT_SECONDS = 20 * 60
     elapsed = 0.0
     poll_interval = 1.5
-    while True:
+    while elapsed < MAX_WAIT_SECONDS:
         status = job_queue.get_status(job_id, current_user.id)
         if status["status"] == "finished":
             return status["result"]
@@ -648,6 +755,13 @@ def _run_job_or_inline(job_type, func, args=(), kwargs=None, progress=None,
             progress.progress(min(0.05 + elapsed / 180.0, 0.9), text=running_text)
         time.sleep(poll_interval)
         elapsed += poll_interval
+
+    raise RuntimeError(
+        "This is taking much longer than expected and may mean the background worker is "
+        "offline. Nothing was charged for this attempt beyond what the trial/subscription "
+        "gate already checked -- try again in a few minutes, and contact "
+        "hello@civilproposals.com if it keeps happening."
+    )
 
 
 def _project_info() -> dict:
@@ -927,7 +1041,17 @@ def _apply_loaded_project(loaded_state: dict, source_label: str) -> None:
         st.session_state[f"{prefix}last_applied_editor_sig"] = None
         st.session_state[f"{prefix}apply_tick"] = False
         st.session_state[f"{prefix}apply_tick_seen"] = False
-    st.success(f"Loaded project from {source_label}. Re-enter your AI provider settings in the sidebar to continue.")
+    # The "re-enter your AI provider settings" follow-up only applies in the
+    # desktop/BYOK build, where ai_config lives purely in session_state and
+    # loading a project doesn't touch it, but a fresh session might not have
+    # a key typed in yet. In SaaS mode ai_config is auto-filled from the
+    # server-side ANTHROPIC_API_KEY at session start (see _ENV_ANTHROPIC_KEY)
+    # and never needs re-entering, so telling a SaaS customer to go do that
+    # in a sidebar field that doesn't exist for them was just wrong.
+    if IS_SAAS_MODE:
+        st.success(f"Loaded project from {source_label}.")
+    else:
+        st.success(f"Loaded project from {source_label}. Re-enter your AI provider settings in the sidebar to continue.")
     st.rerun()
 
 
@@ -951,21 +1075,53 @@ def _maybe_autosave() -> None:
         return
     project_id = _project_identifier()
     if not project_id:
-        return
+        # No project/tender name yet -- this used to skip autosave entirely
+        # until one was entered, which meant a user who'd already uploaded a
+        # real tender brief (the slow, easy-to-forget step) but simply
+        # hadn't gotten to Project Setup yet would lose that brief outright
+        # on any refresh, dropped connection, or accidental tab close --
+        # exactly the state a rushing trial user is in. Once there's real
+        # content worth not losing, fall back to a fixed "Untitled project"
+        # slot instead of skipping -- multiple different unnamed projects in
+        # the same account will share and overwrite that one slot until
+        # each is given its own name, but that's an acceptable trade-off
+        # for a "don't lose today's work" safety net, not a version
+        # history. Still skipped entirely for a genuinely blank session (no
+        # name AND no uploaded brief yet) so opening the app doesn't create
+        # a stray entry before there's anything worth saving.
+        if st.session_state.tender_extracted is None:
+            return
+        project_id = "Untitled project"
     now = time.time()
     if now - st.session_state._last_autosave_ts < AUTOSAVE_INTERVAL_SECONDS:
         return
     try:
+        # Serialize once up front (this is the same work save_cloud()/
+        # save_local() used to each do internally) so its content hash can
+        # be compared against the last save's hash -- if nothing that
+        # save_project() actually captures has changed since then, skip the
+        # write entirely. Hashing costs something every interval too, but
+        # it's in-process and cheap; the write it can now skip is the
+        # expensive part at scale (for cloud_project_store specifically: a
+        # network round trip writing a multi-MB blob to Postgres, on every
+        # interval, for every active user, whether or not anything in it
+        # actually changed).
+        blob = project_store.save_project(st.session_state)
+        content_hash = hashlib.sha256(blob).hexdigest()
+        if content_hash == st.session_state.get("_last_autosave_hash"):
+            st.session_state._last_autosave_ts = now
+            return
         if IS_SAAS_MODE and current_user:
-            slug = cloud_project_store.save_cloud(current_user.id, st.session_state, project_id)
+            slug = cloud_project_store.save_cloud(current_user.id, project_id, blob)
             st.session_state._last_autosave_ts = now
             st.session_state._last_autosave_path = slug
             st.session_state._last_autosave_error = ""
         else:
-            path = local_project_store.save_local(st.session_state, project_id)
+            path = local_project_store.save_local(project_id, blob)
             st.session_state._last_autosave_ts = now
             st.session_state._last_autosave_path = path
             st.session_state._last_autosave_error = ""
+        st.session_state["_last_autosave_hash"] = content_hash
     except Exception as exc:
         # Auto-save is a convenience, not a step the user is waiting on -- a failure here
         # (e.g. disk full, folder permissions, a transient DB hiccup) shouldn't interrupt
@@ -1132,10 +1288,21 @@ with st.sidebar:
         branding.vertical_steps_component_html(_stepper_steps),
         height=max(1, len(_stepper_steps)) * 44 + 16,
     )
-    # Same wording as the signup-time terms and the accept-terms gate
-    # (see auth.TERMS_TEXT) -- one copy of this disclaimer, reused
-    # everywhere it needs to appear instead of several that could drift.
-    st.caption(auth.TERMS_TEXT)
+    # Used to be the full auth.TERMS_TEXT paragraph, permanently pinned in
+    # the sidebar on every single screen -- every user already reads and
+    # explicitly accepts that exact wording once, at signup / the
+    # accept-terms gate (auth.TERMS_TEXT, auth._render_terms_gate), and it's
+    # also the footer disclaimer + Terms of Service on the marketing site.
+    # Repeating the full liability paragraph forever after that adds
+    # nothing legally (nothing here is the only place it's disclosed) and
+    # reads as a constant "we don't trust our own output" banner at exactly
+    # the moment a subscriber is deciding this is worth $120/mo. A short
+    # reminder + a link to the same full text keeps it one click away
+    # without following the user around on every tab.
+    st.caption(
+        "AI-generated content -- review before submitting. "
+        "[Full Terms of Service](https://civilproposals.com/terms-of-service.html)"
+    )
     # "My projects" / "This computer" and "Export / import a file" used to
     # live here, stacked below the steps. Moved into two popovers in the
     # fixed top-right banner instead (see _render_my_projects_popover() and
@@ -1377,12 +1544,13 @@ def _render_my_projects_popover_body() -> None:
         st.checkbox(
             "Auto-save as I work", key="_autosave_enabled",
             help=f"Saves to a 'projects' folder next to the app, at most every {AUTOSAVE_INTERVAL_SECONDS}s "
-                 "of activity -- only once a project name is entered (Project Setup).",
+                 "of activity -- starts once a project name is entered (Project Setup), or once you've "
+                 "uploaded a tender brief, whichever comes first.",
         )
         if st.session_state._last_autosave_path:
             st.caption(f"Last saved {datetime.fromtimestamp(st.session_state._last_autosave_ts).strftime('%H:%M:%S')}")
-        elif not _project_identifier():
-            st.caption("Enter a project or tender name (Project Setup) to enable auto-save.")
+        elif not _project_identifier() and st.session_state.tender_extracted is None:
+            st.caption("Enter a project or tender name (Project Setup), or upload a tender brief, to enable auto-save.")
 
         local_projects = local_project_store.list_local_projects()
         if local_projects:
@@ -1413,8 +1581,9 @@ def _render_my_projects_popover_body() -> None:
         st.checkbox(
             "Auto-save as I work", key="_autosave_enabled",
             help=f"Saves to your account, at most every {AUTOSAVE_INTERVAL_SECONDS}s of activity -- "
-                 "only once a project name is entered (Project Setup). Lets you pick back up later, even "
-                 "after closing the tab or a refresh.",
+                 "starts once a project name is entered (Project Setup), or once you've uploaded a "
+                 "tender brief, whichever comes first (saved as \"Untitled project\" until you name "
+                 "it). Lets you pick back up later, even after closing the tab or a refresh.",
         )
         if st.session_state._last_autosave_error:
             st.warning(
@@ -1424,8 +1593,8 @@ def _render_my_projects_popover_body() -> None:
             )
         elif st.session_state._last_autosave_path:
             st.caption(f"Last saved {datetime.fromtimestamp(st.session_state._last_autosave_ts).strftime('%H:%M:%S')}")
-        elif not _project_identifier():
-            st.caption("Enter a project or tender name (Project Setup) to enable auto-save.")
+        elif not _project_identifier() and st.session_state.tender_extracted is None:
+            st.caption("Enter a project or tender name (Project Setup), or upload a tender brief, to enable auto-save.")
 
         cloud_projects = cloud_project_store.list_cloud_projects(current_user.id)
         if cloud_projects:
@@ -1446,7 +1615,8 @@ def _render_my_projects_popover_body() -> None:
                     st.rerun()
         else:
             st.caption("No saved projects yet -- one will appear here shortly after you start "
-                       "one (auto-save kicks in once you enter a project name on Project Setup).")
+                       "one (auto-save kicks in once you enter a project name on Project Setup, "
+                       "or as soon as you upload a tender brief).")
 
     st.divider()
     with st.expander("⇅ Export / Import"):
@@ -1517,7 +1687,7 @@ def _render_proposal_library_popover_body() -> None:
                 st.success(f"Added '{_lib_up_file.name}' to the Proposal Library under {_lib_up_type}.")
                 st.rerun()
             except Exception as exc:
-                st.error(f"Couldn't upload: {exc}")
+                _show_error("Couldn't upload", exc)
 
     st.divider()
     st.caption(
@@ -1590,7 +1760,7 @@ def _render_proposal_library_popover_body() -> None:
                         else:
                             st.warning("Couldn't extract any text from that file.")
                     except Exception as exc:
-                        st.error(f"Couldn't add as reference: {exc}")
+                        _show_error("Couldn't add as reference", exc)
             st.divider()
 
 
@@ -1626,7 +1796,7 @@ def _render_project_reference_library_popover_body() -> None:
                 st.success(f"Added '{_ref_up_file.name}' to the Project Reference Library under {_ref_up_type}.")
                 st.rerun()
             except Exception as exc:
-                st.error(f"Couldn't upload: {exc}")
+                _show_error("Couldn't upload", exc)
 
     st.divider()
     st.caption(
@@ -1684,7 +1854,7 @@ def _render_project_reference_library_popover_body() -> None:
                         else:
                             st.warning(_doc.warning or "Couldn't extract any text from that file.")
                     except Exception as exc:
-                        st.error(f"Couldn't add to project references: {exc}")
+                        _show_error("Couldn't add to project references", exc)
             st.divider()
 
 
@@ -1723,7 +1893,25 @@ with st.container(key="_topright_actions"):
             # that. It used to fall into the "Upgrade" branch below instead,
             # which offered to start a SECOND subscription and never
             # surfaced the one place that lets them fix the first one.
-            portal_url = billing.create_customer_portal_session(current_user)
+            #
+            # This top banner (and the portal URL below) renders on
+            # literally every rerun across the whole app, so creating a
+            # fresh Stripe Billing Portal Session unconditionally here used
+            # to mean a live Stripe API call on every single click anywhere
+            # in the app for every subscriber -- the paying customers ended
+            # up with the slowest experience. Portal Session URLs stay valid
+            # well past this cache window, so caching one in session_state
+            # for SUBSCRIPTION_REFRESH_INTERVAL_SECONDS and only creating a
+            # fresh one once it's stale cuts that down to at most one Stripe
+            # call per interval instead of one per rerun -- still always a
+            # real, immediately-clickable link, never the vanishing-link
+            # two-step pattern _render_upgrade_buttons() deliberately moved
+            # away from.
+            _now_ts = time.time()
+            if _now_ts - st.session_state.get("_portal_url_ts", 0.0) >= SUBSCRIPTION_REFRESH_INTERVAL_SECONDS:
+                st.session_state["_portal_url_cache"] = billing.create_customer_portal_session(current_user)
+                st.session_state["_portal_url_ts"] = _now_ts
+            portal_url = st.session_state.get("_portal_url_cache")
             if portal_url:
                 st.link_button("Manage", portal_url, type="primary")
         else:
@@ -2096,7 +2284,7 @@ with tabs[1]:
     if st.button("Draft reference projects from uploaded material", disabled=not refs_ai_ready,
                  help=None if refs_ai_ready else (
                      "You're out of bids -- see the Tender Analysis tab to upgrade." if not _access["allowed"]
-                     else "Upload 'Project references' material above and set an AI provider in the sidebar first."
+                     else f"Upload 'Project references' material above and {_AI_HINT_CLAUSE}."
                  ), type="primary"):
         with st.spinner("Reading project reference material and drafting revised, relevance-led entries..."):
             try:
@@ -2113,7 +2301,7 @@ with tabs[1]:
                 if not analysis_for_context:
                     st.info("Tender Analysis hasn't run yet -- re-run this once it has, so relevance can be tailored to the actual brief.")
             except Exception as exc:
-                st.error(f"Reference project drafting failed: {exc}")
+                _show_error("Reference project drafting failed", exc)
 
     if st.session_state.reference_project_warnings:
         st.warning("\n\n".join(st.session_state.reference_project_warnings))
@@ -2193,7 +2381,7 @@ with tabs[2]:
         if st.session_state.tender_extracted is not None and not _has_project_name:
             st.info("Enter a project name on the Project Setup tab before running Tender Analysis.")
         else:
-            st.info("Upload a tender brief (Upload Docs) and configure an AI provider in the sidebar to run analysis.")
+            st.info(f"Upload a tender brief (Upload Docs) and {_AI_HINT_CLAUSE} to run analysis.")
 
     # This is the metered action: the first time a given project+document
     # runs Tender Analysis, it consumes the account's free trial bid(s) (see
@@ -2247,6 +2435,28 @@ with tabs[2]:
         _render_upgrade_buttons(current_user, key_prefix="_tab3",
                                  already_subscribed=_access["subscribed"] or _access["past_due"])
 
+    # Tell people exactly what clicking the button below is about to spend --
+    # previously nothing here said this consumes the account's one free
+    # trial bid, so someone testing with a throwaway/wrong file could burn
+    # it by accident and land on the paywall with no idea why. Skipped
+    # entirely for re-runs of the exact same project+document (see
+    # _already_counted above -- those are free) and for unlimited accounts.
+    if IS_SAAS_MODE and current_user and ready and not _trial_blocked and not _access["unlimited"]:
+        if _already_counted:
+            st.caption("You've already run analysis on this exact project and document -- re-running it now won't use another bid.")
+        elif _access["subscribed"] or _access["past_due"]:
+            if _access["subscription_bids_remaining"] > 0:
+                st.caption(
+                    f"This will use 1 of your {_access['subscription_bids_remaining']} remaining bid(s) "
+                    "in this billing cycle."
+                )
+            else:
+                st.caption(f"This will use 1 pay-as-you-go bid credit (you have {_access['bid_credits']} left).")
+        elif _access["trial_remaining"] > 0:
+            st.caption(f"This will use your {_access['trial_remaining']} free trial bid -- make sure this is the right document first.")
+        else:
+            st.caption(f"This will use 1 pay-as-you-go bid credit (you have {_access['bid_credits']} left).")
+
     if st.button("Run Tender Analysis", type="primary", disabled=not ready or _trial_blocked):
         extracted = st.session_state.tender_extracted
         progress = st.progress(0.0, text="Analysing...")
@@ -2263,13 +2473,21 @@ with tabs[2]:
             # every other concurrently-connected user's Streamlit session
             # while it ran. Falls back to running inline (same as always)
             # with the same granular per-chunk progress bar when the
-            # queue isn't available yet -- see _run_job_or_inline.
+            # queue isn't available yet -- see _run_job_or_inline. The
+            # queued path gets a REDACTED ai_config (api_key="") and a
+            # different target function (job_queue.run_tender_analysis_job,
+            # which re-fills the key from the worker process's own env --
+            # see job_queue.py's docstring) so the real server Anthropic key
+            # never ends up pickled into Redis.
+            _redacted_ai_config = {**st.session_state.ai_config, "api_key": ""}
             analysis = _run_job_or_inline(
                 "tender_analysis", tender_analyser.analyse_tender,
                 args=(extracted.text, extracted.annotations, st.session_state.ai_config),
                 progress=progress,
                 queued_text="Queued for analysis...", running_text="Analysing...",
                 inline_extra_kwargs={"progress_callback": _progress_cb},
+                queue_func=job_queue.run_tender_analysis_job,
+                queue_args=(extracted.text, extracted.annotations, _redacted_ai_config),
             )
             st.session_state.analysis = analysis
             progress.progress(1.0, text="Done.")
@@ -2277,7 +2495,7 @@ with tabs[2]:
             if IS_SAAS_MODE and current_user:
                 auth.record_proposal_usage(current_user, _project_key, st.session_state.project_name)
         except Exception as exc:
-            st.error(f"Analysis failed: {exc}")
+            _show_error("Analysis failed", exc)
 
     analysis = st.session_state.analysis
     if analysis:
@@ -2480,7 +2698,7 @@ with tabs[5]:
         if st.session_state.sections is not None and not _access["allowed"]:
             st.info("You're out of bids -- see the Tender Analysis tab to upgrade before drafting more.")
         else:
-            st.info("Generate the Proposal Structure and configure an AI provider in the sidebar first.")
+            st.info(f"Generate the Proposal Structure and {_AI_HINT_CLAUSE}.")
 
     if _structure_format_stale():
         st.warning(
@@ -2531,7 +2749,9 @@ with tabs[5]:
             # site's comment and _run_job_or_inline) -- this is the other
             # genuinely slow, heavy operation in the app (up to
             # MAX_CONCURRENT_DRAFTS AI calls in flight at once for a big
-            # pack), so it gets the same treatment.
+            # pack), so it gets the same treatment, including the redacted
+            # ai_config on the queued path (see job_queue.py's docstring).
+            _redacted_ai_config = {**st.session_state.ai_config, "api_key": ""}
             new_drafts = _run_job_or_inline(
                 "draft_generation", draft_generator.generate_all_drafts,
                 args=(targets, st.session_state.analysis, _material_for_draft, st.session_state.ai_config),
@@ -2539,12 +2759,14 @@ with tabs[5]:
                 progress=progress,
                 queued_text="Queued for drafting...", running_text="Drafting...",
                 inline_extra_kwargs={"progress_callback": _progress_cb},
+                queue_func=job_queue.run_draft_generation_job,
+                queue_args=(targets, st.session_state.analysis, _material_for_draft, _redacted_ai_config),
             )
             st.session_state.drafts = {**(st.session_state.drafts or {}), **new_drafts}
             progress.progress(1.0, text="Done.")
             st.success("Draft generation complete.")
         except Exception as exc:
-            st.error(f"Draft generation failed: {exc}")
+            _show_error("Draft generation failed", exc)
 
     st.markdown("---")
     st.caption(
@@ -2577,9 +2799,9 @@ with tabs[5]:
                 )
                 st.success("Review complete.")
             except Exception as exc:
-                st.error(f"Pitch review failed: {exc}")
+                _show_error("Pitch review failed", exc)
     if not st.session_state.ai_config.get("api_key"):
-        st.caption("Configure an AI provider in the sidebar first.")
+        st.caption(_AI_HINT_SENTENCE)
     elif not _access["allowed"]:
         st.caption("You're out of bids -- see the Tender Analysis tab to upgrade.")
 
@@ -2601,7 +2823,7 @@ with tabs[5]:
                     st.session_state.analysis, _project_info(), st.session_state.ai_config,
                 )
             except Exception as exc:
-                st.error(f"Couldn't generate questions: {exc}")
+                _show_error("Couldn't generate questions", exc)
 
     if st.session_state.pitch_questions:
         pq = st.session_state.pitch_questions
@@ -2639,7 +2861,7 @@ with tabs[5]:
                         )
                         st.success("Sharpened using your answers -- see the rewrite below.")
                     except Exception as exc:
-                        st.error(f"Sharpening failed: {exc}")
+                        _show_error("Sharpening failed", exc)
 
     if st.session_state.pitch_review:
         pr = st.session_state.pitch_review
@@ -2694,7 +2916,7 @@ with tabs[5]:
                 )
                 st.success("Executive summary drafted.")
             except Exception as exc:
-                st.error(f"Executive summary generation failed: {exc}")
+                _show_error("Executive summary generation failed", exc)
 
     if st.session_state.executive_summary:
         with st.expander("Executive summary", expanded=False):
@@ -2729,7 +2951,7 @@ with tabs[5]:
                     )
                     st.success("Team introduction drafted.")
                 except Exception as exc:
-                    st.error(f"Team introduction generation failed: {exc}")
+                    _show_error("Team introduction generation failed", exc)
         if not st.session_state.resource_plan:
             st.caption("Assign at least one person on the Team & Resourcing tab first.")
 
@@ -2763,7 +2985,7 @@ with tabs[5]:
                     )
                     st.success("Project experience introduction drafted.")
                 except Exception as exc:
-                    st.error(f"Project experience introduction generation failed: {exc}")
+                    _show_error("Project experience introduction generation failed", exc)
         if not st.session_state.reference_projects:
             # Uploading reference material (Upload Docs) only extracts its text --
             # it still needs "Draft reference projects from uploaded material"
@@ -3057,7 +3279,7 @@ with tabs[7]:
             if st.button("Load names from CV library", disabled=not ai_ready,
                          help=None if ai_ready else (
                              "You're out of bids -- see the Tender Analysis tab to upgrade." if not _access["allowed"]
-                             else "Upload a CV library (Upload Docs) and set an AI provider in the sidebar first."
+                             else f"Upload a CV library (Upload Docs) and {_AI_HINT_CLAUSE}."
                          ), type="primary"):
                 with st.spinner("Reading the whole CV library for names (a few seconds per batch)..."):
                     try:
@@ -3068,7 +3290,7 @@ with tabs[7]:
                         for w in warns:
                             st.warning(w)
                     except Exception as exc:
-                        st.error(f"Could not read names from the CV library: {exc}")
+                        _show_error("Could not read names from the CV library", exc)
                 st.rerun()
         with ncol2:
             if known_names:
@@ -3109,7 +3331,7 @@ with tabs[7]:
             if st.button("Re-scan brief for disciplines", disabled=not rescan_ready,
                          help=None if rescan_ready else (
                              "You're out of bids -- see the Tender Analysis tab to upgrade." if not _access["allowed"]
-                             else "Needs the tender brief (Upload Docs) and an AI provider in the sidebar."
+                             else f"Needs the tender brief (Upload Docs) and {_AI_HINT_CLAUSE}."
                          ), type="primary"):
                 with st.spinner("Re-reading the brief for every discipline the scope implies..."):
                     try:
@@ -3134,7 +3356,7 @@ with tabs[7]:
                         else:
                             st.info("No new disciplines found beyond what's already listed.")
                     except Exception as exc:
-                        st.error(f"Discipline re-scan failed: {exc}")
+                        _show_error("Discipline re-scan failed", exc)
                 st.rerun()
         with rcol2:
             st.caption("Reads the brief and infers disciplines the scope implies (environmental, constructability, rail, survey, etc.), even if they weren't named explicitly.")
@@ -3206,7 +3428,7 @@ with tabs[7]:
                 "Fill profile fields from CVs", disabled=not _profile_fill_ready,
                 help=None if _profile_fill_ready else (
                     "You're out of bids -- see the Tender Analysis tab to upgrade." if not _access["allowed"]
-                    else "Assign people to roles above, upload a CV library (Upload Docs), and set an AI provider in the sidebar first."
+                    else f"Assign people to roles above, upload a CV library (Upload Docs), and {_AI_HINT_CLAUSE}."
                 ),
              type="primary"):
                 with st.spinner("Reading each person's CV for registration status, experience and relevance (a few seconds per batch)..."):
@@ -3266,7 +3488,7 @@ with tabs[7]:
                         for w in warns:
                             st.warning(w)
                     except Exception as exc:
-                        st.error(f"Could not fill profile fields from CVs: {exc}")
+                        _show_error("Could not fill profile fields from CVs", exc)
                 st.rerun()
         with pfcol2:
             st.caption(
@@ -3293,7 +3515,7 @@ with tabs[7]:
             "Suggest which personnel to include (AI)", disabled=not _suggest_ready,
             help=None if _suggest_ready else (
                 "You're out of bids -- see the Tender Analysis tab to upgrade." if not _access["allowed"]
-                else "Assign roles above and set an AI provider in the sidebar first."
+                else f"Assign roles above and {_AI_HINT_CLAUSE}."
             ),
          type="primary"):
             with st.spinner("Reading this project's scope to judge which discipline profiles are worth including..."):
@@ -3321,7 +3543,7 @@ with tabs[7]:
                         st.session_state[f"prof_include_{ekey_for_entry}"] = a.include_in_proposal
                     st.success("Recommendations applied -- review the ticks and reasons below, then adjust by hand as needed.")
                 except Exception as exc:
-                    st.error(f"Could not get AI recommendations: {exc}")
+                    _show_error("Could not get AI recommendations", exc)
             st.rerun()
 
         for entry in _profile_entries:
@@ -3368,7 +3590,7 @@ with tabs[7]:
                     "Refresh from CV", key=f"prof_refresh_{ekey}", disabled=not refresh_ready,
                     help=None if refresh_ready else (
                         "You're out of bids -- see the Tender Analysis tab to upgrade." if not _access["allowed"]
-                        else "Assign a name, upload a CV library (Upload Docs), and set an AI provider in the sidebar first."
+                        else f"Assign a name, upload a CV library (Upload Docs), and {_AI_HINT_CLAUSE}."
                     ),
                  type="primary"):
                     messages = []  # [(level, text), ...] -- rendered after the rerun, see result_key above
@@ -3829,7 +4051,7 @@ with tabs[8]:
                         help="Includes a Total row and the average rate across the project (total fee / total hours).",
                      type="primary")
                 else:
-                    st.caption("Excel export needs the 'openpyxl' package -- run `pip install openpyxl` and reload.")
+                    st.caption("Excel export isn't available right now -- please email hello@civilproposals.com if this keeps happening.")
 
                 if letter_hours_pie_png:
                     st.image(letter_hours_pie_png, use_container_width=True)
@@ -3947,7 +4169,7 @@ with tabs[8]:
                     if st.button("Refresh via AI knowledge (not a live web fetch)", disabled=not refresh_ready,
                                  help=None if refresh_ready else (
                                      "You're out of bids -- see the Tender Analysis tab to upgrade." if not _access["allowed"]
-                                     else "Configure an AI provider in the sidebar first."
+                                     else _AI_HINT_SENTENCE
                                  ), key="letter_refresh_btn", type="primary"):
                         fee_cap = st.session_state.analysis.fee_cap if st.session_state.analysis else None
                         with st.spinner("Asking the AI provider for its knowledge of published benchmarks..."):
@@ -4040,7 +4262,7 @@ with tabs[8]:
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                      type="primary")
                 else:
-                    st.caption("Excel export needs the 'openpyxl' package -- run `pip install openpyxl` and reload.")
+                    st.caption("Excel export isn't available right now -- please email hello@civilproposals.com if this keeps happening.")
 
                 # Chart the $ split once a total is available (matches the $ column and
                 # Excel export); otherwise chart the raw percentages.
@@ -4268,7 +4490,7 @@ with tabs[8]:
                     help="Includes a Total row and the average rate across the project (total fee / total hours).",
                  type="primary")
             else:
-                st.caption("Excel export needs the 'openpyxl' package -- run `pip install openpyxl` and reload.")
+                st.caption("Excel export isn't available right now -- please email hello@civilproposals.com if this keeps happening.")
 
             if hours_pie_png:
                 st.image(hours_pie_png, use_container_width=True)
@@ -4516,7 +4738,7 @@ with tabs[8]:
                 if st.button("Refresh via AI knowledge (not a live web fetch)", disabled=not refresh_ready,
                              help=None if refresh_ready else (
                                  "You're out of bids -- see the Tender Analysis tab to upgrade." if not _access["allowed"]
-                                 else "Configure an AI provider in the sidebar first."
+                                 else _AI_HINT_SENTENCE
                              ), key="refresh_btn", type="primary"):
                     fee_cap = (str(manual_total) if manual_total > 0
                                else (st.session_state.analysis.fee_cap if st.session_state.analysis else None))
@@ -4614,7 +4836,7 @@ with tabs[8]:
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                  type="primary")
             else:
-                st.caption("Excel export needs the 'openpyxl' package -- run `pip install openpyxl` and reload.")
+                st.caption("Excel export isn't available right now -- please email hello@civilproposals.com if this keeps happening.")
 
             # Chart the $ split once a total (manual or build-up) is available (matches
             # the other pie's units); otherwise chart the raw percentages, since that's
@@ -4957,7 +5179,7 @@ with tabs[9]:
                 )
                 st.success(f"Archived to the library under '{_archived['project_type']}' as {_archived['filename']}.")
             except Exception as exc:
-                st.error(f"Couldn't archive to the library: {exc}")
+                _show_error("Couldn't archive to the library", exc)
 
 
 # ---------------------------------------------------------------------------

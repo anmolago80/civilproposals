@@ -157,11 +157,15 @@ code change alone and add the worker later.
      rather than reusing the existing one: Railway runs one start command
      per service, and this needs its own)
    - **Variables**: `DATABASE_URL` referencing the same Postgres (e.g.
-     `${{Postgres.DATABASE_URL}}`) and `REDIS_URL` referencing the same
-     Redis as step 2. It does **not** need `ANTHROPIC_API_KEY` or any other
-     AI provider key — every AI call a job makes uses whichever key the
-     requesting user pasted into their own session (this app is BYOK), not
-     a key configured on the server.
+     `${{Postgres.DATABASE_URL}}`), `REDIS_URL` referencing the same Redis
+     as step 2, **and `ANTHROPIC_API_KEY`** referencing the same key as the
+     `civilproposals` app service (e.g. `${{civilproposals.ANTHROPIC_API_KEY}}`).
+     This app is SaaS-hosted, not BYOK — every job runs against the one
+     shared server-side Anthropic key, and that key is deliberately never
+     part of the job payload sent to Redis (only a redacted placeholder is —
+     see `modules/job_queue.py`'s docstring), so the worker process needs
+     its own copy of the real key to actually fill it back in before making
+     the AI call.
 4. Deploy both. Check the worker service's **Deploy Logs** for `*** Listening
    on civilproposals...` — that confirms it connected to Redis and is ready
    to pick up jobs.
