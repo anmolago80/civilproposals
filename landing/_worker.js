@@ -1,7 +1,7 @@
 // Worker entry point for the civilproposals.com Cloudflare project (see
-// wrangler.toml: run_worker_first routes /app and /app/* here; every other
-// path is handled by Cloudflare's static-asset serving before this script
-// ever runs, per the [assets] config).
+// wrangler.toml: run_worker_first == true routes EVERY request here first;
+// anything not matched below falls through to Cloudflare's static-asset
+// serving via the ASSETS binding, per the [assets] config).
 //
 // Jobs:
 //   1. www.civilproposals.com -> redirect (301) to the apex domain, so
@@ -10,8 +10,18 @@
 //      if www is actually routed to this Worker in the first place (a DNS
 //      question, not a code one) -- harmless no-op otherwise.
 //   2. /app and /app/*  -> reverse-proxy to the Streamlit app on Railway,
-//      so it lives at civilproposals.com/app instead of a separate
-//      app.civilproposals.com subdomain.
+//      so it WOULD live at civilproposals.com/app if that were the
+//      canonical entry point. It is NOT: app.civilproposals.com is set up
+//      as its own custom domain pointing straight at the same Railway
+//      service (confirmed live), and every CTA on this site (index.html,
+//      terms/privacy/cookie pages, the lead-capture confirmation email)
+//      links to that subdomain, never to civilproposals.com/app. This
+//      block is dead code from an earlier architecture that was never
+//      removed -- kept only because it's inert (nothing links to
+//      civilproposals.com/app, so it never actually runs) and there's a
+//      small chance something external still has it bookmarked/linked; if
+//      that risk is judged not worth carrying, this whole block plus
+//      BACKEND_HOST below can be deleted with no effect on the live site.
 //   3. POST /api/lead -> lead-capture form handler (see index.html's
 //      #lead-form) -- validates the email, then sends a notification to
 //      the team and a short confirmation to the person who signed up, both
@@ -40,14 +50,28 @@ const BACKEND_HOST = "civilproposals-production.up.railway.app";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-async function sendResendEmail(env, { to, subject, html }) {
+// EMAIL_RE only checks for "one @ and a dot, no whitespace" -- it does NOT
+// exclude HTML-meaningful characters (<, >, &, ", '), so a submitted value
+// like `<img src=x onerror=alert(1)>@x.com` still passes it and would
+// otherwise land verbatim inside the notification email's HTML body below.
+// Escape before interpolating into any HTML string this Worker builds.
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+async function sendResendEmail(env, { to, subject, html, headers }) {
   const resp = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${env.RESEND_API_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ from: env.RESEND_FROM_EMAIL, to: [to], subject, html }),
+    body: JSON.stringify({ from: env.RESEND_FROM_EMAIL, to: [to], subject, html, headers }),
   });
   if (!resp.ok) {
     const detail = await resp.text().catch(() => "");
@@ -55,7 +79,44 @@ async function sendResendEmail(env, { to, subject, html }) {
   }
 }
 
+// Best-effort per-IP rate limit using the Cache API, which (unlike KV or
+// Durable Objects) needs no new Cloudflare resource provisioned -- every
+// Worker already has access to caches.default. This is deliberately NOT a
+// substitute for a real Cloudflare Rate Limiting Rule (dashboard -> the
+// zone -> Security -> WAF -> Rate limiting rules, a few clicks, would
+// enforce this far more reliably at the edge across every Cloudflare PoP)
+// or a CAPTCHA/Turnstile challenge on the form itself -- both need
+// dashboard access this code change doesn't have, and are the stronger
+// fix; this just closes the gap in the meantime. Cache API entries are
+// best-effort (not guaranteed to be visible from every colo instantly,
+// can be evicted early under memory pressure) and CF-Connecting-IP is
+// spoofable-adjacent for anyone behind the same NAT/VPN egress, so this
+// raises the bar against a naive script hammering the endpoint -- it does
+// not stop a determined, distributed abuser.
+const LEAD_RATE_LIMIT_WINDOW_SECONDS = 60;
+
+async function isRateLimited(request) {
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  const cacheKey = new Request(`https://civilproposals-internal.invalid/lead-rate-limit/${ip}`);
+  const cache = caches.default;
+  if (await cache.match(cacheKey)) {
+    return true;
+  }
+  await cache.put(
+    cacheKey,
+    new Response("1", { headers: { "Cache-Control": `max-age=${LEAD_RATE_LIMIT_WINDOW_SECONDS}` } }),
+  );
+  return false;
+}
+
 async function handleLeadCapture(request, env) {
+  if (await isRateLimited(request)) {
+    return new Response(JSON.stringify({ error: "too many requests -- please try again in a minute" }), {
+      status: 429,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   let body;
   try {
     body = await request.json();
@@ -106,16 +167,33 @@ async function handleLeadCapture(request, env) {
   await sendResendEmail(env, {
     to: notifyTo,
     subject: "New CivilProposals landing page lead",
-    html: `<p>New lead signup from the landing page: <strong>${email}</strong></p>`,
+    html: `<p>New lead signup from the landing page: <strong>${escapeHtml(email)}</strong></p>`,
   });
 
   // Confirmation to the person -- best-effort, doesn't fail the request if
   // it errors, since the lead is already captured via the notification
   // above.
+  //
+  // List-Unsubscribe (RFC 2369) + List-Unsubscribe-Post (RFC 8058) below
+  // give this a real one-click "Unsubscribe" action in the major mail
+  // clients (Gmail, Outlook, Apple Mail all render one when both headers
+  // are present) without needing a hosted unsubscribe page or a Resend
+  // Audience set up -- neither of which this code change can provision on
+  // its own. It's a mailto: fallback, not automated: any opt-out email
+  // hello@ receives has to be manually kept off future sends today, since
+  // there's no actual recurring-send/list infrastructure behind this form
+  // yet (this confirmation is the only email that goes out right now) --
+  // see this file's module docstring / DEPLOY.md if a real Resend Audience
+  // + campaign system gets built later, which would replace this with
+  // Resend's own hosted unsubscribe link instead.
   try {
     await sendResendEmail(env, {
       to: email,
       subject: "Thanks for your interest in CivilProposals",
+      headers: {
+        "List-Unsubscribe": "<mailto:hello@civilproposals.com?subject=unsubscribe>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      },
       html:
         '<div style="font-family:sans-serif;font-size:15px;color:#0F172A;line-height:1.6;">' +
         "<p>Thanks for signing up -- we'll send occasional proposal-writing tips and " +
@@ -124,6 +202,9 @@ async function handleLeadCapture(request, env) {
         '<p><a href="https://app.civilproposals.com" style="background:#1D4ED8;color:#fff;' +
         'padding:10px 20px;border-radius:8px;text-decoration:none;display:inline-block;">' +
         "Try CivilProposals</a></p>" +
+        '<p style="color:#5A6B7A;font-size:12px;margin-top:24px;">Don\'t want these? Reply to this ' +
+        'email or write to <a href="mailto:hello@civilproposals.com">hello@civilproposals.com</a> ' +
+        "and we'll take you off the list.</p>" +
         "</div>",
     });
   } catch (err) {

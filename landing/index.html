@@ -67,6 +67,65 @@
   ]
 }
 </script>
+<!-- FAQPage schema -- same six Q&As shown in the FAQ section below, kept
+     word-for-word in sync with it (see the .faq-list further down); update
+     both together if either changes. -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Is this just ChatGPT with extra steps?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. General chat tools don't know how tender evaluation actually works: which parts of a brief are mandatory, how weightings map to page allocation, or what a compliance matrix needs to cover. CivilProposals is built specifically around that: it extracts scoring criteria straight from your brief, builds a weighted structure to match, and keeps a reusable library of your firm's own past proposals and CVs, so your next bid gets faster too, not just this one."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Will it invent staff, certifications, or project experience I never gave it?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. Every draft is grounded only in what you've actually uploaded or entered. Anything the tool doesn't genuinely know, a certification, a past project, a specific number, becomes a clearly marked placeholder for you to fill in, never a guess dressed up as fact."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How secure is what I upload?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Your tender briefs and company material are stored under your account only; other firms using CivilProposals can't see them. We use Claude (Anthropic) to power the AI drafting, and your data is never used to train their models. We're still a beta product and haven't completed formal compliance certifications like SOC 2 yet, so if that's a hard requirement for your firm, reach out before signing up and we'll be upfront about where things stand."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Who's responsible if something in the draft is wrong?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "You are, the same as you'd be with a first draft from a junior team member. CivilProposals produces a first pass, not a document that's ready to submit; your normal review process should still catch and correct anything before it goes to a client. Full detail in our Terms of Service."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Do I need a credit card to try it?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. Your first full bid is free, no card required. You'll only need to pay if you want to run a second one: $50 for a single bid, or $120/month for 3."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can I cancel the Monthly plan anytime?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes, anytime, directly from your account, no phone call or email required. You'll keep access through the end of whatever billing period you've already paid for."
+      }
+    }
+  ]
+}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -353,7 +412,7 @@
     </div>
 
     <div class="hero-shot-frame">
-      <img src="assets/app_screenshot_workspace.jpg" alt="CivilProposals workspace showing tracked progress and a live fee estimate">
+      <img src="assets/app_screenshot_workspace.jpg" alt="CivilProposals workspace showing tracked progress and a live fee estimate" width="1902" height="1009" loading="eager" fetchpriority="high">
     </div>
     <p class="hero-shot-caption">A real screenshot of the live app, mid-proposal: progress tracked step by step, with the discipline fee build-up and chart filling in as you go.</p>
   </div>

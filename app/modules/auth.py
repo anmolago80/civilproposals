@@ -774,7 +774,13 @@ SUBSCRIPTION_MONTHLY_BID_LIMIT = 3
 # treating these accounts as fully unlimited with no caveat, per product
 # decision. Lowercased/stripped to match how emails are stored (see
 # create_user()).
-UNLIMITED_ACCOUNTS = {"anmolago@icloud.com"}
+#
+# Includes both of Andrew's addresses on purpose: anmolago@hotmail.com is
+# the one actually used to log into the live production account (this only
+# had the icloud address before, which meant testing on the real account
+# was quietly burning real paid bids/trial limit). Keeping icloud too in
+# case it's a secondary test account.
+UNLIMITED_ACCOUNTS = {"anmolago@icloud.com", "anmolago@hotmail.com"}
 
 
 # ---------------------------------------------------------------------------

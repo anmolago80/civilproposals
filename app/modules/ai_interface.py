@@ -21,7 +21,10 @@ API keys/tokens are read from a config dict (normally built from
 from __future__ import annotations
 
 import json
+import random
 import re
+import sys
+import time
 
 
 class AIConfigError(Exception):
@@ -35,8 +38,22 @@ class AIProviderNotImplemented(Exception):
 DEFAULT_MODELS = {
     "OpenAI": "gpt-4o",
     "Azure OpenAI": "",  # deployment name is tenant-specific; user must supply it
+    # Verified against platform.claude.com's model-ids-and-versions docs
+    # (Aug 2026): dateless IDs like this are the CURRENT pinned-snapshot
+    # convention (not an evergreen alias) for this model generation, so
+    # this is correct as-is, not something that drifts.
     "Anthropic Claude": "claude-sonnet-5",
-    "Google Gemini": "gemini-1.5-pro",
+    # Was "gemini-1.5-pro" -- Google fully shut that model family down on
+    # 2025-09-29 (confirmed via ai.google.dev/gemini-api/docs/changelog),
+    # so every BYOK/desktop-mode user who'd left this at its default was
+    # getting a hard failure on every single Gemini call, not a slow
+    # response. "gemini-3.1-pro-preview" is the current, live, confirmed-
+    # working Pro-tier identifier as of Aug 2026 -- Google's Pro-tier naming
+    # has been through a fast churn of "-preview" suffixed releases lately,
+    # so if this starts failing again, check
+    # https://ai.google.dev/gemini-api/docs/changelog for whatever the
+    # current Pro-tier id is before assuming something else broke.
+    "Google Gemini": "gemini-3.1-pro-preview",
     "Microsoft 365 Copilot (Preview)": "",  # no model name -- Copilot doesn't take one
 }
 
@@ -262,7 +279,12 @@ def _call_copilot(prompt, system_message, config) -> str:
 
     full_prompt = f"{system_message.strip()}\n\n{prompt}" if system_message else prompt
     try:
-        return chat_once(access_token, full_prompt)
+        # Same transient-error retry as the other four providers (see
+        # _call_with_retry) -- applied here too, not just inside
+        # _call_with_resilience, so a rate limit/server hiccup partway
+        # through a long analysis doesn't throw away every chunk processed
+        # so far no matter which provider is selected.
+        return _call_with_retry(chat_once, access_token, full_prompt)
     except CopilotAPIError as exc:
         raise AIConfigError(str(exc)) from exc
 
@@ -310,10 +332,71 @@ def _is_max_tokens_unsupported_error(exc: Exception) -> bool:
     )
 
 
+MAX_TRANSIENT_RETRIES = 3
+BASE_RETRY_DELAY_SECONDS = 2.0
+
+
+def _is_transient_error(exc: Exception) -> bool:
+    """True for rate-limit (429), Anthropic's "overloaded" (529), and
+    common server-side/network transience (500/502/503/504, timeouts,
+    connection resets) -- signals that retrying the exact same request
+    after a short wait is likely to succeed, as opposed to a real
+    configuration/input problem (bad key, bad model name, malformed
+    request) that retrying would just repeat forever. Checked via
+    status_code first where the SDK exposes one (openai and anthropic both
+    do), falling back to the message text since google.generativeai's
+    exception types aren't as consistently shaped."""
+    status_code = getattr(exc, "status_code", None)
+    if status_code in (429, 500, 502, 503, 504, 529):
+        return True
+    text = str(exc).lower()
+    return any(s in text for s in (
+        "429", "rate limit", "rate_limit", "too many requests",
+        "529", "overloaded",
+        "500", "502", "503", "504", "server_error", "bad gateway", "service unavailable",
+        "timeout", "timed out", "connection reset", "connection error", "temporarily unavailable",
+    ))
+
+
+def _call_with_retry(fn, *args, **kwargs):
+    """Retries fn(*args, **kwargs) with exponential backoff + jitter on a
+    transient error (see _is_transient_error) before giving up. Without
+    this, a single 429/529 partway through a long tender analysis (which
+    makes one AI call per chunk, up to 17+ for a long brief) used to fail
+    the WHOLE analysis outright -- every chunk successfully processed
+    before that point thrown away -- even though the exact same request
+    almost always succeeds a few seconds later. A non-transient error (bad
+    API key, unknown model, malformed request) raises immediately on the
+    first attempt instead: retrying those would just waste time repeating
+    a failure that isn't going to change."""
+    last_exc = None
+    for attempt in range(MAX_TRANSIENT_RETRIES + 1):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:
+            if not _is_transient_error(exc) or attempt == MAX_TRANSIENT_RETRIES:
+                raise
+            last_exc = exc
+            delay = BASE_RETRY_DELAY_SECONDS * (2 ** attempt) + random.uniform(0, 1)
+            print(
+                f"[ai_interface] transient error (attempt {attempt + 1}/{MAX_TRANSIENT_RETRIES + 1}), "
+                f"retrying in {delay:.1f}s: {exc}",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
+    raise last_exc  # pragma: no cover -- loop above always returns or raises
+
+
 def _call_with_resilience(create_and_extract_fn, temperature: float, max_tokens: int) -> str:
     """
-    Wraps a provider call with two resilience layers that apply across all four
-    API-key providers, in order:
+    Wraps a provider call with three resilience layers that apply across all
+    four API-key providers, in order:
+
+    0. Every actual provider call below goes through _call_with_retry(),
+       which retries transient failures (rate limits, "overloaded",
+       server-side 5xx, timeouts) with exponential backoff before this
+       function's own retry layers below ever see the exception -- see that
+       function's docstring.
 
     1. Some newer/reasoning-mode models stop accepting a custom `temperature`
        at all (OpenAI's o-series is the well-known case; other providers have
@@ -341,7 +424,7 @@ def _call_with_resilience(create_and_extract_fn, temperature: float, max_tokens:
     """
     def _attempt(tokens: int, include_temperature: bool) -> str:
         kwargs = {"temperature": temperature} if include_temperature else {}
-        return create_and_extract_fn(tokens, **kwargs)
+        return _call_with_retry(create_and_extract_fn, tokens, **kwargs)
 
     def _attempt_with_temperature_fallback(tokens: int) -> str:
         try:

@@ -44,6 +44,7 @@ import sys
 from datetime import datetime, timezone
 
 import stripe
+from sqlalchemy.exc import IntegrityError
 
 from modules import db, email_utils
 
@@ -187,7 +188,19 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
         return None
 
     session = stripe.checkout.Session.retrieve(session_id)
-    if session.get("payment_status") not in ("paid", "no_payment_required") and session.get("status") != "complete":
+    # payment_status is the only field that actually says money changed
+    # hands. session.status=="complete" just means the Checkout FORM was
+    # completed -- for async payment methods (bank debits, some
+    # wallets/vouchers) that happens immediately while payment_status stays
+    # "unpaid" for hours/days until it actually settles (or fails). The
+    # previous `... and session.get("status") != "complete"` here was an
+    # AND, not an OR, so a complete-but-unpaid session slipped straight
+    # through and got credited immediately -- an attacker (or just an
+    # unlucky async payment) could get a bid/subscription for free, or for
+    # a payment that later fails entirely. payment_status alone is the
+    # correct and sufficient check; status is irrelevant to "was this
+    # actually paid".
+    if session.get("payment_status") not in ("paid", "no_payment_required"):
         return None
 
     user_id = session.get("client_reference_id")
@@ -218,7 +231,24 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
             db_user.bid_credits = (db_user.bid_credits or 0) + 1
             _receipt_kind = "bid"
         s.add(db.ProcessedCheckoutSession(session_id=session_id, user_id=db_user.id))
-        s.commit()
+        try:
+            s.commit()
+        except IntegrityError:
+            # The `already` check above and this insert aren't atomic --
+            # two tabs/requests hitting this same success URL at once (a
+            # very plausible double-tab scenario: someone completes
+            # checkout, then hits back+refresh, or Stripe's own redirect
+            # double-fires) can both pass the check before either commits,
+            # so the second commit here hits ProcessedCheckoutSession's
+            # session_id primary key and raises. Without this, that
+            # IntegrityError propagated all the way to the customer as a
+            # scary generic error screen immediately after paying
+            # successfully. Roll back this attempt's (redundant) credit and
+            # return the OTHER commit's already-applied result instead --
+            # same outcome as the `already` branch above, just discovered a
+            # few lines later.
+            s.rollback()
+            return s.query(db.User).filter(db.User.id == user_id).first()
         s.refresh(db_user)
 
     # Best-effort receipt email -- the purchase itself is already committed
