@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Only the homepage is listed -- terms-of-service.html, privacy-policy.html,
+     and cookie-policy.html all carry <meta name="robots" content="noindex">
+     on purpose (legal boilerplate, not content anyone should land on from
+     search), and listing noindex pages in a sitemap is a known anti-pattern
+     that just generates "Submitted URL marked noindex" warnings in Search
+     Console. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://civilproposals.com/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>

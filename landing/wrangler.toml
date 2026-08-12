@@ -2,6 +2,22 @@ name = "civilproposals"
 compatibility_date = "2026-08-11"
 main = "./_worker.js"
 
+# Lead-capture form (see index.html's #lead-form, handled in _worker.js).
+# RESEND_FROM_EMAIL is not sensitive, so it's fine here as a plain var --
+# same value already used on the Railway side, e.g.
+# "CivilProposals <noreply@civilproposals.com>". LEAD_NOTIFY_EMAIL is
+# optional (defaults to hello@civilproposals.com if omitted).
+#
+# RESEND_API_KEY is NOT set here on purpose -- it's a secret, so set it via:
+#   wrangler secret put RESEND_API_KEY
+# (run from this "landing" directory) or the Cloudflare dashboard -> Workers
+# & Pages -> civilproposals -> Settings -> Variables and Secrets. This is a
+# separate value from Railway's RESEND_API_KEY variable -- same Resend
+# account, but each platform needs its own copy of the key.
+[vars]
+RESEND_FROM_EMAIL = "CivilProposals <noreply@civilproposals.com>"
+LEAD_NOTIFY_EMAIL = "hello@civilproposals.com"
+
 [assets]
 # The landing page's own static files (this file lives in the same
 # "landing" directory that's configured as the project's Root directory in

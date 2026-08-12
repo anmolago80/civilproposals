@@ -3,10 +3,70 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CivilProposals: AI-assisted tender & proposal preparation for civil engineering firms</title>
-<meta name="description" content="Turn a tender brief into a structured first pass proposal in minutes. Built for civil engineering firms. 1 free bid on sign up, then from $50 a bid.">
+<title>CivilProposals: Tender Writing Software & Bid Writing AI for Civil Engineering Firms</title>
+<meta name="description" content="AI-assisted tender writing software and fee proposal generator for civil engineering firms. Turn a tender brief into a structured first pass proposal in minutes. 1 free bid on sign up, then from $50 a bid.">
+<link rel="canonical" href="https://civilproposals.com/">
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+
+<!-- Open Graph -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CivilProposals">
+<meta property="og:title" content="CivilProposals: Tender Writing Software & Bid Writing AI for Civil Engineering Firms">
+<meta property="og:description" content="Turn a tender brief into a structured first pass proposal in minutes. Built for civil engineering firms. 1 free bid on sign up, then from $50 a bid.">
+<meta property="og:url" content="https://civilproposals.com/">
+<meta property="og:image" content="https://civilproposals.com/assets/app_screenshot_workspace.jpg">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="CivilProposals: Tender Writing Software & Bid Writing AI for Civil Engineering Firms">
+<meta name="twitter:description" content="Turn a tender brief into a structured first pass proposal in minutes. Built for civil engineering firms. 1 free bid on sign up, then from $50 a bid.">
+<meta name="twitter:image" content="https://civilproposals.com/assets/app_screenshot_workspace.jpg">
+
+<!-- Structured data: Organization + SoftwareApplication (accurate facts only --
+     no fabricated ratings/review counts, since there's no real review data yet). -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "name": "CivilProposals",
+  "url": "https://civilproposals.com/",
+  "logo": "https://civilproposals.com/assets/logo_mark.png",
+  "email": "hello@civilproposals.com",
+  "sameAs": ["https://www.linkedin.com/company/civil-proposals"]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "CivilProposals",
+  "applicationCategory": "BusinessApplication",
+  "operatingSystem": "Web",
+  "description": "AI-assisted tender writing software and fee proposal generator for civil engineering firms. Extracts requirements from a tender brief, builds a weighted proposal structure, and drafts a first pass Word document.",
+  "url": "https://civilproposals.com/",
+  "offers": [
+    {
+      "@type": "Offer",
+      "name": "Free trial",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    {
+      "@type": "Offer",
+      "name": "Pay as you go",
+      "price": "50",
+      "priceCurrency": "USD"
+    },
+    {
+      "@type": "Offer",
+      "name": "Monthly",
+      "price": "120",
+      "priceCurrency": "USD"
+    }
+  ]
+}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -296,9 +356,10 @@
       We know the challenges you face every day because we face them too. Whether it's a small
       project with a simple scope, a brief buried in an email, a client who isn't quite sure what
       they want, or a major tender that takes days to read and weeks to prepare, CivilProposals is
-      designed to help. Built by civil engineers, for civil engineers, the platform assists you in
-      creating professional, well structured proposals faster, allowing you to focus on
-      understanding client needs and developing winning solutions.
+      designed to help. It's tender writing software and a fee proposal generator built specifically
+      for civil engineering firms, not a generic AI wrapper. Built by civil engineers, for civil
+      engineers, this bid writing AI assists you in creating professional, well structured proposals
+      faster, allowing you to focus on understanding client needs and developing winning solutions.
     </p>
   </div>
 </section>
@@ -589,6 +650,20 @@
   </div>
 </section>
 
+<section style="background:var(--ink);">
+  <div class="wrap" style="max-width:640px;text-align:center;">
+    <span class="promo-label">Not ready to upload a brief yet?</span>
+    <h2 class="section-title" style="color:#fff;">Get proposal-writing tips, and a heads-up when we ship</h2>
+    <p class="section-sub" style="color:#9CA3AF;">Occasional emails about new features and running better tenders. No spam, unsubscribe anytime.</p>
+    <form id="lead-form" style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:8px;">
+      <input type="text" name="company" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;" aria-hidden="true">
+      <input type="email" id="lead-email" name="email" required placeholder="you@firm.com" style="flex:1;min-width:240px;max-width:320px;padding:14px 18px;border-radius:10px;border:1.5px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:#fff;font-size:.95rem;font-family:inherit;">
+      <button type="submit" class="btn-primary" style="border:none;cursor:pointer;">Keep me posted</button>
+    </form>
+    <p id="lead-status" style="margin-top:14px;font-size:.88rem;color:#9CA3AF;" role="status"></p>
+  </div>
+</section>
+
 <footer class="site-footer">
   <div class="wrap footer-top">
     <div class="footer-brand">
@@ -625,6 +700,47 @@
     <div class="footer-copyright">Copyright &copy; 2026 CivilProposals. All rights reserved.</div>
   </div>
 </footer>
+
+<script>
+(function(){
+  var form = document.getElementById('lead-form');
+  if(!form) return;
+  form.addEventListener('submit', function(e){
+    e.preventDefault();
+    var status = document.getElementById('lead-status');
+    var emailField = document.getElementById('lead-email');
+    var email = emailField.value.trim();
+    var company = form.company.value; // honeypot -- real users never fill this
+    if(company){ return; }
+    var btn = form.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    status.textContent = 'Sending...';
+    fetch('/api/lead', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({email: email})
+    }).then(function(r){
+      if(!r.ok) throw new Error('request failed');
+      return r.json();
+    }).then(function(){
+      status.textContent = "Thanks -- you're on the list.";
+      form.reset();
+    }).catch(function(){
+      status.textContent = "Something went wrong -- please try again, or email hello@civilproposals.com directly.";
+    }).finally(function(){
+      btn.disabled = false;
+    });
+  });
+})();
+</script>
+
+<!-- Cloudflare Web Analytics -- cookieless, no consent banner required.
+     Replace YOUR_CF_BEACON_TOKEN below with your real token: Cloudflare
+     dashboard -> Analytics & Logs -> Web Analytics -> Add a site -> copies a
+     snippet with your token already filled in. Until replaced, this beacon
+     silently fails to load (no error visible to visitors) -- it just won't
+     record anything. -->
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "YOUR_CF_BEACON_TOKEN"}'></script>
 
 </body>
 </html>
