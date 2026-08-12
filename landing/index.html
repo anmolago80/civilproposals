@@ -50,19 +50,19 @@
       "@type": "Offer",
       "name": "Free trial",
       "price": "0",
-      "priceCurrency": "USD"
+      "priceCurrency": "AUD"
     },
     {
       "@type": "Offer",
       "name": "Pay as you go",
       "price": "50",
-      "priceCurrency": "USD"
+      "priceCurrency": "AUD"
     },
     {
       "@type": "Offer",
       "name": "Monthly",
       "price": "120",
-      "priceCurrency": "USD"
+      "priceCurrency": "AUD"
     }
   ]
 }
@@ -126,6 +126,19 @@
   ]
 }
 </script>
+<!-- Analytics: Cloudflare Web Analytics (free, cookieless -- consistent with
+     the Cookie Policy's "no analytics cookies" statement, since it sets none).
+     TWO-MINUTE SETUP, pick ONE of:
+       (a) Cloudflare dashboard -> Analytics & Logs -> Web Analytics -> add
+           civilproposals.com with "Automatic setup" ON -- Cloudflare injects
+           the beacon itself at the edge; leave the snippet below commented out.
+       (b) Same place, but with automatic setup OFF: copy the site token it
+           shows you, paste it over PASTE_TOKEN_HERE below, and uncomment the
+           script tag (also copy it onto the three legal pages if you want
+           their traffic counted too).
+     Until one of these is done, the site has NO visitor/conversion tracking.
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "PASTE_TOKEN_HERE"}'></script>
+-->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -221,7 +234,13 @@
     background:#fff;border:1px solid var(--border);border-radius:20px;
     box-shadow:0 24px 60px rgba(17,24,39,.08);
   }
-  .hero-shot-frame img{width:100%;display:block;border-radius:12px;}
+  /* height:auto is load-bearing here: the <img> tag carries explicit
+     width/height attributes (added so the browser reserves the right
+     aspect-ratio box before the JPEG loads -- no layout shift). Without
+     height:auto, CSS width:100% shrinks the width to the 920px frame but
+     the height attribute keeps rendering at its full fixed pixel value,
+     stretching the screenshot vertically into a distorted blow-up. */
+  .hero-shot-frame img{width:100%;height:auto;display:block;border-radius:12px;}
   .hero-shot-caption{
     max-width:920px;margin:16px auto 0;font-size:.85rem;color:var(--text-muted);text-align:center;
   }
@@ -606,7 +625,8 @@
     <h2 class="section-title">Pricing that pays for itself</h2>
     <p class="section-sub">
       A single bid can easily cost your firm $2,400 in staff time to prepare. CivilProposals
-      does half that work for you, starting at a fraction of the price.
+      does half that work for you, starting at a fraction of the price. All prices in
+      Australian dollars (AUD).
     </p>
 
     <div class="pricing-grid">

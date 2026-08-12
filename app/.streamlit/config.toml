@@ -14,11 +14,17 @@ font = "sans serif"
 headless = true
 enableCORS = false
 enableXsrfProtection = true
-# Served behind civilproposals.com/app via a Cloudflare Pages Function
-# reverse proxy (landing/functions/app/[[path]].js) -- no more app.
-# subdomain. Streamlit needs to know its own base path so it generates
-# correct asset/websocket URLs under /app/... instead of /...
-baseUrlPath = "app"
+# Served directly at app.civilproposals.com (a Railway custom domain
+# pointed straight at this service -- confirmed live via `railway domain`
+# and the Railway dashboard), NOT behind a civilproposals.com/app path
+# proxy -- that architecture was superseded (see landing/_worker.js's
+# top-of-file comment) but this file was never updated to match, so
+# Streamlit kept generating asset/websocket URLs under /app/... and
+# refusing to serve anything at "/", which is exactly what the custom
+# domain actually requests. Left as the default (root) base path so
+# Streamlit serves at "/" -- do NOT reintroduce "app" unless the site
+# goes back to path-based proxying.
+baseUrlPath = ""
 
 [browser]
 gatherUsageStats = false
