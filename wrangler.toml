@@ -4,6 +4,32 @@ compatibility_date = "2026-08-11"
 # Worker script lives in landing/ alongside the static site it serves.
 main = "./landing/_worker.js"
 
+# THIS is the wrangler.toml that actually matters for deploys: the
+# Cloudflare Workers Build config for this project has Root Directory set
+# to "/" (repo root) with Deploy command "npx wrangler deploy", so wrangler
+# runs from here and reads THIS file -- not landing/wrangler.toml. A copy
+# of this [vars] block also lives in landing/wrangler.toml purely so a
+# manual `wrangler deploy` run from inside landing/ still works the same
+# way; if you ever change these values, update both files.
+#
+# Lead-capture form (see landing/index.html's #lead-form, handled in
+# landing/_worker.js). RESEND_FROM_EMAIL is not sensitive, so it's fine
+# here as a plain var -- same value already used on the Railway side, e.g.
+# "CivilProposals <noreply@civilproposals.com>". LEAD_NOTIFY_EMAIL is
+# optional (defaults to hello@civilproposals.com if omitted).
+#
+# RESEND_API_KEY is NOT set here on purpose -- it's a secret, so set it via:
+#   wrangler secret put RESEND_API_KEY
+# (run from this repo's root, or from landing/ -- either works, since
+# wrangler resolves the target Worker by its `name` above, not by which
+# wrangler.toml you happened to run from) or the Cloudflare dashboard ->
+# Workers & Pages -> civilproposals -> Settings -> Variables and Secrets.
+# This is a separate value from Railway's RESEND_API_KEY variable -- same
+# Resend account, but each platform needs its own copy of the key.
+[vars]
+RESEND_FROM_EMAIL = "CivilProposals <noreply@civilproposals.com>"
+LEAD_NOTIFY_EMAIL = "hello@civilproposals.com"
+
 # Binds this Worker to www.civilproposals.com as well as the bare domain.
 # The Cloudflare dashboard's "Connect domain" flow under Domains only
 # accepts full apex/root domains, not subdomains like www -- this route

@@ -2,6 +2,13 @@ name = "civilproposals"
 compatibility_date = "2026-08-11"
 main = "./_worker.js"
 
+# NOTE: the Cloudflare Workers Build config for this project actually has
+# Root Directory set to "/" (the repo root) with Deploy command
+# "npx wrangler deploy" -- so real deploys (auto-deploy on push to main)
+# use ../wrangler.toml, NOT this file. This copy exists only so a manual
+# `wrangler deploy` run from inside this "landing" directory still works
+# the same way. Keep both files' [vars] in sync if you change either.
+#
 # Lead-capture form (see index.html's #lead-form, handled in _worker.js).
 # RESEND_FROM_EMAIL is not sensitive, so it's fine here as a plain var --
 # same value already used on the Railway side, e.g.
@@ -19,9 +26,10 @@ RESEND_FROM_EMAIL = "CivilProposals <noreply@civilproposals.com>"
 LEAD_NOTIFY_EMAIL = "hello@civilproposals.com"
 
 [assets]
-# The landing page's own static files (this file lives in the same
-# "landing" directory that's configured as the project's Root directory in
-# the Cloudflare dashboard, so "." means "this directory").
+# The landing page's own static files -- "." means "this directory" since
+# this copy of the config lives inside landing/ itself (see ../wrangler.toml
+# for the version used from the repo root, where the equivalent path is
+# "./landing").
 directory = "."
 binding = "ASSETS"
 # Everything under /app runs the Worker (_worker.js) first instead of
