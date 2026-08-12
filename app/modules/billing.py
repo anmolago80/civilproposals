@@ -40,11 +40,12 @@ redirect handler, not two.
 from __future__ import annotations
 
 import os
+import sys
 from datetime import datetime, timezone
 
 import stripe
 
-from modules import db
+from modules import db, email_utils
 
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "").strip()
 STRIPE_PRICE_ID = os.environ.get("STRIPE_PRICE_ID", "").strip()
@@ -210,14 +211,28 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
         if session.get("mode") == "subscription":
             db_user.stripe_subscription_id = session.get("subscription") or db_user.stripe_subscription_id
             db_user.subscription_status = "active"
+            _receipt_kind = "subscription"
         else:
             # Pay-as-you-go: always +1 -- create_bid_checkout_session always
             # requests quantity=1, so there's no line-item quantity to read.
             db_user.bid_credits = (db_user.bid_credits or 0) + 1
+            _receipt_kind = "bid"
         s.add(db.ProcessedCheckoutSession(session_id=session_id, user_id=db_user.id))
         s.commit()
         s.refresh(db_user)
-        return db_user
+
+    # Best-effort receipt email -- the purchase itself is already committed
+    # above regardless of whether this send succeeds, since a paying
+    # customer must never have their payment silently lost over an email
+    # provider hiccup. Previously Stripe's own receipt (generic, no mention
+    # of what CivilProposals-specific thing it unlocked) was the only
+    # confirmation anyone got.
+    try:
+        email_utils.send_purchase_receipt_email(db_user.email, _receipt_kind)
+    except Exception as exc:
+        print(f"[purchase_receipt_email] failed for {db_user.email}: {exc}", file=sys.stderr)
+
+    return db_user
 
 
 def refresh_subscription_status(user: db.User) -> db.User:
@@ -262,6 +277,7 @@ def refresh_subscription_status(user: db.User) -> db.User:
     )
 
     if new_status != user.subscription_status or period_rolled_over:
+        _entering_past_due = new_status == "past_due" and user.subscription_status != "past_due"
         with db.get_session() as s:
             db_user = s.query(db.User).filter(db.User.id == user.id).first()
             if db_user:
@@ -271,6 +287,20 @@ def refresh_subscription_status(user: db.User) -> db.User:
                     db_user.subscription_period_end = new_period_end
                 s.commit()
                 s.refresh(db_user)
+
+                # Best-effort failed-payment nudge -- fires once, on the
+                # transition INTO past_due (not on every subsequent login
+                # while still stuck there, since this runs on every login
+                # and would otherwise re-send every single time). Previously
+                # a failing card produced no outbound signal at all; the
+                # customer would only find out from the in-app banner on
+                # their next visit, if they even came back.
+                if _entering_past_due:
+                    try:
+                        email_utils.send_payment_failed_email(db_user.email)
+                    except Exception as exc:
+                        print(f"[payment_failed_email] failed for {db_user.email}: {exc}", file=sys.stderr)
+
                 return db_user
     return user
 
