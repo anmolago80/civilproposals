@@ -135,6 +135,20 @@ def extract_text_from_pdf(file_bytes: bytes, filename: str = "document.pdf",
     import fitz  # PyMuPDF
 
     doc = fitz.open(stream=file_bytes, filetype="pdf")
+    if doc.needs_pass:
+        # A password-protected PDF "opens" but every page read returns
+        # nothing -- without this check it looked like a silently empty
+        # brief. A human answer instead: what's wrong and what to do.
+        doc.close()
+        return ExtractedDocument(
+            filename=filename, text="",
+            warning=(
+                f"'{filename}' is password-protected, so its text can't be read. If you have "
+                f"the password, open it in a PDF viewer and save an unlocked copy (usually "
+                f"Print > Save as PDF), then upload that -- or email the file to "
+                f"hello@civilproposals.com and we'll process it for you."
+            ),
+        )
     page_count = doc.page_count
     do_structure = include_structure and page_count <= STRUCTURE_SCAN_PAGE_LIMIT
 

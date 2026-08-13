@@ -122,7 +122,14 @@ DATACLASS_SINGLE = {"tender_extracted": ExtractedDocument}
 # Binary fields, written into the zip as real files rather than JSON.
 BINARY_SINGLE = ["cover_hero_png", "weighting_chart_png", "org_chart_png"]  # bytes | None
 BINARY_LIST = ["project_photo_bytes", "branding_bytes"]          # list[bytes]
-BINARY_DICT = ["divider_images", "team_photos", "personnel_photos", "reference_project_photos"]  # dict[str, bytes]
+BINARY_DICT = [
+    "divider_images", "team_photos", "personnel_photos", "reference_project_photos",
+    # Returnable schedules (raw DOCX/XLSX bytes) unpacked from a tender
+    # package ZIP -- see modules/package_intake.py; consumed by the
+    # schedule filler. Saved with the project so a package uploaded once
+    # keeps its schedules across save/load.
+    "returnable_schedule_files",
+]  # dict[str, bytes]
 
 
 class ProjectLoadError(Exception):

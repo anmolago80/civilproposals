@@ -64,6 +64,7 @@ def _save_anthropic_key_to_env(key: str) -> None:
 from modules import (
     analytics,
     document_processor,
+    package_intake,
     ai_interface,
     tender_analyser,
     weighting_engine,
@@ -589,6 +590,7 @@ def _init_state():
                                         # re-upload can update/remove individual files (see the
                                         # Upload Documents tab) instead of replacing the whole category.
         "company_uploaded_flags": {},
+        "returnable_schedule_files": {},  # {filename: raw bytes} -- returnable schedules from a package ZIP (see package_intake)
         "project_photo_bytes": [],
         "branding_bytes": [],
         # Pre-filled from ANTHROPIC_API_KEY in a local .env file, if present (see
@@ -2271,26 +2273,68 @@ with tabs[1]:
     st.caption("The tender brief is required. Everything else is optional but strongly improves draft quality.")
 
     st.markdown(
-        "**Tender brief (required)** -- PDF, DOCX, or TXT. Sometimes a brief arrives as several "
-        "separate documents (e.g. the main RFT plus addenda, schedules, or annexures) -- upload "
-        "all of them here and they'll be combined into one brief. If you've already highlighted/"
-        "commented on any of them while reading, upload those marked-up copies -- your notes get read too."
+        "**Tender brief (required)** -- PDF, DOCX, TXT, or a whole tender-package **ZIP**. "
+        "Sometimes a brief arrives as several separate documents (e.g. the main RFT plus "
+        "addenda, schedules, or annexures) -- upload all of them here and they'll be combined "
+        "into one brief. A ZIP gets unpacked and sorted automatically: brief + addenda go into "
+        "the analysis, returnable schedules are kept aside for filling, drawings are set aside. "
+        "If you've already highlighted/commented on any document while reading, upload that "
+        "marked-up copy -- your notes get read too."
     )
     if st.session_state.get("_tender_uploader_version") is None:
         st.session_state._tender_uploader_version = 0
     tender_files = st.file_uploader(
-        "Upload the tender document(s)", type=["pdf", "docx", "txt"],
+        "Upload the tender document(s)", type=["pdf", "docx", "txt", "zip"],
         accept_multiple_files=True,
         key=f"tender_uploader_{st.session_state._tender_uploader_version}",
     )
     # Only (re)extract when the uploaded files actually change -- not on every rerun.
     if tender_files and _files_signature(tender_files) != st.session_state.get("_tender_files_sig"):
+        _zip_uploads = [f for f in tender_files if f.name.lower().endswith(".zip")]
+        _doc_uploads = [f for f in tender_files if not f.name.lower().endswith(".zip")]
+        _package_rows = []      # classification summary rows for the UI
+        _package_errors = []
+        _package_schedules = {}
         with st.spinner("Extracting text..." if len(tender_files) == 1 else f"Extracting text from {len(tender_files)} files..."):
-            per_file = [document_processor.extract_text_from_file(f) for f in tender_files]
+            per_file = [document_processor.extract_text_from_file(f) for f in _doc_uploads]
+            for _zf in _zip_uploads:
+                _pkg = package_intake.process_zip(_zf.getvalue(), _zf.name)
+                if _pkg.fatal_error:
+                    _package_errors.append(_pkg.fatal_error)
+                    continue
+                per_file.extend(f.extracted for f in _pkg.briefs + _pkg.addenda if f.extracted)
+                for _sched in _pkg.schedules:
+                    if _sched.file_bytes:
+                        _package_schedules[_sched.filename.rsplit("/", 1)[-1]] = _sched.file_bytes
+                for _cf in _pkg.all_files():
+                    _package_rows.append({
+                        "File": _cf.filename,
+                        "Filed as": package_intake.CATEGORY_LABELS.get(_cf.category, _cf.category),
+                        "Why / what to do": _cf.reason,
+                        "_category": _cf.category,
+                    })
+                _package_errors.extend(_pkg.warnings)
             extracted = document_processor.combine_extracted_documents(per_file)
         st.session_state._tender_files_sig = _files_signature(tender_files)
+        st.session_state._package_intake_rows = _package_rows or None
+        st.session_state._package_intake_notes = _package_errors or None
+        if _package_schedules:
+            # Kept for the returnable-schedule filler -- merged, not replaced,
+            # same rationale as merge_extracted_material() for company files.
+            st.session_state.returnable_schedule_files = {
+                **(st.session_state.get("returnable_schedule_files") or {}),
+                **_package_schedules,
+            }
         if extracted.warning and not extracted.text:
             st.session_state._tender_extract_error = extracted.warning
+        elif not extracted.text and _package_rows:
+            # ZIP-only upload that contained no analysable brief/addenda --
+            # a coherent outcome, not an error: say what WAS found instead.
+            st.session_state._tender_extract_error = (
+                "No brief or addenda were found in that package (see the breakdown below "
+                "for how each file was filed). Upload the brief itself -- as a PDF/DOCX, "
+                "or in another ZIP -- to run the analysis."
+            )
         else:
             # A genuinely new/changed brief invalidates everything derived
             # from the old one -- see _reset_downstream_from_brief(). Runs
@@ -2303,6 +2347,35 @@ with tabs[1]:
 
     if st.session_state.get("_tender_extract_error"):
         st.error(st.session_state._tender_extract_error)
+
+    # Package (ZIP) classification breakdown -- persists across reruns so
+    # the user can always see where each file in the package ended up.
+    if st.session_state.get("_package_intake_notes"):
+        for _note in st.session_state._package_intake_notes:
+            st.warning(_note)
+    if st.session_state.get("_package_intake_rows"):
+        with st.expander("Tender package breakdown -- how each file was filed", expanded=True):
+            _rows = st.session_state._package_intake_rows
+            st.dataframe(
+                [{k: v for k, v in r.items() if not k.startswith("_")} for r in _rows],
+                use_container_width=True, hide_index=True,
+            )
+            _n_sched = sum(1 for r in _rows if r["_category"] == "schedule")
+            _n_drawings = sum(1 for r in _rows if r["_category"] == "drawing")
+            _n_unreadable = sum(1 for r in _rows if r["_category"] == "unreadable")
+            if _n_sched:
+                st.info(
+                    f"{_n_sched} returnable schedule(s) were kept aside -- see the "
+                    f"**Returnable Schedules** section on the Export Pack tab to fill them "
+                    f"from this project's data."
+                )
+            if _n_drawings:
+                st.caption(f"{_n_drawings} drawing/image file(s) were set aside -- drawings aren't used in the text analysis.")
+            if _n_unreadable:
+                st.markdown(
+                    f"{_n_unreadable} file(s) couldn't be read -- each row above says why and how to fix it, "
+                    f"or [email us the file]({package_intake.support_mailto('tender file')}) and we'll process it for you."
+                )
 
     _ext = st.session_state.tender_extracted
     if _ext is not None and _ext.text:
