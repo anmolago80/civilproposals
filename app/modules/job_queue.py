@@ -208,22 +208,48 @@ def _resolve_server_api_key(ai_config: dict) -> dict:
     }
 
 
-def run_tender_analysis_job(document_text: str, annotations, ai_config: dict, **kwargs):
+def _apply_usage_context(usage_context: dict | None, default_purpose: str) -> None:
+    """Sets ai_interface's cost-attribution context for this worker-side job
+    run (see ai_interface.set_usage_context / db.AiCallLog). The context
+    dict is plain strings (user id, project key/name) -- safe to pickle into
+    the job payload, unlike an API key. Best-effort: attribution failing
+    must never fail the job itself."""
+    try:
+        from modules import ai_interface
+        usage_context = usage_context or {}
+        ai_interface.set_usage_context(
+            user_id=usage_context.get("user_id"),
+            project_key=usage_context.get("project_key", ""),
+            project_name=usage_context.get("project_name", ""),
+            purpose=usage_context.get("purpose") or default_purpose,
+        )
+    except Exception:
+        pass
+
+
+def run_tender_analysis_job(document_text: str, annotations, ai_config: dict,
+                            usage_context: dict | None = None, **kwargs):
     """Queued-job entry point for tender_analyser.analyse_tender -- app.py
     enqueues THIS function for the SaaS/queued path (instead of enqueuing
     analyse_tender directly) specifically so the real Anthropic key never
     has to be part of the pickled job payload. `ai_config` arrives here
     redacted (api_key="") and gets re-filled from this worker process's own
     ANTHROPIC_API_KEY env var immediately below, right before the real call
-    -- see this module's docstring for the full rationale."""
+    -- see this module's docstring for the full rationale.
+
+    `usage_context` (optional) attributes this job's AI calls to a
+    user/project for per-bid cost logging -- see _apply_usage_context()."""
+    _apply_usage_context(usage_context, "tender_analysis")
     return tender_analyser.analyse_tender(
         document_text, annotations, _resolve_server_api_key(ai_config), **kwargs
     )
 
 
-def run_draft_generation_job(sections, analysis, company_material_text: dict, ai_config: dict, **kwargs):
+def run_draft_generation_job(sections, analysis, company_material_text: dict, ai_config: dict,
+                             usage_context: dict | None = None, **kwargs):
     """Queued-job entry point for draft_generator.generate_all_drafts -- same
     rationale and mechanism as run_tender_analysis_job() above."""
+    _apply_usage_context(usage_context, "draft_generation")
     return draft_generator.generate_all_drafts(
         sections, analysis, company_material_text, _resolve_server_api_key(ai_config), **kwargs
     )

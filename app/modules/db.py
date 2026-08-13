@@ -27,7 +27,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    create_engine, Column, String, Integer, DateTime, Boolean, LargeBinary,
+    create_engine, Column, String, Integer, Float, DateTime, Boolean, LargeBinary,
     ForeignKey, Text, select, func, UniqueConstraint, inspect, text,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
@@ -275,6 +275,132 @@ class Job(Base):
     created_at = Column(DateTime, default=_now)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
     error_message = Column(Text, default="")
+
+
+class AiCallLog(Base):
+    """One row per individual AI provider call made anywhere in the app (web
+    process or worker process) -- provider, model, token counts, and an
+    estimated cost in USD, attributed to the user/project that triggered it
+    via ai_interface.set_usage_context(). Written best-effort by
+    ai_interface._record_usage(): a logging failure must never fail (or slow
+    down) the AI call itself, so everything about this table is optional
+    from the caller's point of view.
+
+    estimated_cost_usd is NULL (not 0) when the model's pricing isn't in
+    ai_interface.MODEL_PRICES_PER_MTOK -- an unknown cost and a free call
+    are different facts, and the admin rollup below reports "N calls with
+    unpriced models" rather than silently under-counting."""
+    __tablename__ = "ai_call_log"
+
+    id = Column(String, primary_key=True, default=_uid)
+    # Nullable on purpose: desktop/BYOK mode has no logged-in user, and a
+    # worker-side call that somehow arrives without context should still be
+    # counted in the global total rather than dropped.
+    user_id = Column(String, index=True, nullable=True)
+    project_key = Column(String, index=True, default="")
+    project_name = Column(String, default="")
+    purpose = Column(String, default="")  # e.g. "tender_analysis", "draft_generation"
+    provider = Column(String, default="")
+    model = Column(String, default="")
+    input_tokens = Column(Integer, nullable=True)
+    output_tokens = Column(Integer, nullable=True)
+    estimated_cost_usd = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=_now)
+
+
+def log_ai_call(user_id: str | None, project_key: str, project_name: str, purpose: str,
+                provider: str, model: str, input_tokens: int | None,
+                output_tokens: int | None, estimated_cost_usd: float | None) -> None:
+    """Best-effort insert -- see AiCallLog. Callers must wrap in try/except
+    (ai_interface._record_usage does); this function itself doesn't swallow
+    errors so tests can still see them."""
+    with get_session() as s:
+        s.add(AiCallLog(
+            user_id=user_id or None,
+            project_key=(project_key or "")[:512],
+            project_name=(project_name or "")[:512],
+            purpose=(purpose or "")[:64],
+            provider=(provider or "")[:64],
+            model=(model or "")[:128],
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            estimated_cost_usd=estimated_cost_usd,
+        ))
+        s.commit()
+
+
+def ai_cost_summary(limit_projects: int = 25) -> dict:
+    """Admin rollup for app.py's admin-only AI cost panel. Returns
+    {"total_cost_usd", "total_calls", "unpriced_calls", "per_project":
+    [{"project_name", "project_key", "user_id", "calls", "cost_usd",
+    "input_tokens", "output_tokens"}, ...]} across ALL users (the caller is
+    responsible for gating this behind is_admin)."""
+    with get_session() as s:
+        total_cost = s.query(func.coalesce(func.sum(AiCallLog.estimated_cost_usd), 0.0)).scalar() or 0.0
+        total_calls = s.query(func.count(AiCallLog.id)).scalar() or 0
+        unpriced = s.query(func.count(AiCallLog.id)).filter(AiCallLog.estimated_cost_usd.is_(None)).scalar() or 0
+        rows = (
+            s.query(
+                AiCallLog.project_key,
+                func.max(AiCallLog.project_name),
+                func.max(AiCallLog.user_id),
+                func.count(AiCallLog.id),
+                func.coalesce(func.sum(AiCallLog.estimated_cost_usd), 0.0),
+                func.coalesce(func.sum(AiCallLog.input_tokens), 0),
+                func.coalesce(func.sum(AiCallLog.output_tokens), 0),
+            )
+            .group_by(AiCallLog.project_key)
+            .order_by(func.coalesce(func.sum(AiCallLog.estimated_cost_usd), 0.0).desc())
+            .limit(limit_projects)
+            .all()
+        )
+    return {
+        "total_cost_usd": float(total_cost),
+        "total_calls": int(total_calls),
+        "unpriced_calls": int(unpriced),
+        "per_project": [
+            {
+                "project_key": r[0] or "(no project)",
+                "project_name": r[1] or "(no project)",
+                "user_id": r[2] or "",
+                "calls": int(r[3]),
+                "cost_usd": float(r[4]),
+                "input_tokens": int(r[5]),
+                "output_tokens": int(r[6]),
+            }
+            for r in rows
+        ],
+    }
+
+
+def project_ai_cost(project_key: str) -> dict:
+    """Cost rollup for ONE project -- used to show a per-bid cost figure.
+    Returns {"calls", "cost_usd", "input_tokens", "output_tokens",
+    "unpriced_calls"}."""
+    project_key = (project_key or "").strip()
+    with get_session() as s:
+        row = (
+            s.query(
+                func.count(AiCallLog.id),
+                func.coalesce(func.sum(AiCallLog.estimated_cost_usd), 0.0),
+                func.coalesce(func.sum(AiCallLog.input_tokens), 0),
+                func.coalesce(func.sum(AiCallLog.output_tokens), 0),
+            )
+            .filter(AiCallLog.project_key == project_key)
+            .first()
+        )
+        unpriced = (
+            s.query(func.count(AiCallLog.id))
+            .filter(AiCallLog.project_key == project_key, AiCallLog.estimated_cost_usd.is_(None))
+            .scalar() or 0
+        )
+    return {
+        "calls": int(row[0] or 0),
+        "cost_usd": float(row[1] or 0.0),
+        "input_tokens": int(row[2] or 0),
+        "output_tokens": int(row[3] or 0),
+        "unpriced_calls": int(unpriced),
+    }
 
 
 def init_db() -> None:

@@ -251,6 +251,154 @@ def _clear_cookie_token() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Login attempt throttling
+#
+# 5 failed attempts (per email OR per client IP) inside a 15-minute window
+# locks that email/IP out of the login form for 15 minutes, with a clear
+# message saying so. Counters live in Redis (same REDIS_URL the job queue
+# uses) so they're shared across the web process's threads AND survive a
+# redeploy mid-attack; when Redis isn't configured or is down, a
+# per-process in-memory fallback keeps the throttle working locally rather
+# than silently switching off. Every failure path here degrades to "allow
+# the attempt" -- a rate limiter outage must never lock legitimate users
+# out of their accounts.
+# ---------------------------------------------------------------------------
+
+LOGIN_MAX_FAILURES = 5
+LOGIN_LOCKOUT_SECONDS = 15 * 60
+LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
+
+_LOGIN_REDIS_URL = os.environ.get("REDIS_URL", "").strip()
+_login_redis_client = None
+# In-memory fallback: {key: (failure_count, window_expiry_ts, lockout_expiry_ts)}
+_login_failures_local: dict[str, tuple[int, float, float]] = {}
+
+
+def _login_redis():
+    """Lazy Redis client with short timeouts -- None when unavailable."""
+    global _login_redis_client
+    if not _LOGIN_REDIS_URL:
+        return None
+    if _login_redis_client is None:
+        try:
+            import redis as _redis
+            _login_redis_client = _redis.Redis.from_url(
+                _LOGIN_REDIS_URL, socket_timeout=2, socket_connect_timeout=2,
+            )
+        except Exception:
+            return None
+    return _login_redis_client
+
+
+def _client_ip() -> str:
+    """Best-effort client IP. Railway (and any standard reverse proxy)
+    forwards the real client address in X-Forwarded-For; the first entry is
+    the original client. Falls back to a fixed placeholder -- which
+    effectively makes the IP counter a global one -- rather than failing."""
+    try:
+        forwarded = (st.context.headers.get("X-Forwarded-For", "") or "").strip()
+        if forwarded:
+            return forwarded.split(",")[0].strip()[:64]
+    except Exception:
+        pass
+    return "unknown"
+
+
+def _throttle_keys(email: str) -> list[str]:
+    email_norm = (email or "").strip().lower()
+    email_digest = hashlib.sha256(email_norm.encode("utf-8")).hexdigest()[:24]
+    return [f"cp:loginfail:email:{email_digest}", f"cp:loginfail:ip:{_client_ip()}"]
+
+
+def login_lockout_remaining(email: str) -> int:
+    """Seconds until this email/IP may try logging in again -- 0 when not
+    locked out. Checks both the per-email and per-IP lockouts and returns
+    the longer one."""
+    remaining = 0
+    r = _login_redis()
+    for key in _throttle_keys(email):
+        lock_key = key + ":lock"
+        if r is not None:
+            try:
+                ttl = r.ttl(lock_key)
+                if ttl and ttl > 0:
+                    remaining = max(remaining, int(ttl))
+                continue
+            except Exception:
+                pass  # fall through to local
+        entry = _login_failures_local.get(key)
+        if entry:
+            _, _, lock_until = entry
+            now = datetime.now(timezone.utc).timestamp()
+            if lock_until > now:
+                remaining = max(remaining, int(lock_until - now))
+    return remaining
+
+
+def record_login_failure(email: str) -> int:
+    """Registers one failed login attempt against both the email and the
+    client IP. Returns how many attempts remain before lockout (0 means the
+    lockout just started). Never raises."""
+    remaining_attempts = LOGIN_MAX_FAILURES
+    r = _login_redis()
+    now = datetime.now(timezone.utc).timestamp()
+    for key in _throttle_keys(email):
+        count = None
+        if r is not None:
+            try:
+                pipe = r.pipeline()
+                pipe.incr(key)
+                pipe.expire(key, LOGIN_FAILURE_WINDOW_SECONDS)
+                count = int(pipe.execute()[0])
+                if count >= LOGIN_MAX_FAILURES:
+                    r.set(key + ":lock", "1", ex=LOGIN_LOCKOUT_SECONDS)
+            except Exception:
+                count = None
+        if count is None:
+            # Local fallback (per-process). Reset the window if it expired.
+            prev_count, window_until, lock_until = _login_failures_local.get(key, (0, 0.0, 0.0))
+            if window_until < now:
+                prev_count = 0
+            count = prev_count + 1
+            new_lock_until = lock_until
+            if count >= LOGIN_MAX_FAILURES:
+                new_lock_until = now + LOGIN_LOCKOUT_SECONDS
+            _login_failures_local[key] = (count, now + LOGIN_FAILURE_WINDOW_SECONDS, new_lock_until)
+            # Opportunistic cleanup so this dict can't grow unboundedly.
+            if len(_login_failures_local) > 5000:
+                _login_failures_local.clear()
+        remaining_attempts = min(remaining_attempts, max(0, LOGIN_MAX_FAILURES - count))
+    return remaining_attempts
+
+
+def clear_login_failures(email: str) -> None:
+    """Called on a successful login -- a legitimate user who finally got
+    their password right shouldn't stay one typo away from lockout. The
+    lockout keys themselves are deliberately NOT cleared: a success during
+    an active lockout shouldn't be possible (the form is blocked), and
+    clearing them here would let an attacker reset the lock by knowing one
+    valid password for any account at the same IP. Never raises."""
+    r = _login_redis()
+    for key in _throttle_keys(email):
+        if r is not None:
+            try:
+                r.delete(key)
+                continue
+            except Exception:
+                pass
+        # Local fallback: reset the failure count but keep any active
+        # lockout, mirroring the Redis behaviour above (which deletes the
+        # counter key but not the separate :lock key).
+        entry = _login_failures_local.get(key)
+        if entry:
+            _, _, lock_until = entry
+            if lock_until > datetime.now(timezone.utc).timestamp():
+                _login_failures_local[key] = (0, 0.0, lock_until)
+            else:
+                _login_failures_local.pop(key, None)
+
+
+# ---------------------------------------------------------------------------
 # User lookup / creation
 # ---------------------------------------------------------------------------
 
@@ -577,11 +725,21 @@ def require_login() -> db.User:
     rendering any of the app's real tabs."""
     user = current_user()
     if user:
+        # Deferred signup-funnel event from the run that created the account
+        # -- see the signup submit handler below for why it can't fire on
+        # that run itself (st.rerun() races the component's mount).
+        if st.session_state.pop("_signup_event_pending", False):
+            from modules import analytics
+            analytics.track_event("Signup Completed", once_per_session=False)
         if user.accepted_terms_at is None:
             _render_terms_gate(user)  # always st.stop()s
         return user
 
     from modules import branding  # imported here to avoid a circular import at module load time
+    from modules import analytics
+
+    # Signup-funnel step 1: someone reached the login/signup screen.
+    analytics.track_event("Auth Screen View")
 
     st.markdown(
         """
@@ -638,12 +796,38 @@ def require_login() -> db.User:
                 password = st.text_input("Password", type="password")
                 submitted = st.form_submit_button("Log in", type="primary", use_container_width=True)
             if submitted:
-                user = authenticate(email, password)
-                if user:
-                    log_in(user)
-                    st.rerun()
+                lockout_seconds = login_lockout_remaining(email)
+                if lockout_seconds > 0:
+                    minutes = max(1, (lockout_seconds + 59) // 60)
+                    st.error(
+                        f"Too many failed sign-in attempts. For your account's security, "
+                        f"logging in is paused for about {minutes} more minute"
+                        f"{'s' if minutes != 1 else ''} -- please try again then, or use "
+                        f"\"Forgot password?\" below to reset your password."
+                    )
                 else:
-                    st.error("Incorrect email or password.")
+                    user = authenticate(email, password)
+                    if user:
+                        clear_login_failures(email)
+                        log_in(user)
+                        st.rerun()
+                    else:
+                        attempts_left = record_login_failure(email)
+                        if attempts_left <= 0:
+                            minutes = LOGIN_LOCKOUT_SECONDS // 60
+                            st.error(
+                                f"Incorrect email or password. Too many failed attempts -- "
+                                f"logging in is now paused for {minutes} minutes. You can "
+                                f"use \"Forgot password?\" below to reset your password."
+                            )
+                        elif attempts_left <= 2:
+                            st.error(
+                                f"Incorrect email or password. {attempts_left} attempt"
+                                f"{'s' if attempts_left != 1 else ''} left before sign-in "
+                                f"is paused for {LOGIN_LOCKOUT_SECONDS // 60} minutes."
+                            )
+                        else:
+                            st.error("Incorrect email or password.")
 
             with st.popover("Forgot password?"):
                 st.caption("Enter your account email and we'll send a link to reset your password.")
@@ -689,6 +873,15 @@ def require_login() -> db.User:
                     try:
                         user = create_user(email, password, name, firm_name)
                         accept_terms(user)
+                        # Signup-funnel step 2: account actually created.
+                        # Deferred to the NEXT script run (see the flag
+                        # check at the top of require_login) -- firing the
+                        # event component here, immediately before
+                        # st.rerun(), loses the same mount race the session
+                        # cookie write does (see log_in()'s comment): the
+                        # rerun tears the component down before its script
+                        # ever executes in the browser.
+                        st.session_state["_signup_event_pending"] = True
                         log_in(user)
                         st.rerun()
                     except ValueError as e:

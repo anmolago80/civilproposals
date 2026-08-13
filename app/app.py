@@ -62,6 +62,7 @@ def _save_anthropic_key_to_env(key: str) -> None:
     _ENV_PATH.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 
 from modules import (
+    analytics,
     document_processor,
     ai_interface,
     tender_analyser,
@@ -798,7 +799,20 @@ def _run_job_or_inline(job_type, func, args=(), kwargs=None, progress=None,
 
     enqueue_func = queue_func or func
     enqueue_args = args if queue_args is None else queue_args
-    job_id = job_queue.enqueue(current_user.id, job_type, enqueue_func, *enqueue_args, **kwargs)
+    enqueue_kwargs = dict(kwargs)
+    if queue_func is not None:
+        # Both job_queue.run_*_job wrappers accept usage_context -- plain
+        # strings attributing the job's AI calls to this user/project for
+        # per-bid cost logging (db.AiCallLog). Only added when a wrapper is
+        # in use: a future call site that enqueues its function directly
+        # shouldn't get a kwarg it never asked for.
+        enqueue_kwargs["usage_context"] = {
+            "user_id": current_user.id,
+            "project_key": _current_project_key(),
+            "project_name": st.session_state.get("project_name", ""),
+            "purpose": job_type,
+        }
+    job_id = job_queue.enqueue(current_user.id, job_type, enqueue_func, *enqueue_args, **enqueue_kwargs)
     if progress:
         progress.progress(0.05, text=queued_text)
 
@@ -1306,6 +1320,20 @@ def _ensure_divider_config(sections) -> None:
 
 _init_state()
 
+# Attribute every AI call made inline in THIS script run (i.e. not via the
+# job queue -- that path carries its own usage_context, see
+# _run_job_or_inline) to the logged-in user and current project, for
+# per-bid cost logging (db.AiCallLog). Re-set on every rerun because the
+# project fields can change between runs. Best-effort on purpose.
+try:
+    ai_interface.set_usage_context(
+        user_id=current_user.id if (IS_SAAS_MODE and current_user) else None,
+        project_key=_current_project_key(),
+        project_name=st.session_state.get("project_name", ""),
+    )
+except Exception:
+    pass
+
 
 # ---------------------------------------------------------------------------
 # Workflow progress -- computed here (before the sidebar renders) so the
@@ -1443,6 +1471,38 @@ with st.sidebar:
         "AI-generated content -- review before submitting. "
         "[Full Terms of Service](https://civilproposals.com/terms-of-service.html)"
     )
+
+    # Admin-only AI cost rollup (see db.AiCallLog / db.ai_cost_summary) --
+    # never rendered for regular users. Read-only, so any failure here is
+    # non-fatal by design: an observability panel must not be able to take
+    # the sidebar down with it.
+    if IS_SAAS_MODE and current_user and getattr(current_user, "is_admin", False):
+        with st.expander("AI cost (admin)"):
+            try:
+                _cost = db.ai_cost_summary()
+                st.metric("Total estimated AI cost", f"${_cost['total_cost_usd']:.2f}")
+                st.caption(
+                    f"{_cost['total_calls']} calls logged"
+                    + (f" ({_cost['unpriced_calls']} with unpriced models -- token counts "
+                       f"recorded, cost unknown)" if _cost["unpriced_calls"] else "")
+                )
+                if _cost["per_project"]:
+                    st.dataframe(
+                        [
+                            {
+                                "Project": p["project_name"],
+                                "Calls": p["calls"],
+                                "Est. cost (USD)": round(p["cost_usd"], 2),
+                                "Tokens in": p["input_tokens"],
+                                "Tokens out": p["output_tokens"],
+                            }
+                            for p in _cost["per_project"]
+                        ],
+                        use_container_width=True, hide_index=True,
+                    )
+            except Exception as _exc:
+                st.caption(f"Cost data unavailable right now: {_exc}")
+
     # "My projects" / "This computer" and "Export / import a file" used to
     # live here, stacked below the steps. Moved into two popovers in the
     # fixed top-right banner instead (see _render_my_projects_popover() and
@@ -2634,6 +2694,8 @@ with tabs[2]:
             st.success("Tender analysis complete.")
             if IS_SAAS_MODE and current_user:
                 auth.record_proposal_usage(current_user, _project_key, st.session_state.project_name)
+                # Signup-funnel step 3 (activation): a bid actually analysed.
+                analytics.track_event("Bid Analysed")
         except Exception as exc:
             _show_error("Analysis failed", exc)
 

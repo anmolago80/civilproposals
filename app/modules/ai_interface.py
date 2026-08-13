@@ -20,6 +20,7 @@ API keys/tokens are read from a config dict (normally built from
 
 from __future__ import annotations
 
+import contextvars
 import json
 import random
 import re
@@ -58,6 +59,100 @@ DEFAULT_MODELS = {
 }
 
 PROVIDERS = list(DEFAULT_MODELS.keys())
+
+
+# ---------------------------------------------------------------------------
+# Per-call cost logging (see db.AiCallLog)
+#
+# Every provider adapter below calls _record_usage() with the token counts
+# its response reported. Attribution (who/which project) comes from a
+# contextvar set via set_usage_context() -- a contextvar (not a module
+# global) because the Streamlit web process serves many users' script runs
+# from one process, and the RQ worker sets it per-job (see
+# job_queue.run_*_job). Logging is strictly best-effort: any failure here is
+# printed to stderr and swallowed, because a cost-accounting hiccup must
+# never fail a user's actual AI call mid-tender.
+# ---------------------------------------------------------------------------
+
+_usage_context: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "ai_usage_context", default=None
+)
+
+# Approximate USD per MILLION tokens (input, output). These are estimates
+# for internal cost visibility only -- update them when provider pricing
+# changes; an unknown model logs its token counts with cost NULL rather
+# than guessing. Last reviewed: Aug 2026.
+MODEL_PRICES_PER_MTOK: dict[str, tuple[float, float]] = {
+    # Anthropic
+    "claude-sonnet-5": (3.00, 15.00),
+    "claude-sonnet-4-5": (3.00, 15.00),
+    "claude-haiku-4-5": (1.00, 5.00),
+    "claude-opus-4-6": (15.00, 75.00),
+    # OpenAI
+    "gpt-4o": (2.50, 10.00),
+    "gpt-4o-mini": (0.15, 0.60),
+    # Google
+    "gemini-3.1-pro-preview": (1.25, 10.00),
+}
+
+
+def set_usage_context(user_id: str | None = None, project_key: str = "",
+                      project_name: str = "", purpose: str = "") -> None:
+    """Attribute subsequent call_ai() calls (in this thread/task) to a
+    user + project for cost logging. Call with no arguments to clear."""
+    if not any([user_id, project_key, project_name, purpose]):
+        _usage_context.set(None)
+    else:
+        _usage_context.set({
+            "user_id": user_id,
+            "project_key": project_key or "",
+            "project_name": project_name or "",
+            "purpose": purpose or "",
+        })
+
+
+def estimate_cost_usd(model: str, input_tokens: int | None, output_tokens: int | None) -> float | None:
+    """None when the model has no entry in MODEL_PRICES_PER_MTOK (unknown
+    cost is a different fact from zero cost) or when neither token count is
+    available."""
+    prices = MODEL_PRICES_PER_MTOK.get((model or "").strip())
+    if not prices or (input_tokens is None and output_tokens is None):
+        return None
+    in_price, out_price = prices
+    return round(
+        (input_tokens or 0) / 1_000_000 * in_price
+        + (output_tokens or 0) / 1_000_000 * out_price,
+        6,
+    )
+
+
+def _record_usage(provider: str, model: str,
+                  input_tokens: int | None, output_tokens: int | None) -> None:
+    """Best-effort write of one AI call's usage to db.AiCallLog. Never
+    raises -- see the section comment above."""
+    try:
+        from modules import db
+        ctx = _usage_context.get() or {}
+        db.log_ai_call(
+            user_id=ctx.get("user_id"),
+            project_key=ctx.get("project_key", ""),
+            project_name=ctx.get("project_name", ""),
+            purpose=ctx.get("purpose", ""),
+            provider=provider,
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            estimated_cost_usd=estimate_cost_usd(model, input_tokens, output_tokens),
+        )
+    except Exception as exc:
+        print(f"[ai_interface] cost logging failed (ignored): {exc}", file=sys.stderr)
+
+
+def _safe_int(value) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -184,6 +279,12 @@ def _call_openai(prompt, system_message, config, max_tokens, temperature) -> str
 
     def _create_and_extract(tokens, **kwargs):
         response = _openai_chat_create(client, model, messages, tokens, kwargs)
+        usage = getattr(response, "usage", None)
+        _record_usage(
+            "OpenAI", model,
+            _safe_int(getattr(usage, "prompt_tokens", None)),
+            _safe_int(getattr(usage, "completion_tokens", None)),
+        )
         return response.choices[0].message.content or ""
 
     return _call_with_resilience(_create_and_extract, temperature, max_tokens)
@@ -210,6 +311,12 @@ def _call_azure_openai(prompt, system_message, config, max_tokens, temperature) 
 
     def _create_and_extract(tokens, **kwargs):
         response = _openai_chat_create(client, deployment, messages, tokens, kwargs)
+        usage = getattr(response, "usage", None)
+        _record_usage(
+            "Azure OpenAI", deployment,
+            _safe_int(getattr(usage, "prompt_tokens", None)),
+            _safe_int(getattr(usage, "completion_tokens", None)),
+        )
         return response.choices[0].message.content or ""
 
     return _call_with_resilience(_create_and_extract, temperature, max_tokens)
@@ -230,6 +337,12 @@ def _call_anthropic(prompt, system_message, config, max_tokens, temperature) -> 
             model=model, max_tokens=tokens, system=system_message or "",
             messages=[{"role": "user", "content": prompt}], **kwargs,
         )
+        usage = getattr(response, "usage", None)
+        _record_usage(
+            "Anthropic Claude", model,
+            _safe_int(getattr(usage, "input_tokens", None)),
+            _safe_int(getattr(usage, "output_tokens", None)),
+        )
         parts = [block.text for block in response.content if getattr(block, "type", "") == "text"]
         return "\n".join(parts)
 
@@ -249,6 +362,12 @@ def _call_gemini(prompt, system_message, config, max_tokens, temperature) -> str
 
     def _create_and_extract(tokens, **kwargs):
         response = model.generate_content(prompt, generation_config={"max_output_tokens": tokens, **kwargs})
+        usage = getattr(response, "usage_metadata", None)
+        _record_usage(
+            "Google Gemini", model_name,
+            _safe_int(getattr(usage, "prompt_token_count", None)),
+            _safe_int(getattr(usage, "candidates_token_count", None)),
+        )
         return response.text or ""
 
     return _call_with_resilience(_create_and_extract, temperature, max_tokens)
@@ -278,6 +397,9 @@ def _call_copilot(prompt, system_message, config) -> str:
         )
 
     full_prompt = f"{system_message.strip()}\n\n{prompt}" if system_message else prompt
+    # The Copilot Chat API reports no token usage, so the call is logged
+    # with unknown (NULL) counts -- the admin rollup still sees it happened.
+    _record_usage("Microsoft 365 Copilot", "", None, None)
     try:
         # Same transient-error retry as the other four providers (see
         # _call_with_retry) -- applied here too, not just inside

@@ -222,6 +222,37 @@ report) if you do.
 
 ---
 
+## 7. Analytics (Plausible), login throttling, and AI cost logging
+
+**Analytics.** Both the landing page and the app fire cookieless,
+privacy-respecting analytics via Plausible (consistent with the Cookie
+Policy's "no analytics cookies" statement). One-time setup: create an
+account at plausible.io and add **two sites** — `civilproposals.com`
+(landing pageviews + tagged "CTA Click" events) and
+`app.civilproposals.com` (the signup funnel: "Auth Screen View" →
+"Signup Completed" → "Bid Analysed"; see `app/modules/analytics.py`).
+Until the account exists everything silently no-ops — nothing breaks.
+Optional env vars on the Railway app service: `PLAUSIBLE_DOMAIN`
+(default `app.civilproposals.com`; set to `off` to disable) and
+`PLAUSIBLE_API_HOST` (for self-hosted Plausible).
+
+**Login throttling.** 5 failed login attempts (per email or per client IP)
+within 15 minutes locks that email/IP out for 15 minutes, with a clear
+message. Counters live in the same Redis the job queue uses (`REDIS_URL`);
+without Redis a per-process in-memory fallback still applies the limit.
+No setup needed — it's automatic once `REDIS_URL` is set (which the
+background-jobs section above already requires).
+
+**AI cost logging.** Every AI call is logged to the `ai_call_log` table
+(provider, model, tokens, estimated USD cost, attributed to user +
+project). The admin sidebar (accounts with `is_admin` set in the `users`
+table) shows an "AI cost (admin)" panel with the overall total and a
+per-project breakdown. Model prices are estimates maintained in
+`ai_interface.MODEL_PRICES_PER_MTOK` — update them when provider pricing
+changes; unknown models log token counts with cost recorded as unknown.
+
+---
+
 ## Go-live checklist (steps 11–15 from the original plan)
 
 - [ ] Landing page loads at civilproposals.com and the "Get Started" button reaches the app

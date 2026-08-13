@@ -126,19 +126,17 @@
   ]
 }
 </script>
-<!-- Analytics: Cloudflare Web Analytics (free, cookieless -- consistent with
+<!-- Analytics: Plausible (cookieless, privacy-respecting -- consistent with
      the Cookie Policy's "no analytics cookies" statement, since it sets none).
-     TWO-MINUTE SETUP, pick ONE of:
-       (a) Cloudflare dashboard -> Analytics & Logs -> Web Analytics -> add
-           civilproposals.com with "Automatic setup" ON -- Cloudflare injects
-           the beacon itself at the edge; leave the snippet below commented out.
-       (b) Same place, but with automatic setup OFF: copy the site token it
-           shows you, paste it over PASTE_TOKEN_HERE below, and uncomment the
-           script tag (also copy it onto the three legal pages if you want
-           their traffic counted too).
-     Until one of these is done, the site has NO visitor/conversion tracking.
-<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "PASTE_TOKEN_HERE"}'></script>
--->
+     ONE-TIME SETUP: create an account at plausible.io and add BOTH sites --
+     "civilproposals.com" (this landing site) and "app.civilproposals.com"
+     (the app fires signup-funnel events against that domain; see
+     app/modules/analytics.py). Until the account exists, this script tag
+     silently no-ops (a harmless 404) -- nothing on the page breaks.
+     The Cloudflare Web Analytics beacon remains a fine cookieless
+     alternative (dashboard -> Analytics & Logs -> Web Analytics) if
+     preferred -- but then the app-side funnel events need rewiring too. -->
+<script defer data-domain="civilproposals.com" src="https://plausible.io/js/script.tagged-events.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -414,7 +412,7 @@
 
 <nav class="wrap">
   <div class="logo"><img src="assets/logo_mark.png" alt="CivilProposals"> CivilProposals <span class="beta-tag">Beta</span></div>
-  <a class="nav-cta" href="https://app.civilproposals.com">Try it free</a>
+  <a class="nav-cta plausible-event-name=CTA+Click plausible-event-position=nav" href="https://app.civilproposals.com">Try it free</a>
 </nav>
 
 <header class="hero">
@@ -426,7 +424,7 @@
       first pass drafts, and a designed Word document to hand to your proposal writers.
     </p>
     <div class="hero-ctas">
-      <a class="btn-primary" href="https://app.civilproposals.com">Upload your first brief free</a>
+      <a class="btn-primary plausible-event-name=CTA+Click plausible-event-position=hero" href="https://app.civilproposals.com">Upload your first brief free</a>
       <a class="btn-secondary" href="#pricing">See pricing</a>
     </div>
 
@@ -640,7 +638,7 @@
           <li><span class="check">✓</span> Designed Word export</li>
           <li><span class="check">✓</span> See exactly what you get before you pay anything</li>
         </ul>
-        <a class="btn-secondary" style="display:block;" href="https://app.civilproposals.com">Upload your first brief free</a>
+        <a class="btn-secondary plausible-event-name=CTA+Click plausible-event-position=pricing-free" style="display:block;" href="https://app.civilproposals.com">Upload your first brief free</a>
       </div>
 
       <div class="pricing-card">
@@ -653,7 +651,7 @@
           <li><span class="check">✓</span> Compliance matrix, fee & program tools</li>
           <li><span class="check">✓</span> Nothing to cancel: use it as often as you like</li>
         </ul>
-        <a class="btn-secondary" style="display:block;" href="https://app.civilproposals.com">Buy 1 bid -- $50</a>
+        <a class="btn-secondary plausible-event-name=CTA+Click plausible-event-position=pricing-bid" style="display:block;" href="https://app.civilproposals.com">Buy 1 bid -- $50</a>
       </div>
 
       <div class="pricing-card featured">
@@ -668,7 +666,7 @@
           <li><span class="check">✓</span> Compliance matrix, gap analysis, fee & program tools</li>
           <li><span class="check">✓</span> Cancel anytime</li>
         </ul>
-        <a class="btn-primary" style="display:block;" href="https://app.civilproposals.com">Subscribe -- $120/mo</a>
+        <a class="btn-primary plausible-event-name=CTA+Click plausible-event-position=pricing-sub" style="display:block;" href="https://app.civilproposals.com">Subscribe -- $120/mo</a>
       </div>
     </div>
 
@@ -751,7 +749,7 @@
     <h2 class="section-title">Ready to see your first brief turned into a draft?</h2>
     <p class="section-sub">Your first full bid is free, no card required.</p>
     <div class="hero-ctas">
-      <a class="btn-primary" href="https://app.civilproposals.com">Upload your first brief free</a>
+      <a class="btn-primary plausible-event-name=CTA+Click plausible-event-position=hero" href="https://app.civilproposals.com">Upload your first brief free</a>
     </div>
   </div>
 </section>
