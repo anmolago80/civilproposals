@@ -1,0 +1,18 @@
+# Never commit the real .env (API keys) anywhere in this repo.
+.env
+*.env
+!.env.example
+
+# Local databases
+*.db
+
+# One-off fix bundles and scratch notes -- keep these out of the deployed repo.
+*.zip
+push_commands*.txt
+
+# Local scratch/recycle area (files awaiting manual deletion on Windows).
+_to_delete/
+
+__pycache__/
+*.pyc
+venv/
