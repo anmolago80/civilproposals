@@ -1,0 +1,591 @@
+# modules/pages/00_init.py -- one segment of the CivilProposals app script.
+# App configuration, environment, SaaS mode, Stripe checkout redirect handling, login gate, provider help text.
+#
+# HOW THIS FILE RUNS: app.py executes the files in modules/pages/ in order,
+# in ONE shared script namespace (see app.py's loader) -- exactly as when
+# all of this was a single 315KB app.py, just split along its natural seams
+# so each area of the app lives in its own reviewable file. Code here is
+# UNCHANGED from the pre-split app.py; names defined in earlier segments
+# (helpers, current_user, _access, the tabs list) are used directly, and
+# st.session_state remains the single shared state, same as before.
+# Deliberately NOT a function-per-page refactor: that would change scoping
+# and evaluation order (the thing a mid-tender regression hides in), and is
+# better done tab-by-tab with live click-through testing.
+"""
+app.py
+
+Tender Response Pack Generator -- Streamlit prototype.
+
+A guided, 10-step workflow: Project Setup -> Upload Documents -> AI Provider
+Settings -> Tender Analysis -> Proposal Structure -> Page Allocation ->
+Draft Responses -> Graphics & Design -> Fee Estimate -> Export Pack.
+
+Design intent: simple and hard to get lost in. Each tab tells you in one
+line what it needs from the previous step, buttons are disabled until their
+prerequisites are met, and the sidebar shows a running checklist so you
+always know where you are.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+import streamlit as st
+import streamlit.components.v1 as components
+
+# Loads a local .env file (if one exists next to app.py) into the process's
+# environment variables -- this is how the AI Provider Settings tab can come
+# up already configured on every launch instead of asking you to paste your
+# API key in each time (see ANTHROPIC_API_KEY below). A missing .env file, or
+# a missing python-dotenv package, is not an error -- both just mean nothing
+# gets pre-filled and the tab behaves exactly as before.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+_ENV_ANTHROPIC_KEY = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+_ENV_PATH = Path(__file__).resolve().parent / ".env"
+
+
+def _save_anthropic_key_to_env(key: str) -> None:
+    """Persist the Claude API key to the local .env file next to app.py (creating
+    it if it doesn't exist yet) so load_dotenv() above picks it up automatically
+    on every future launch -- this is the sidebar "Remember this key" checkbox's
+    only effect. Only ever touches the single ANTHROPIC_API_KEY= line; every
+    other line in the file (if any) is left exactly as it was."""
+    key = (key or "").strip()
+    if not key:
+        return
+    lines = _ENV_PATH.read_text(encoding="utf-8").splitlines() if _ENV_PATH.exists() else []
+    new_lines, found = [], False
+    for line in lines:
+        if line.strip().startswith("ANTHROPIC_API_KEY="):
+            new_lines.append(f"ANTHROPIC_API_KEY={key}")
+            found = True
+        else:
+            new_lines.append(line)
+    if not found:
+        new_lines.append(f"ANTHROPIC_API_KEY={key}")
+    _ENV_PATH.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+from modules import (
+    analytics,
+    document_processor,
+    package_intake,
+    returnable_schedules,
+    ai_interface,
+    tender_analyser,
+    weighting_engine,
+    page_allocation,
+    proposal_structure,
+    guidance_generator,
+    compliance_matrix,
+    gap_analysis,
+    draft_generator,
+    executive_summary as executive_summary_module,
+    team_intro as team_intro_module,
+    experience_intro as experience_intro_module,
+    pitch_review as pitch_review_module,
+    graphics_engine,
+    fee_estimation_engine,
+    export_docx,
+    divider_designer,
+    team_bios,
+    program_schedule,
+    project_store,
+    local_project_store,
+    cloud_project_store,
+    resourcing,
+    org_chart,
+    org_chart_pptx,
+    methodology_pptx,
+    program_pptx,
+    proposal_library,
+    reference_library,
+    reference_projects as reference_projects_module,
+    db,
+    auth,
+    billing,
+    branding,
+    job_queue,
+)
+
+AUTOSAVE_INTERVAL_SECONDS = 20
+
+# Throttle for billing.refresh_subscription_status() and
+# billing.create_customer_portal_session() -- both make a live Stripe API
+# call, and both used to run unconditionally on every single Streamlit
+# rerun (which fires on nearly every click/keystroke across the whole app,
+# not just billing-related ones). For a subscriber that meant every
+# interaction anywhere in the app cost a live network round trip to Stripe
+# before the page could even render, and made subscribers -- the paying
+# customers -- the ones with the slowest experience. Neither check needs
+# to be that fresh: subscription status changes at most a few times a
+# month (a payment failing, a billing period rolling over), so re-checking
+# every few minutes of active use is still fast enough to show a stale
+# status for at most that long, in exchange for cutting the Stripe call
+# rate from "every rerun" to "at most once per interval."
+SUBSCRIPTION_REFRESH_INTERVAL_SECONDS = 300
+
+_PAGE_ICON_PATH = Path(__file__).resolve().parent / "assets" / "brand" / "logo_mark_32.png"
+st.set_page_config(
+    # "Beta" used to be in the browser tab title too -- one more repetition
+    # of the same disclosure the nav badge (branding.brand_html's
+    # show_beta) already makes on every screen, right at the moment
+    # someone's paying $120/mo. The nav badge, the pricing section's beta
+    # note, and the security FAQ answer are the three places this audit
+    # asked to keep; this was one of the ones to cut.
+    page_title="CivilProposals",
+    page_icon=str(_PAGE_ICON_PATH) if _PAGE_ICON_PATH.exists() else "📐",
+    layout="wide",
+)
+
+# ---------------------------------------------------------------------------
+# SaaS gate: login, trial/subscription access, Stripe checkout redirect.
+#
+# SAAS_MODE defaults on (this is the hosted civilproposals.com deployment).
+# Set SAAS_MODE=false only for the original single-user local prototype
+# behaviour (no login, no trial limit, BYO AI key) -- see README_SAAS.md.
+# ---------------------------------------------------------------------------
+IS_SAAS_MODE = os.environ.get("SAAS_MODE", "true").strip().lower() != "false"
+
+# Used at ~11 gating points across the app when st.session_state.ai_config's
+# api_key is empty. In the desktop/BYOK build this correctly points at the
+# sidebar's "Anthropic API key" field -- but that field only renders when
+# `not IS_SAAS_MODE` (see the `if not IS_SAAS_MODE:` gate in the sidebar
+# further down), so telling a SaaS customer to go set it there was pointing
+# them at a control they can't see, left over from before this app had a
+# SaaS mode at all. In a correctly configured SaaS deploy this branch
+# should never actually fire -- ANTHROPIC_API_KEY is set server-side and
+# auto-fills ai_config at session start (see _ENV_ANTHROPIC_KEY above) -- so
+# if it does fire, the server-side key is missing/misconfigured, which a
+# customer can't fix themselves; the message points them at support instead
+# of a UI control that doesn't exist for them.
+_AI_HINT_CLAUSE = (
+    "set an AI provider in the sidebar first" if not IS_SAAS_MODE
+    else "try again in a moment -- if it keeps happening, email hello@civilproposals.com"
+)
+_AI_HINT_SENTENCE = (
+    "Configure an AI provider in the sidebar first." if not IS_SAAS_MODE
+    else "AI features aren't available right now -- please email hello@civilproposals.com so we can look into it."
+)
+# Shown at every downstream/auxiliary AI feature gated on
+# _current_project_already_paid() (see that function's docstring) instead
+# of the account-wide "You're out of bids" message -- "out of bids" would
+# often be flat-out wrong here (the account may have plenty of capacity;
+# it just hasn't been spent on THIS project yet), and would send someone
+# to go buy a bid they don't actually need instead of just running
+# analysis.
+_PROJECT_NOT_PAID_HINT = "Run Tender Analysis for this project first (that's what uses a bid) -- everything else unlocks once it has."
+
+# A misconfigured SaaS deploy (ANTHROPIC_API_KEY missing/blank in Railway)
+# used to boot completely silently -- every AI feature would just be
+# disabled for every single customer, with no signal anywhere that
+# anything was actually wrong versus working as designed. This fires on
+# every rerun for as long as it stays broken, which is the point: it's
+# meant to be impossible to miss in the deploy/runtime logs, not a
+# one-time startup message that could scroll away before anyone looks.
+_MISSING_SERVER_AI_KEY = IS_SAAS_MODE and not _ENV_ANTHROPIC_KEY
+if _MISSING_SERVER_AI_KEY:
+    print(
+        "[STARTUP] SAAS_MODE is on but ANTHROPIC_API_KEY is not set -- every AI "
+        "feature in the app is disabled for every customer until this is fixed "
+        "in Railway's Variables tab (civilproposals AND civilproposals-worker "
+        "services) and both services are redeployed.",
+        file=sys.stderr,
+    )
+
+
+def _show_error(action: str, exc: Exception) -> None:
+    """Shared by every AI/upload/export failure path in this file (~19
+    call sites). Used to be `st.error(f"{{action}}: {{exc}}")` at each one --
+    showing a customer the raw exception straight from whatever failed
+    (an AI provider's raw API error body, a library's internal message, a
+    stack-trace fragment) instead of something they can actually act on.
+    Full detail still goes to stderr (visible in Railway's Deploy Logs),
+    just not onto a page a paying customer is looking at."""
+    print(f"[{action}] {exc}", file=sys.stderr)
+    st.error(f"{action} -- please try again. If it keeps happening, email hello@civilproposals.com and we'll take a look.")
+
+# Design pass: hide Streamlit's default chrome (hamburger menu, "Deploy"
+# button, footer) so the app reads as a branded product, then layer on a
+# "modern & confident" visual language -- bolder headings, a punchier
+# primary button treatment, a cleaner sidebar, and tabs that read as real
+# navigation rather than the Streamlit default. Uses data-testid selectors
+# where possible since those are more stable across Streamlit versions than
+# internal class names. Purely cosmetic -- no effect on functionality.
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
+
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header [data-testid="stToolbar"] {visibility: hidden;}
+    .stDeployButton {display: none;}
+
+    /* Same typeface as the landing page (landing/index.html), so the
+       marketing site and the product read as one consistent brand instead
+       of two different fonts stitched together. */
+    html, body, [class*="css"] {
+        font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    /* Bolder, tighter headings across the app */
+    h1, h2, h3 {
+        font-weight: 800 !important;
+        letter-spacing: -0.01em;
+        color: #0F172A;
+    }
+    h3 { font-size: 1.3rem !important; }
+
+    /* Sidebar: subtle separation from the main canvas, and fixed -- no
+       option to collapse it. Streamlit doesn't expose a config flag for
+       this, so it's CSS: hide the collapse arrow inside the sidebar
+       (stSidebarCollapseButton) and the "expand" arrow that appears in its
+       place if the sidebar is ever collapsed some other way
+       (stExpandSidebarButton, e.g. keyboard shortcut) -- so there's no
+       control left to collapse it with, and nothing to click back open
+       even if it somehow did. */
+    [data-testid="stSidebarCollapseButton"], [data-testid="stExpandSidebarButton"] {
+        display: none !important;
+    }
+    /* stSidebarHeader is the ~60px strip that normally holds the collapse
+       button and a logo spacer -- with the collapse button hidden above,
+       nothing else uses it, and it was leaving a dead gap that pushed the
+       menu icon/logo down from the sidebar's top edge. Hiding it lets
+       stSidebarUserContent (the menu icon, logo, and step list) sit flush
+       at the very top instead. */
+    [data-testid="stSidebarHeader"] {
+        display: none !important;
+    }
+    [data-testid="stSidebar"] {
+        border-right: 1px solid #E2E8F0;
+    }
+    [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2 {
+        font-size: 1.05rem !important;
+    }
+
+    /* Buttons: bolder weight, confident rounded corners, a real hover lift
+       on primary actions so CTAs (Upgrade, Run Analysis, Export) feel
+       tappable rather than flat. */
+    .stButton button, .stDownloadButton button, .stLinkButton a {
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        transition: transform .12s ease, box-shadow .12s ease;
+    }
+    button[kind="primary"], [data-testid="stBaseButton-primary"] {
+        box-shadow: 0 2px 10px rgba(29, 78, 216, 0.25);
+    }
+    button[kind="primary"]:hover, [data-testid="stBaseButton-primary"]:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 14px rgba(29, 78, 216, 0.32);
+    }
+
+    /* Rounder, calmer alert/info/success boxes */
+    div[data-testid="stAlert"] {
+        border-radius: 10px;
+    }
+
+    /* Metric-style callouts (used for the trial/plan status) get a touch
+       more breathing room */
+    [data-testid="stSidebar"] div[data-testid="stAlert"] {
+        padding: 0.6rem 0.9rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+current_user = None
+_access = {
+    "allowed": True, "subscribed": True, "past_due": False, "trial_remaining": 999, "trial_limit": 999,
+    "bid_credits": 0, "subscription_bids_remaining": 999, "subscription_bid_limit": 3,
+}
+
+if IS_SAAS_MODE:
+    db.init_db()
+
+    # Stripe redirects back here with ?checkout=success&session_id=... after
+    # a successful Checkout -- verify with Stripe directly (never trust the
+    # query string alone) and activate the subscription. This URL is
+    # revisitable (browser history, refresh, back button) and
+    # handle_checkout_redirect() is itself idempotent against replays (see
+    # db.ProcessedCheckoutSession) -- but a real error verifying with Stripe
+    # (network blip, Stripe outage, a DB hiccup) must NEVER be swallowed
+    # here: someone who was just charged and hits that error deserves a
+    # clear message and a way to recover, not a silently-cleared URL that
+    # looks like nothing happened. See DEPLOY.md/support notes -- if this
+    # keeps failing for a real paying customer, reconcile manually in Stripe
+    # + the admin panel using the session_id shown in the error.
+    _qp = st.query_params
+    if _qp.get("checkout") == "success" and _qp.get("session_id"):
+        _checkout_session_id = _qp.get("session_id")
+        _checkout_error = None
+        try:
+            _checkout_user = billing.handle_checkout_redirect(_checkout_session_id)
+        except Exception as _exc:
+            _checkout_user = None
+            _checkout_error = str(_exc)
+
+        if _checkout_user is not None:
+            st.query_params.clear()
+            st.toast("Payment confirmed -- thanks!", icon="✅")
+        elif _checkout_error is not None:
+            # A genuine verification error, not just "this session wasn't
+            # actually paid" -- keep the query params so refreshing the page
+            # retries, and tell the customer exactly what to do if it keeps
+            # happening instead of leaving them with no signal at all.
+            st.error(
+                "We couldn't confirm your payment just now, so nothing's been applied to your "
+                "account yet. If you were just charged, please refresh this page to retry. If it "
+                "keeps failing, email hello@civilproposals.com with this reference so we can apply "
+                f"it manually: `{_checkout_session_id}`"
+            )
+        else:
+            # handle_checkout_redirect() returned None without raising --
+            # e.g. the Checkout Session genuinely wasn't paid (someone
+            # revisiting a cancelled/expired checkout link). Nothing to
+            # apply, nothing to warn about -- just drop the query params.
+            st.query_params.clear()
+
+    # Stripe's cancel_url (see billing.create_checkout_session /
+    # create_bid_checkout_session) -- someone who backed out of Checkout
+    # instead of paying. Previously this param was never read at all, so
+    # backing out landed the user back on the app with the ?checkout=
+    # cancelled param just sitting in the URL bar (surviving refresh/
+    # bookmarking) and no acknowledgement that anything happened -- easy to
+    # read as "did that... do something?" Nothing to apply here, just a
+    # low-key confirmation and clearing the param so it doesn't linger.
+    elif _qp.get("checkout") == "cancelled":
+        st.query_params.clear()
+        st.toast("Checkout cancelled -- no charge was made.", icon="ℹ️")
+
+    # Password-reset link (see auth.request_password_reset /
+    # render_password_reset_screen) -- checked BEFORE require_login()
+    # deliberately: someone resetting a forgotten password is, by
+    # definition, not logged in and can't get past that gate normally.
+    # render_password_reset_screen() always st.stop()s, so it fully
+    # replaces the rest of this script run when a reset_token is present.
+    if _qp.get("reset_token"):
+        auth.render_password_reset_screen(_qp.get("reset_token"))
+
+    current_user = auth.require_login()  # renders login/signup and st.stop()s if not logged in
+
+    if _MISSING_SERVER_AI_KEY:
+        # See _MISSING_SERVER_AI_KEY's definition above for the stderr side
+        # of this -- that's for Andrew; this is for whoever's actually
+        # logged in right now, since "every AI button is just silently
+        # disabled" with no on-screen explanation is its own broken
+        # experience even once the server-side log exists.
+        st.error(
+            "AI features are temporarily unavailable -- we're aware and looking into it. "
+            "Nothing you've entered has been lost; please check back shortly or email "
+            "hello@civilproposals.com if this doesn't resolve soon."
+        )
+
+    # Throttled per SUBSCRIPTION_REFRESH_INTERVAL_SECONDS (see that
+    # constant's comment) -- was an unconditional live Stripe call on every
+    # single rerun. "_sub_refresh_ts" is keyed to this browser tab's
+    # session, not persisted, so a brand new session (fresh login, or the
+    # first rerun after a deploy) always refreshes once immediately.
+    _now_ts = time.time()
+    if _now_ts - st.session_state.get("_sub_refresh_ts", 0.0) >= SUBSCRIPTION_REFRESH_INTERVAL_SECONDS:
+        current_user = billing.refresh_subscription_status(current_user)
+        st.session_state["_sub_refresh_ts"] = _now_ts
+    _access = auth.get_access_status(current_user)
+
+
+def _lib_user_id() -> str:
+    """User id to scope the Proposal Library / Project Reference Library to.
+    'local' is a fixed placeholder used only when SAAS_MODE is off
+    (single-user prototype)."""
+    return current_user.id if IS_SAAS_MODE and current_user else "local"
+
+
+def _get_or_create_checkout_url(user, kind: str) -> str:
+    """Returns a live Stripe Checkout URL for kind ("sub" or "bid"), reusing
+    one cached in st.session_state for up to SUBSCRIPTION_REFRESH_INTERVAL_
+    SECONDS instead of creating a brand new Checkout Session on every single
+    call. _render_upgrade_buttons() renders at up to two call sites (the
+    top-right popover -- which itself can re-render on essentially any
+    click anywhere in the app -- and the Tender Analysis tab's inline
+    prompt), so "eagerly, every render" meant up to two live Stripe API
+    calls, for both button kinds, on nearly every rerun for every
+    non-subscribed user -- exactly the per-keystroke Stripe traffic problem
+    that was just fixed for subscribers' status/portal calls elsewhere,
+    reintroduced here and worse (uncapped, since anyone can trigger a
+    rerun just by using the app). Cached per-kind, not per key_prefix,
+    since both render sites want the same underlying session for the same
+    user -- no reason to mint two. A Checkout Session's URL keeps working
+    for a day even if this cache goes stale sooner, so serving the same one
+    for a few minutes is harmless."""
+    cache_key = f"_checkout_url_{kind}"
+    ts_key = f"_checkout_url_{kind}_ts"
+    now_ts = time.time()
+    cached_url = st.session_state.get(cache_key)
+    cached_ts = st.session_state.get(ts_key, 0.0)
+    if cached_url and (now_ts - cached_ts) < SUBSCRIPTION_REFRESH_INTERVAL_SECONDS:
+        return cached_url
+    url = billing.create_checkout_session(user) if kind == "sub" else billing.create_bid_checkout_session(user)
+    st.session_state[cache_key] = url
+    st.session_state[ts_key] = now_ts
+    return url
+
+
+def _render_upgrade_buttons(user, key_prefix: str, already_subscribed: bool = False) -> None:
+    """Ways to keep going once the free trial (or, for an already-subscribed
+    account, this billing period's 3-bid quota -- see
+    auth.SUBSCRIPTION_MONTHLY_BID_LIMIT) is used up. Reused at both call
+    sites (the top-right Upgrade popover and the Tender Analysis tab's
+    inline upgrade prompt) so the checkout flows can't drift out of sync.
+    Subscribe: $120/month, 3 bids per billing period (see
+    billing.create_checkout_session) -- hidden when already_subscribed,
+    since subscribing again makes no sense. Buy 1 bid: $50 one-time, adds a
+    single db.User.bid_credits (see billing.create_bid_checkout_session) --
+    works on top of either the trial or an active subscription's quota.
+
+    Each option is a single st.link_button straight to the Stripe Checkout
+    URL. This used to be a two-step flow (a plain st.button that, once
+    clicked, rendered a SECOND st.link_button below it) -- that had a real
+    bug: the link_button only ever existed on the exact script run where the
+    first button was clicked, because Streamlit reruns the whole script on
+    every interaction. The instant anything else caused a rerun (including
+    this same component re-rendering inside the top-right popover, which
+    can close and reopen on its own), the "Continue to payment" link
+    vanished with no trace and no visible next step -- maximum friction at
+    the exact moment someone was trying to pay. A single link_button
+    removes that round trip entirely: one click opens Stripe directly. The
+    URL itself comes from _get_or_create_checkout_url() above, which caches
+    it instead of creating a fresh live Checkout Session on every render."""
+    if already_subscribed:
+        try:
+            bid_url = _get_or_create_checkout_url(user, "bid")
+            st.link_button("Buy 1 bid -- $50 →", bid_url, key=f"{key_prefix}_bid_btn", type="primary")
+        except Exception as exc:
+            # debug_key_info() used to be shown here via st.caption() --
+            # useful while Andrew was first wiring up Stripe, but it's
+            # internal setup diagnostics (masked key/price-ID info), not
+            # something a customer hitting a checkout error should ever
+            # see. Logged server-side instead; see debug_key_info()'s own
+            # docstring if this needs diagnosing again later.
+            print(f"[checkout] {exc} | {billing.debug_key_info()}", file=sys.stderr)
+            st.error("Couldn't start checkout -- please try again. If it keeps happening, email hello@civilproposals.com.")
+        return
+
+    ucol1, ucol2 = st.columns(2)
+    with ucol1:
+        try:
+            sub_url = _get_or_create_checkout_url(user, "sub")
+            st.link_button("Subscribe -- $120/mo →", sub_url, key=f"{key_prefix}_sub_btn", type="primary")
+        except Exception as exc:
+            print(f"[checkout] {exc} | {billing.debug_key_info()}", file=sys.stderr)
+            st.error("Couldn't start checkout -- please try again. If it keeps happening, email hello@civilproposals.com.")
+    with ucol2:
+        try:
+            bid_url = _get_or_create_checkout_url(user, "bid")
+            st.link_button("Buy 1 bid -- $50 →", bid_url, key=f"{key_prefix}_bid_btn")
+        except Exception as exc:
+            print(f"[checkout] {exc} | {billing.debug_key_info()}", file=sys.stderr)
+            st.error("Couldn't start checkout -- please try again. If it keeps happening, email hello@civilproposals.com.")
+
+
+def _extract_plain_text_from_bytes(file_bytes: bytes, filename: str):
+    """Same dispatch document_processor.extract_plain_text_from_file() does
+    (pdf/docx/txt -> the right extractor, text-only/fast), but for bytes
+    already sitting in the database (a Proposal Library / Project Reference
+    Library entry) rather than a fresh st.file_uploader object -- there's
+    no UploadedFile to hand it, just raw bytes and a filename."""
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    try:
+        if extension == "pdf":
+            return document_processor.extract_text_from_pdf(file_bytes, filename, include_structure=False)
+        elif extension == "docx":
+            return document_processor.extract_text_from_docx(file_bytes, filename)
+        elif extension == "txt":
+            return document_processor.extract_text_from_txt(file_bytes, filename)
+        else:
+            return document_processor.ExtractedDocument(
+                filename=filename, text="", warning=f"Unsupported file type '.{extension}'.",
+            )
+    except Exception as exc:
+        return document_processor.ExtractedDocument(filename=filename, text="", warning=f"Could not read '{filename}': {exc}")
+
+# Also doubles as the Proposal Library's folder taxonomy (see
+# modules/proposal_library.py) -- an archived proposal is filed under
+# library/<one of these names>/, so this list is a closed taxonomy on
+# purpose, not free text.
+PROJECT_TYPES = [
+    "Structural Engineering",
+    "Geotechnical Engineering",
+    "Transportation Engineering",
+    "Water Resources & Hydraulic Engineering",
+    "Environmental Engineering",
+    "Construction Engineering & Management",
+    "Coastal & Ocean Engineering",
+    "Surveying & Geomatics Engineering",
+    "Infrastructure & Urban Engineering",
+    "Civil Engineering Materials",
+    "Earthquake Engineering",
+    "Forensic Engineering",
+]
+PROPOSAL_THEMES = ["Corporate", "Modern", "Government", "Infrastructure", "Minimalist"]
+
+# Which underlying pipeline shape a proposal uses -- content-agnostic either way; the
+# difference is purely structural (a small brief still gets scope/team/fees/program the
+# same way a large one does, just in a shorter pack with fewer sections).
+# See modules/proposal_structure.py's build_proposal_structure() for the branch itself.
+# Internal keys ("formal"/"letter") are unchanged -- only the user-facing labels below
+# renamed away from "formal"/"letter" wording, which read as jargon.
+PROPOSAL_FORMAT_LABELS = {"formal": "Large Scope Proposal Response Pack", "letter": "Small Scope Proposal Response Pack"}
+PROPOSAL_FORMAT_KEYS = {v: k for k, v in PROPOSAL_FORMAT_LABELS.items()}
+
+# Where to get an API key for each provider -- shown as an in-app expander in AI Provider
+# Settings so nobody has to leave the app to figure this out. Kept in sync with the matching
+# "Getting an API key" section in README.md; update both together if a provider's console UI
+# changes. Every provider bills the key's own account, not any Claude/Cowork subscription.
+PROVIDER_SETUP_STEPS = {
+    "OpenAI": """
+1. Go to **[platform.openai.com](https://platform.openai.com/)** and sign up or log in.
+2. Add a payment method / purchase credits under **Settings → Billing** -- API usage is billed separately from a ChatGPlus subscription and won't work without credits loaded.
+3. Go to **[platform.openai.com/api-keys](https://platform.openai.com/api-keys)**.
+4. Click **Create new secret key**, name it (e.g. "Tender Response Pack Generator"), and copy it immediately -- it's only shown once.
+5. Paste it into the API key field below. The Model field can stay `gpt-4o`, or any other model you have access to.
+""",
+    "Azure OpenAI": """
+1. You need an Azure subscription -- **[azure.microsoft.com](https://azure.microsoft.com/pricing/purchase-options/azure-account)** for a free one if you don't have one. Access to Azure OpenAI can require an approval/onboarding step in some subscriptions.
+2. In the **[Azure Portal](https://portal.azure.com/)**: **Create a resource** → search **Azure OpenAI** → **Create**. Fill in subscription, resource group, region, a name, and pricing tier (Standard), then **Review + create**.
+3. In **[Microsoft Foundry](https://ai.azure.com/)**: find your resource → **Deployments** → **+ Deploy model** → pick a model (e.g. `gpt-4o`) → give it a **deployment name** → **Deploy**.
+4. Back in the Azure Portal, open your resource → **Keys and Endpoint** → copy **Key 1** and the **Endpoint** URL.
+5. Paste the key into the API key field, the endpoint into the Azure endpoint URL field, and the **deployment name you chose** (not the underlying model name) into the Model field below -- Azure OpenAI calls use the deployment name, not the model name.
+""",
+    "Anthropic Claude": """
+1. Go to **[platform.claude.com](https://platform.claude.com/)** and sign up or log in.
+2. Add a payment method and purchase credits -- API usage is billed separately from any Claude.ai subscription.
+3. Go to **[platform.claude.com/settings/keys](https://platform.claude.com/settings/keys)** (Settings → API Keys).
+4. Click **Create Key**, name it, and copy it immediately -- it's only shown once.
+5. Paste it into the API key field below. The Model field can stay as the current default, or any Claude model you have access to.
+""",
+    "Google Gemini": """
+1. Go to **[aistudio.google.com/apikey](https://aistudio.google.com/apikey)** and sign in with a Google account.
+2. Accept the Terms of Service if this is your first time. A default Google Cloud project is created for you automatically (existing Google Cloud users can import an existing project instead).
+3. Click **Create API key** and copy it.
+4. Paste it into the API key field below. There's a free tier with rate limits; check Google's current pricing page if you need higher throughput.
+""",
+}
+
+COMPANY_MATERIAL_CATEGORIES = {
+    "company_profile": "Company profile",
+    "previous_proposals": "Previous proposals",
+    "project_references": "Project references",
+    "cv_library": "CV library",
+    "boilerplate_content": "Boilerplate content",
+}
+
+
