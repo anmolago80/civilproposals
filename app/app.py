@@ -854,6 +854,24 @@ def _run_job_or_inline(job_type, func, args=(), kwargs=None, progress=None,
     )
 
 
+def _ocr_export_note() -> str | None:
+    """The "OCR-derived -- verify carefully" notice for exported documents
+    (see export_docx._add_ocr_notice), or None when none of the brief's text
+    came from OCR. Kept here so all four export call sites share one wording."""
+    _ext = st.session_state.get("tender_extracted")
+    if not getattr(_ext, "ocr_used", False):
+        return None
+    pages = getattr(_ext, "ocr_pages", []) or []
+    page_part = f" (page {', '.join(str(p) for p in pages[:12])}{' and more' if len(pages) > 12 else ''})" if pages else ""
+    return (
+        f"Parts of the tender brief this pack is based on were read with text recognition "
+        f"(OCR) from scanned pages{page_part}. {document_processor.OCR_VERIFY_TAG}: OCR can "
+        f"misread numbers, dates, and names -- verify extracted requirements, figures, and "
+        f"names against the original brief before this document goes anywhere near a "
+        f"submission. Delete this notice once verified."
+    )
+
+
 def _project_info() -> dict:
     return {
         "project_name": st.session_state.project_name,
@@ -2290,6 +2308,15 @@ with tabs[1]:
     if _ext is not None and _ext.text:
         if _ext.warning:
             st.warning(_ext.warning)
+        if getattr(_ext, "ocr_used", False) and not _ext.warning:
+            # Standing badge for a project re-loaded from a save (the
+            # detailed extraction warning above only exists right after
+            # upload) -- the OCR caveat must follow the project around.
+            st.warning(
+                f"Parts of this brief were read with text recognition (OCR) from scanned "
+                f"pages. {document_processor.OCR_VERIFY_TAG}: double-check numbers, dates "
+                f"and names against the original document."
+            )
         tcol1, tcol2 = st.columns([8, 1])
         with tcol1:
             st.success(
@@ -2701,6 +2728,12 @@ with tabs[2]:
 
     analysis = st.session_state.analysis
     if analysis:
+        if getattr(st.session_state.tender_extracted, "ocr_used", False):
+            st.warning(
+                f"This analysis is based on text read with OCR from scanned pages. "
+                f"{document_processor.OCR_VERIFY_TAG}: double-check extracted requirements, "
+                f"dates, and numbers against the original document."
+            )
         st.markdown("#### Project scope")
         st.write(analysis.project_scope or "_not extracted_")
 
@@ -5129,6 +5162,7 @@ with tabs[9]:
                     discipline_fee_lines=st.session_state.discipline_fee_lines,
                     differentiator_text=st.session_state.project_differentiator,
                     sales_pitch_text=st.session_state.project_sales_pitch,
+                    ocr_note=_ocr_export_note(),
                 )
                 st.session_state.docx_buffer = buffer
 
@@ -5148,6 +5182,7 @@ with tabs[9]:
                     sections=st.session_state.sections,
                     drafts=st.session_state.drafts or {},
                     body_font=st.session_state.body_font,
+                    ocr_note=_ocr_export_note(),
                 )
             st.success("Document generated.")
     else:
@@ -5213,6 +5248,7 @@ with tabs[9]:
                     experience_intro=st.session_state.experience_intro,
                     differentiator_text=st.session_state.project_differentiator,
                     sales_pitch_text=st.session_state.project_sales_pitch,
+                    ocr_note=_ocr_export_note(),
                 )
                 st.session_state.docx_buffer = buffer
 
@@ -5230,6 +5266,7 @@ with tabs[9]:
                     sections=st.session_state.sections,
                     drafts=st.session_state.drafts or {},
                     body_font=st.session_state.body_font,
+                    ocr_note=_ocr_export_note(),
                 )
             st.success("Document generated.")
 

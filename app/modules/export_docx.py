@@ -85,6 +85,7 @@ def build_docx(
     experience_intro=None,
     differentiator_text: str | None = None,
     sales_pitch_text: str | None = None,
+    ocr_note: str | None = None,
 ) -> io.BytesIO:
     theme = _theme_colours(project_info.get("proposal_theme"))
     font = body_font or DEFAULT_FONT
@@ -94,6 +95,8 @@ def build_docx(
     _add_page_numbers(doc)
 
     _build_cover_page(doc, project_info, cover_image_bytes, cover_theme_image_bytes, theme)
+
+    _add_ocr_notice(doc, ocr_note)
 
     _add_toc(doc)
     doc.add_page_break()
@@ -134,6 +137,7 @@ def build_tender_summary_docx(
     sections: list,
     drafts: dict,
     body_font: str | None = None,
+    ocr_note: str | None = None,
 ) -> io.BytesIO:
     """Builds the companion Tender Summary document -- everything about how the
     brief was read and how this response pack was put together, kept OUT of the
@@ -151,6 +155,8 @@ def build_tender_summary_docx(
 
     _build_tender_summary_title_page(doc, project_info, theme)
     doc.add_page_break()
+
+    _add_ocr_notice(doc, ocr_note)
 
     _add_toc(doc)
     doc.add_page_break()
@@ -228,6 +234,7 @@ def build_letter_docx(
     discipline_fee_lines: list | None = None,
     differentiator_text: str | None = None,
     sales_pitch_text: str | None = None,
+    ocr_note: str | None = None,
 ) -> io.BytesIO:
     """
     Builds the Small Scope Proposal Response Pack -- the leaner, content-agnostic
@@ -273,6 +280,8 @@ def build_letter_docx(
     _add_page_numbers(doc)
 
     _build_cover_page(doc, project_info, cover_image_bytes, cover_theme_image_bytes, theme)
+
+    _add_ocr_notice(doc, ocr_note)
     _add_company_footer_line(doc.sections[-1].footer, project_info)
 
     _build_executive_summary(doc, executive_summary, project_info, theme, differentiator_text=differentiator_text)
@@ -647,6 +656,21 @@ def _build_cover_page(
     run.font.size = Pt(10)
     run.font.color.rgb = RED
     doc.add_page_break()
+
+
+def _add_ocr_notice(doc: Document, ocr_note: str | None):
+    """Red review-note paragraph flagging OCR-derived source text -- added
+    right after the cover/title page of each exported document when any of
+    the brief's text came from OCR of scanned pages (see
+    document_processor.OCR_VERIFY_TAG). Same red as the guidance notes, so
+    it reads as 'review this before submission', not part of the content."""
+    if not ocr_note:
+        return
+    p = doc.add_paragraph()
+    run = p.add_run("OCR NOTICE -- " + ocr_note)
+    run.font.bold = True
+    run.font.size = Pt(10)
+    run.font.color.rgb = RED
 
 
 def _add_toc(doc: Document):

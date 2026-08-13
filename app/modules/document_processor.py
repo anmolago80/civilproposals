@@ -40,6 +40,13 @@ class ExtractedDocument:
     page_texts: list[str] = field(default_factory=list)  # index 0 == page 1
     annotations: list[dict] = field(default_factory=list)  # see extract_annotations_from_pdf
     warning: str | None = None
+    # True when any of this document's text came from OCR of scanned pages
+    # rather than the PDF's own text layer -- see _ocr_scanned_pages(). The
+    # UI and the exported documents both surface an "OCR-derived -- verify
+    # carefully" notice off the back of this flag, because OCR can misread
+    # numbers, dates, and names. ocr_pages is the 1-indexed pages affected.
+    ocr_used: bool = False
+    ocr_pages: list[int] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +58,67 @@ class ExtractedDocument:
 # on a large PDF it can take minutes and looks like a freeze. Past this limit we
 # extract the full text (fast, via PyMuPDF) and skip the structure scan.
 STRUCTURE_SCAN_PAGE_LIMIT = 40
+
+# --- Scanned-PDF OCR fallback ---------------------------------------------
+# A page whose extracted text (whitespace-stripped) is shorter than this is
+# treated as effectively image-only: real brief pages of body text are
+# thousands of characters, while a scanned page's text layer is empty or
+# just a few stray artefact characters. Deliberately low so a genuinely
+# sparse-but-real page (a divider with one heading) isn't needlessly OCR'd.
+OCR_MIN_CHARS_PER_PAGE = 40
+
+# Rendering DPI for OCR -- 200 is Tesseract's sweet spot for body text
+# (higher costs seconds per page for little accuracy gain on A4 briefs).
+OCR_RENDER_DPI = 200
+
+# Hard ceiling on how many pages get OCR'd inline, so a 500-page scanned
+# appendix can't freeze the app for half an hour. Pages past the cap are
+# reported in the warning rather than silently skipped.
+OCR_MAX_PAGES = 60
+
+# The standing tag wording -- referenced by app.py (UI badge) and
+# export_docx.py (in-document notice) so all three stay in sync.
+OCR_VERIFY_TAG = "OCR-derived -- verify carefully"
+
+OCR_UNAVAILABLE_MESSAGE = (
+    "This brief looks scanned -- its pages are images rather than selectable text, and "
+    "text recognition (OCR) isn't available on the server right now, so nothing could be "
+    "read from it. Try re-exporting the PDF with selectable text (most scanners and PDF "
+    "tools have an 'OCR' or 'searchable PDF' option), or email the file to "
+    "hello@civilproposals.com and we'll process it for you."
+)
+
+
+def ocr_available() -> bool:
+    """True when pytesseract AND the tesseract binary are both usable.
+    Cached after the first real check -- the answer can't change within one
+    process lifetime, and the binary check shells out."""
+    global _OCR_AVAILABLE
+    if _OCR_AVAILABLE is None:
+        try:
+            import pytesseract
+            pytesseract.get_tesseract_version()
+            _OCR_AVAILABLE = True
+        except Exception:
+            _OCR_AVAILABLE = False
+    return _OCR_AVAILABLE
+
+
+_OCR_AVAILABLE: bool | None = None
+
+
+def _ocr_pdf_page(page) -> str:
+    """OCR one PyMuPDF page by rendering it to an image first. Returns ""
+    on any failure -- the caller treats that the same as 'no text found'."""
+    try:
+        import pytesseract
+        from PIL import Image
+
+        pix = page.get_pixmap(dpi=OCR_RENDER_DPI)
+        image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+        return (pytesseract.image_to_string(image) or "").strip()
+    except Exception:
+        return ""
 
 
 def extract_text_from_pdf(file_bytes: bytes, filename: str = "document.pdf",
@@ -77,17 +145,82 @@ def extract_text_from_pdf(file_bytes: bytes, filename: str = "document.pdf",
         if do_structure:
             headings.extend(_guess_headings_from_page(page))
 
+    # --- Scanned-page detection + OCR fallback ---------------------------
+    # A page with (almost) no text layer is effectively an image: a scan, a
+    # photographed brief, or an image-only export. Without this, such a
+    # brief used to sail through "successfully" with an empty analysis.
+    low_text_pages = [
+        i for i, t in enumerate(page_texts) if len((t or "").strip()) < OCR_MIN_CHARS_PER_PAGE
+    ]
+    ocr_pages: list[int] = []
+    ocr_skipped_pages: list[int] = []
+    ocr_needed = bool(low_text_pages)
+    whole_doc_unreadable = len(low_text_pages) == page_count and page_count > 0
+
+    if ocr_needed and ocr_available():
+        for n, page_index in enumerate(low_text_pages):
+            if n >= OCR_MAX_PAGES:
+                ocr_skipped_pages.append(page_index + 1)
+                continue
+            ocr_text = _ocr_pdf_page(doc[page_index])
+            if ocr_text:
+                page_texts[page_index] = ocr_text
+                ocr_pages.append(page_index + 1)
+
     full_text = "\n\n".join(
         f"[Page {i + 1}]\n{t}" for i, t in enumerate(page_texts)
     )
     doc.close()
 
     tables = _extract_tables_with_pdfplumber(file_bytes) if do_structure else []
-    warning = None
+    warnings: list[str] = []
     if include_structure and not do_structure:
-        warning = (
+        warnings.append(
             f"Large PDF ({page_count} pages): skipped the slower heading/table scan to keep "
             f"things responsive. The full text was still extracted and is used for analysis."
+        )
+
+    if ocr_needed and not ocr_available():
+        if whole_doc_unreadable:
+            # Nothing usable at all -- return empty text plus the plain-
+            # language message, so the caller's "warning and not text" path
+            # shows a clear error instead of proceeding to an empty analysis.
+            return ExtractedDocument(
+                filename=filename, text="", page_count=page_count,
+                warning=OCR_UNAVAILABLE_MESSAGE,
+            )
+        warnings.append(
+            f"{len(low_text_pages)} of this PDF's {page_count} pages look scanned (images "
+            f"rather than selectable text) and text recognition (OCR) isn't available on the "
+            f"server right now, so those pages could not be read: "
+            f"page(s) {_format_page_list([p + 1 for p in low_text_pages])}. The other pages "
+            f"were extracted normally. If those scanned pages matter, re-export the PDF with "
+            f"selectable text or email it to hello@civilproposals.com."
+        )
+    elif ocr_pages:
+        warnings.append(
+            f"Text recognition (OCR) was used to read {len(ocr_pages)} scanned page(s) "
+            f"(page {_format_page_list(ocr_pages)}). {OCR_VERIFY_TAG}: OCR can misread "
+            f"numbers, dates, and names, so double-check anything important against the "
+            f"original document."
+        )
+        if ocr_skipped_pages:
+            warnings.append(
+                f"{len(ocr_skipped_pages)} further scanned page(s) were NOT read "
+                f"(page {_format_page_list(ocr_skipped_pages)}) -- OCR is capped at "
+                f"{OCR_MAX_PAGES} pages per document to keep the app responsive."
+            )
+    elif ocr_needed and whole_doc_unreadable:
+        # OCR is available but produced nothing on any page (e.g. blank
+        # scans, or an image format Tesseract couldn't handle) -- same
+        # honest dead-end as OCR being unavailable, never an empty analysis.
+        return ExtractedDocument(
+            filename=filename, text="", page_count=page_count,
+            warning=(
+                "This brief looks scanned, and text recognition (OCR) couldn't read anything "
+                "usable from its pages. Try re-exporting the PDF with selectable text, or "
+                "email the file to hello@civilproposals.com and we'll process it for you."
+            ),
         )
 
     return ExtractedDocument(
@@ -97,8 +230,18 @@ def extract_text_from_pdf(file_bytes: bytes, filename: str = "document.pdf",
         headings=_dedupe_preserve_order(headings)[:200],
         tables=tables,
         page_texts=page_texts,
-        warning=warning,
+        warning="\n\n".join(warnings) if warnings else None,
+        ocr_used=bool(ocr_pages),
+        ocr_pages=ocr_pages,
     )
+
+
+def _format_page_list(pages: list[int], max_shown: int = 12) -> str:
+    pages = sorted(pages)
+    shown = ", ".join(str(p) for p in pages[:max_shown])
+    if len(pages) > max_shown:
+        shown += f" and {len(pages) - max_shown} more"
+    return shown
 
 
 def _guess_headings_from_page(page) -> list[str]:
@@ -519,6 +662,8 @@ def combine_extracted_documents(docs: list[ExtractedDocument]) -> ExtractedDocum
     warnings: list[str] = []
     page_count = 0
 
+    ocr_used = False
+    ocr_pages: list[int] = []
     for d in docs:
         if d.text:
             text_parts.append(f"===== {d.filename} =====\n\n{d.text}")
@@ -531,6 +676,9 @@ def combine_extracted_documents(docs: list[ExtractedDocument]) -> ExtractedDocum
             annotations.append({**a, "source_file": d.filename})
         if d.warning:
             warnings.append(f"{d.filename}: {d.warning}")
+        if getattr(d, "ocr_used", False):
+            ocr_used = True
+            ocr_pages.extend(getattr(d, "ocr_pages", []) or [])
 
     return ExtractedDocument(
         filename=f"{len(docs)} files combined ({', '.join(filenames)})",
@@ -541,6 +689,8 @@ def combine_extracted_documents(docs: list[ExtractedDocument]) -> ExtractedDocum
         page_texts=page_texts,
         annotations=annotations,
         warning="; ".join(warnings) if warnings else None,
+        ocr_used=ocr_used,
+        ocr_pages=ocr_pages,
     )
 
 

@@ -1,0 +1,6 @@
+# Railway build config (Nixpacks). The scanned-PDF OCR fallback
+# (modules/document_processor.py) shells out to the tesseract binary via
+# pytesseract -- a system package, not a pip one. Applies to BOTH services
+# built from this directory (web + worker).
+[phases.setup]
+aptPkgs = ["tesseract-ocr", "tesseract-ocr-eng"]

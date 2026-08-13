@@ -26,3 +26,10 @@ stripe>=10.0
 # --- Added for background jobs (multi-user concurrency) ---
 redis>=5.0
 rq>=1.16
+
+# --- Added for the scanned-PDF OCR fallback (see modules/document_processor.py) ---
+# Also needs the tesseract-ocr SYSTEM package at runtime -- installed on
+# Railway via nixpacks.toml's aptPkgs (see that file). Without the binary,
+# the app still runs; scanned PDFs get a clear "this brief looks scanned"
+# message instead of OCR.
+pytesseract>=0.3.10
