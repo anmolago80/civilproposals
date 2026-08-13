@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Security &amp; Data Handling - CivilProposals</title>
+<meta name="description" content="Where CivilProposals stores your tender data, how it's protected, how AI processing works, and honest answers on SOC 2 and Australian data residency.">
+<link rel="canonical" href="https://civilproposals.com/security.html">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#111827;
+    --blue:#1D4ED8;
+    --blue-dark:#1E3A8A;
+    --blue-tint:#EFF4FF;
+    --accent:#F97316;
+    --surface:#F6F6F4;
+    --border:#E4E4E0;
+    --text-muted:#5B6472;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{
+    font-family:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink);line-height:1.6;background:#fff;font-weight:500;
+  }
+  a{color:var(--blue);}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 24px;}
+  h1,h2,h3,h4{font-weight:800;letter-spacing:-0.02em;}
+
+  nav{display:flex;align-items:center;justify-content:space-between;padding:20px 0;}
+  .logo{font-weight:800;font-size:1.25rem;display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink);}
+  .logo img{width:32px;height:32px;border-radius:8px;}
+  .beta-tag{
+    font-size:.64rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase;
+    background:#FFF3E0;color:#B8600A;border:1px solid #F3D9AE;padding:3px 9px;border-radius:20px;
+  }
+  .nav-cta{
+    background:var(--blue);color:#fff;padding:11px 22px;border-radius:10px;
+    text-decoration:none;font-weight:700;font-size:.92rem;
+  }
+  .nav-cta:hover{background:var(--blue-dark);}
+
+  main{padding:48px 0 80px;}
+  .back-link{display:inline-block;margin-bottom:20px;color:var(--text-muted);text-decoration:none;font-size:.9rem;font-weight:700;}
+  .back-link:hover{color:var(--blue);}
+  .legal-page{max-width:800px;}
+  .legal-page h1{font-size:2.1rem;margin-bottom:8px;}
+  .legal-updated{color:var(--text-muted);font-size:.9rem;margin-bottom:28px;}
+  .review-note{
+    background:#FFF8EE;border:1px solid #F3D9AE;border-radius:12px;padding:16px 20px;
+    font-size:.88rem;color:#7A4A0A;margin-bottom:36px;line-height:1.6;
+  }
+  .legal-page h2{font-size:1.25rem;margin:34px 0 12px;}
+  .legal-page p{color:var(--text-muted);margin-bottom:14px;}
+  .legal-page ul{color:var(--text-muted);margin:0 0 14px 22px;}
+  .legal-page li{margin-bottom:8px;}
+  .legal-page strong{color:var(--ink);}
+
+  .site-footer{background:var(--ink);color:#fff;}
+  .footer-top{display:flex;flex-wrap:wrap;gap:40px;justify-content:space-between;padding:56px 0 40px;}
+  .footer-brand{max-width:340px;}
+  .footer-brand .logo{color:#fff;font-weight:800;font-size:1.15rem;display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+  .footer-brand .logo img{width:28px;height:28px;border-radius:7px;}
+  .footer-tagline{color:#9CA3AF;font-size:.92rem;line-height:1.6;}
+  .footer-col .footer-col-title{font-size:.76rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#9CA3AF;margin-bottom:14px;}
+  .footer-col a{color:#fff;text-decoration:none;font-size:.92rem;display:block;margin-bottom:8px;}
+  .footer-col a:hover{color:#93C5FD;}
+  .footer-bottom{
+    border-top:1px solid rgba(255,255,255,.12);padding:22px 0;
+    display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:center;
+  }
+  .footer-links{display:flex;gap:22px;flex-wrap:wrap;}
+  .footer-links a{color:#D1D5DB;text-decoration:none;font-size:.85rem;font-weight:700;}
+  .footer-links a:hover{color:#fff;}
+  .footer-copyright{color:#9CA3AF;font-size:.82rem;}
+</style>
+<script defer data-domain="civilproposals.com" src="https://plausible.io/js/script.js"></script>
+</head>
+<body>
+
+<nav class="wrap">
+  <a class="logo" href="index.html"><img src="assets/logo_mark.png" alt="CivilProposals"> CivilProposals <span class="beta-tag">Beta</span></a>
+  <a class="nav-cta" href="https://app.civilproposals.com">Get Started</a>
+</nav>
+
+<main class="wrap">
+  <div class="legal-page">
+    <a class="back-link" href="index.html">&larr; Back to home</a>
+    <h1>Security &amp; Data Handling</h1>
+    <p class="legal-updated">Last updated: August 2026</p>
+
+    <p>
+      Tender documents are commercially sensitive, and the CivilProposals team treats them that
+      way. This page describes -- plainly and truthfully -- where your data lives, how it's
+      protected, how the AI processing works, and where we honestly stand on formal
+      certifications. If anything here doesn't answer your firm's specific question, email
+      <a href="mailto:hello@civilproposals.com">hello@civilproposals.com</a> and you'll get a
+      straight answer.
+    </p>
+
+    <h2>Where your data is stored</h2>
+    <p>
+      Your account data, uploaded documents, saved projects, and proposal library are stored in a
+      managed PostgreSQL database on <strong>Railway</strong>, our hosting platform, in its
+      <strong>US-West (San Francisco) region</strong>. The application itself runs on the same
+      platform. The marketing site (this page) is served by <strong>Cloudflare</strong> and holds
+      no customer data. Payments are handled entirely by <strong>Stripe</strong> -- your card
+      details go directly to Stripe and never touch our servers.
+    </p>
+
+    <h2>Encryption</h2>
+    <ul>
+      <li><strong>In transit:</strong> all connections to civilproposals.com and
+        app.civilproposals.com are encrypted with TLS (HTTPS). There is no unencrypted access to
+        the Service.</li>
+      <li><strong>At rest:</strong> your data sits on Railway's managed, SOC 2 Type II certified
+        infrastructure. Passwords are hashed with bcrypt -- we never store or log a plain-text
+        password. Sessions use signed, tamper-evident cookies.</li>
+      <li><strong>API keys and secrets</strong> are held as server-side environment variables,
+        never in code or in the database, and background job payloads are deliberately redacted
+        so credentials never sit in the job queue.</li>
+    </ul>
+
+    <h2>AI processing and the no-training commitment</h2>
+    <p>
+      Draft generation is powered by Claude, via Anthropic's commercial API. Under Anthropic's
+      commercial terms, <strong>data sent to the API is not used to train their models</strong>.
+      Your documents are sent to Anthropic only to generate your outputs -- extraction, analysis,
+      and drafting for your project -- and Anthropic processes that data in the United States.
+      We don't use your documents to train models either, and no other customer's AI output can
+      draw on your uploaded material.
+    </p>
+
+    <h2>Per-account isolation</h2>
+    <p>
+      Everything you upload or generate -- briefs, company material, CVs, saved projects, the
+      proposal library -- is scoped to your account in the database. Other firms using
+      CivilProposals cannot see, search, or reuse any of it. Library isolation between accounts
+      is covered by an automated check in our development process, not just a policy statement.
+    </p>
+
+    <h2>Deleting your data</h2>
+    <p>
+      Email <a href="mailto:hello@civilproposals.com">hello@civilproposals.com</a> from your
+      account address and we'll delete your account and its stored data -- uploaded documents,
+      saved projects, and library entries -- and confirm when it's done. Backups held by our
+      hosting provider expire on their standard retention cycle.
+    </p>
+
+    <h2>Where we stand on SOC 2</h2>
+    <p>
+      Honestly: <strong>CivilProposals has not completed a SOC 2 audit.</strong> We're a young
+      product and we'd rather tell you that plainly than imply otherwise. The infrastructure we
+      build on carries its own certifications -- Railway is SOC 2 Type II certified, and Stripe
+      is a PCI-DSS Level 1 service provider -- but those certify our providers, not us. If SOC 2
+      is a hard requirement for your firm, talk to us before signing up and we'll be upfront
+      about where things stand and what's on the roadmap.
+    </p>
+
+    <h2>Australian data residency</h2>
+    <p>
+      Most of our users are Australian firms, so here is the current reality:
+      <strong>your data is processed and stored in the United States</strong> -- the application
+      and database run in Railway's US-West region, and Anthropic's AI processing also happens in
+      the US. There is currently no Australian-hosted option. Australian data residency is on our
+      roadmap as the product matures; if it's a requirement for a specific pursuit (some
+      government tenders do require it), email us and we'll tell you honestly whether we can meet
+      it yet rather than talking around it.
+    </p>
+
+    <h2>Reporting a security concern</h2>
+    <p>
+      If you believe you've found a vulnerability in CivilProposals, email
+      <a href="mailto:hello@civilproposals.com">hello@civilproposals.com</a> with the details.
+      You'll get a response from the team -- practising civil engineers who understand exactly
+      how sensitive tender material is -- and a fix will be prioritised ahead of feature work.
+    </p>
+
+    <p style="margin-top:34px;">
+      Related reading: our <a href="security.html">Security &amp; Data Handling</a>
+      <a href="privacy-policy.html">Privacy Policy</a> covers what we
+      collect and why, and the <a href="terms-of-service.html">Terms of Service</a> cover
+      responsibility for reviewing AI output.
+    </p>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-top">
+    <div class="footer-brand">
+      <a class="logo" href="index.html" style="color:#fff;"><img src="assets/logo_mark.png" alt="CivilProposals"> CivilProposals</a>
+      <p class="footer-tagline">AI-assisted tender & proposal preparation, built for civil engineering firms.</p>
+    </div>
+    <div class="footer-col">
+      <div class="footer-col-title">Contact</div>
+      <a href="mailto:hello@civilproposals.com">hello@civilproposals.com</a>
+    </div>
+    <div class="footer-col">
+      <div class="footer-col-title">Follow us</div>
+      <a href="https://www.linkedin.com/company/civil-proposals" target="_blank" rel="noopener">LinkedIn</a>
+    </div>
+  </div>
+  <div class="wrap footer-bottom">
+    <div class="footer-links">
+      <a href="privacy-policy.html">Privacy Policy</a>
+      <a href="terms-of-service.html">Terms of Service</a>
+      <a href="cookie-policy.html">Cookie Policy</a>
+    </div>
+    <div class="footer-copyright">Copyright &copy; 2026 CivilProposals. All rights reserved.</div>
+  </div>
+</footer>
+
+</body>
+</html>

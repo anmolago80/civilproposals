@@ -126,6 +126,21 @@
   ]
 }
 </script>
+<script>
+  // Site-wide config. beta:false swaps the pricing section's Beta Access
+  // note for the prepared beta-exit variant and hides the nav Beta tag --
+  // flip this single flag on launch day, nothing else to edit.
+  window.SITE_CONFIG = { beta: true };
+</script>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var beta = (window.SITE_CONFIG || {}).beta !== false;
+    document.querySelectorAll('[data-beta-note]').forEach(function(el){
+      el.hidden = (el.getAttribute('data-beta-note') === 'beta') !== beta;
+    });
+    if(!beta){ document.querySelectorAll('.beta-tag').forEach(function(el){ el.hidden = true; }); }
+  });
+</script>
 <!-- Analytics: Plausible (cookieless, privacy-respecting -- consistent with
      the Cookie Policy's "no analytics cookies" statement, since it sets none).
      ONE-TIME SETUP: create an account at plausible.io and add BOTH sites --
@@ -297,8 +312,21 @@
   @media(max-width:600px){.feature-grid{grid-template-columns:1fr;}}
   .feature-card{background:#fff;border:1px solid var(--border);border-radius:14px;padding:26px;}
   .feature-icon{font-size:1.4rem;margin-bottom:14px;}
-  .feature-card h4{font-size:1.02rem;margin-bottom:8px;}
+  .feature-card h3{font-size:1.02rem;margin-bottom:8px;}
   .feature-card p{color:var(--text-muted);font-size:.92rem;}
+
+  /* Capability deep-dive -- screenshot-led cards for features that used to
+     be invisible on this page (pitch review, gap analysis, fee benchmarks,
+     PPTX exports). Same card language as .feature-card, plus an image. */
+  .deep-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;}
+  @media(max-width:900px){.deep-grid{grid-template-columns:1fr;}}
+  .deep-card{background:#fff;border:1px solid var(--border);border-radius:14px;overflow:hidden;}
+  .deep-card.wide{grid-column:1 / -1;}
+  .deep-shot{border-bottom:1px solid var(--border);background:#EAF3FB;}
+  .deep-shot img{display:block;width:100%;height:auto;}
+  .deep-body{padding:22px 26px 26px;}
+  .deep-body h3{font-size:1.05rem;margin-bottom:8px;}
+  .deep-body p{color:var(--text-muted);font-size:.93rem;line-height:1.7;}
 
   /* How it works -- Step N label + bold heading + numbered instructions,
      matching civils.ai's step-by-step cards, each backed by a real
@@ -393,7 +421,7 @@
   .footer-brand .logo{color:#fff;font-weight:800;font-size:1.15rem;display:flex;align-items:center;gap:10px;margin-bottom:12px;}
   .footer-brand .logo img{width:28px;height:28px;border-radius:7px;}
   .footer-tagline{color:#9CA3AF;font-size:.92rem;line-height:1.6;}
-  .footer-col h4{font-size:.76rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#9CA3AF;margin-bottom:14px;}
+  .footer-col .footer-col-title{font-size:.76rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#9CA3AF;margin-bottom:14px;}
   .footer-col a{color:#fff;text-decoration:none;font-size:.92rem;display:block;margin-bottom:8px;}
   .footer-col a:hover{color:#93C5FD;}
   .footer-disclaimer{border-top:1px solid rgba(255,255,255,.12);padding:26px 0;}
@@ -541,39 +569,84 @@
     <div class="feature-grid">
       <div class="feature-card">
         <div class="feature-icon">📋</div>
-        <h4>Compliance matrix, automatically</h4>
+        <h3>Compliance matrix, automatically</h3>
         <p>Every mandatory requirement pulled straight from the brief and tracked against your
         response, so nothing gets missed between now and submission day.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">🏗️</div>
-        <h4>A structure that matches how you're scored</h4>
+        <h3>A structure that matches how you're scored</h3>
         <p>Mirrors the brief's own named selection criteria when it has them, or a proven skeleton
         when it doesn't, weighted and page-allocated to match, not guessed at.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">✍️</div>
-        <h4>First pass drafts, never invented facts</h4>
+        <h3>First pass drafts, never invented facts</h3>
         <p>A real starting point for every section. Anything the tool doesn't actually know
         (a certification, a past project, a number) becomes a clearly marked placeholder.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">🎨</div>
-        <h4>A designed document, not a bare Word file</h4>
+        <h3>A designed document, not a bare Word file</h3>
         <p>Branded section dividers, cover banners, a real project org chart, and a themed layout,
         ready to hand to your proposal writers.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">🗂️</div>
-        <h4>A reusable content library</h4>
+        <h3>A reusable content library</h3>
         <p>Archive finished proposals, tag them, and pull real content back in on your next
         pursuit instead of starting from a blank page every time.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">💰</div>
-        <h4>Fee &amp; program tools, built in</h4>
+        <h3>Fee &amp; program tools, built in</h3>
         <p>An indicative discipline fee split, a delivery program, and a full commercial section
         buildup alongside the technical response.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <span class="section-label">A closer look</span>
+    <h2 class="section-title">The tools you'd otherwise only find by clicking around</h2>
+    <p class="section-sub">Beyond the first-pass draft, the same project drives a set of deeper checks and exports. All demo data shown -- no real clients or projects.</p>
+    <div class="deep-grid">
+      <div class="deep-card wide">
+        <div class="deep-shot"><img src="assets/feature_pitch_review.jpg" alt="Red-team pitch review: an evaluator's read of your pitch plus a tightened rewrite built only from your own content" width="1902" height="780" loading="lazy"></div>
+        <div class="deep-body">
+          <h3>Red-team pitch review</h3>
+          <p>Your differentiator and sales pitch, read the way an evaluator will read them: which claims score nothing because every competitor makes them too, what this brief actually rewards, and a tightened rewrite built strictly from your own content -- with red placeholders where evidence is still needed, never an invented project.</p>
+        </div>
+      </div>
+      <div class="deep-card">
+        <div class="deep-shot"><img src="assets/feature_gap_analysis.jpg" alt="Gap analysis table showing each brief requirement marked covered, partial, or missing" width="1902" height="780" loading="lazy"></div>
+        <div class="deep-body">
+          <h3>Gap analysis</h3>
+          <p>Every requirement in the brief, checked against the material you've actually uploaded and marked covered, partial, or missing -- so the holes surface while there's still time to fix them, not on submission morning.</p>
+        </div>
+      </div>
+      <div class="deep-card">
+        <div class="deep-shot"><img src="assets/feature_fee_benchmarks.jpg" alt="Fee estimation table with each discipline's split compared against typical benchmark ranges" width="1902" height="780" loading="lazy"></div>
+        <div class="deep-body">
+          <h3>Fee estimation with benchmarks</h3>
+          <p>Your hours-and-rates build-up, sanity-checked against typical multidisciplinary fee-split patterns. A discipline sitting outside its usual range gets flagged for a second look -- clearly labelled as an indicative rule-of-thumb, never a substitute for your own estimate.</p>
+        </div>
+      </div>
+      <div class="deep-card">
+        <div class="deep-shot"><img src="assets/feature_org_chart.jpg" alt="Project org chart built from the resourcing plan, with a Download Org Chart PPTX button" width="1902" height="780" loading="lazy"></div>
+        <div class="deep-body">
+          <h3>Org chart, exported to PowerPoint</h3>
+          <p>A project org chart built straight from your resourcing plan and exported as a real, editable PPTX -- unassigned roles show a red TBC rather than an invented name, so the chart is honest about where the team still has gaps.</p>
+        </div>
+      </div>
+      <div class="deep-card wide">
+        <div class="deep-shot"><img src="assets/feature_methodology.jpg" alt="Staged methodology table themed to the proposal, with real scope items in stage two and red placeholders for unconfirmed stages" width="1902" height="780" loading="lazy"></div>
+        <div class="deep-body">
+          <h3>Methodology table, exported to PowerPoint</h3>
+          <p>A staged methodology table themed to your proposal's colours: stage two's key tasks come straight from this brief's real scope items, later stages stay explicit red placeholders until you confirm them, and the whole thing exports as an editable PPTX to finish in PowerPoint.</p>
+        </div>
       </div>
     </div>
   </div>
@@ -670,11 +743,22 @@
       </div>
     </div>
 
-    <div class="beta-note">
+    <!-- Beta banner, keyed off SITE_CONFIG.beta (see the config script in
+         <head>). While beta=true the Beta Access note shows; flipping the
+         flag to false swaps in the prepared beta-exit variant below and
+         hides the nav's Beta tag -- one switch, no copy edits needed on
+         launch day. -->
+    <div class="beta-note" data-beta-note="beta">
       <strong>🚀 Beta Access.</strong> This product is currently in beta. Features and pricing may
       change, and occasional issues may occur. Always review and verify AI generated content
       before using it in tender submissions or other formal documentation. If something doesn't
       look right, please let us know.
+    </div>
+    <div class="beta-note" data-beta-note="ga" hidden>
+      <strong>✅ Out of beta.</strong> CivilProposals is now generally available -- the pricing
+      above is current, and the team behind it uses it on real pursuits. As with any AI-assisted
+      tool, always review and verify generated content before it goes into a tender submission
+      or other formal documentation.
     </div>
   </div>
 </section>
@@ -711,7 +795,9 @@
         drafting, and your data is never used to train their models. We're still a beta product
         and haven't completed formal compliance certifications like SOC 2 yet, so if that's a
         hard requirement for your firm, reach out before signing up and we'll be upfront about
-        where things stand.</p>
+        where things stand. The full picture -- where data is stored, encryption, AI processing,
+        data residency -- is on our <a href="security.html" style="color:var(--blue);font-weight:700;">Security &amp;
+        Data Handling</a> page.</p>
       </details>
 
       <details class="faq-item">
@@ -775,11 +861,11 @@
       <p class="footer-tagline">AI-assisted tender & proposal preparation, built for civil engineering firms.</p>
     </div>
     <div class="footer-col">
-      <h4>Contact</h4>
+      <div class="footer-col-title">Contact</div>
       <a href="mailto:hello@civilproposals.com">hello@civilproposals.com</a>
     </div>
     <div class="footer-col">
-      <h4>Follow us</h4>
+      <div class="footer-col-title">Follow us</div>
       <a href="https://www.linkedin.com/company/civil-proposals" target="_blank" rel="noopener">LinkedIn</a>
     </div>
   </div>
@@ -797,6 +883,7 @@
 
   <div class="wrap footer-bottom">
     <div class="footer-links">
+      <a href="security.html">Security &amp; Data Handling</a>
       <a href="privacy-policy.html">Privacy Policy</a>
       <a href="terms-of-service.html">Terms of Service</a>
       <a href="cookie-policy.html">Cookie Policy</a>
