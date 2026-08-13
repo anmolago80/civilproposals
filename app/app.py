@@ -65,6 +65,7 @@ from modules import (
     analytics,
     document_processor,
     package_intake,
+    returnable_schedules,
     ai_interface,
     tender_analyser,
     weighting_engine,
@@ -5504,6 +5505,105 @@ with tabs[9]:
                 st.success(f"Archived to the library under '{_archived['project_type']}' as {_archived['filename']}.")
             except Exception as exc:
                 _show_error("Couldn't archive to the library", exc)
+
+    # -----------------------------------------------------------------------
+    # Returnable schedules -- fill the client's own response forms (DOCX
+    # tables/forms, XLSX schedules) from this project's data, preserving
+    # their original formatting (see modules/returnable_schedules.py).
+    # Available whether or not the proposal DOCX has been generated: the
+    # schedules only need project data, not the pack.
+    # -----------------------------------------------------------------------
+    st.divider()
+    st.markdown("#### Returnable schedules")
+    st.caption(
+        "Fill the client's own response forms from this project's data -- company and contact "
+        "details, key personnel, reference projects, fee build-up -- inside their original "
+        "document, formatting intact. Anything the project doesn't actually know is left as a "
+        f"clearly-marked **{returnable_schedules.PLACEHOLDER_PREFIX}: ...]** placeholder, never "
+        "a guess. Schedules found in an uploaded tender-package ZIP appear here automatically; "
+        "you can also upload more below."
+    )
+    _extra_scheds = st.file_uploader(
+        "Add schedules to fill (DOCX or XLSX)", type=["docx", "xlsx", "xlsm"],
+        accept_multiple_files=True, key="_returnable_sched_uploader",
+    )
+    if _extra_scheds:
+        for _f in _extra_scheds:
+            _name = _f.name
+            if _name not in (st.session_state.returnable_schedule_files or {}):
+                if _name.lower().endswith(".docx") and not returnable_schedules.looks_like_response_form(_name, _f.getvalue()):
+                    st.info(
+                        f"'{_name}' doesn't look like a response form (its tables are already "
+                        f"full, or it has none) -- it'll still be attempted, but check the "
+                        f"result carefully."
+                    )
+                st.session_state.returnable_schedule_files = {
+                    **(st.session_state.returnable_schedule_files or {}),
+                    _name: _f.getvalue(),
+                }
+
+    _sched_files = st.session_state.returnable_schedule_files or {}
+    if not _sched_files:
+        st.caption("No schedules yet -- upload a tender-package ZIP in Upload Docs, or add files above.")
+    else:
+        _sched_names = sorted(_sched_files)
+        st.write(f"**{len(_sched_names)} schedule(s) ready:** " + ", ".join(f"`{n}`" for n in _sched_names))
+        _rm_col1, _rm_col2 = st.columns([3, 1])
+        with _rm_col2:
+            _to_remove = st.selectbox("Remove a file", ["(keep all)"] + _sched_names, key="_sched_remove_pick",
+                                      label_visibility="collapsed")
+            if _to_remove != "(keep all)" and st.button("Remove", key="_sched_remove_btn"):
+                _new = dict(_sched_files)
+                _new.pop(_to_remove, None)
+                st.session_state.returnable_schedule_files = _new
+                st.rerun()
+        with _rm_col1:
+            if st.button("Fill schedules from this project's data", type="primary", key="_fill_scheds_btn"):
+                _fill_data = returnable_schedules.build_fill_data(st.session_state)
+                _results = []
+                with st.spinner(f"Filling {len(_sched_names)} schedule(s)..."):
+                    for _name in _sched_names:
+                        _results.append(returnable_schedules.fill_schedule(_name, _sched_files[_name], _fill_data))
+                st.session_state._sched_fill_results = _results
+
+        for _res in st.session_state.get("_sched_fill_results") or []:
+            st.markdown(f"**{_res.filename}**")
+            if _res.error:
+                st.warning(_res.error)
+                continue
+            _fcol1, _fcol2 = st.columns([1, 3])
+            with _fcol1:
+                st.download_button(
+                    "Download filled copy",
+                    data=_res.file_bytes,
+                    file_name=returnable_schedules.filled_filename(_res.filename),
+                    mime=("application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                          if _res.kind == "docx" else
+                          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+                    key=f"_sched_dl_{_res.filename}",
+                    type="primary",
+                )
+            with _fcol2:
+                st.caption(
+                    f"{len(_res.filled)} field(s) filled from project data, "
+                    f"{len(_res.placeholdered)} left as clearly-marked placeholders to complete. "
+                    f"Review everything before submitting -- this is a first pass, and the "
+                    f"placeholders are deliberate: the project doesn't know those answers."
+                )
+            if _res.filled or _res.placeholdered:
+                with st.expander(f"What was filled / placeholdered in {_res.filename}"):
+                    if _res.filled:
+                        st.markdown("**Filled from project data:**")
+                        st.dataframe(
+                            [{"Where": f["where"], "Field": f["label"], "Value": f["value"]} for f in _res.filled],
+                            use_container_width=True, hide_index=True,
+                        )
+                    if _res.placeholdered:
+                        st.markdown("**Left as placeholders (complete before submission):**")
+                        st.dataframe(
+                            [{"Where": f["where"], "Field": f["label"]} for f in _res.placeholdered],
+                            use_container_width=True, hide_index=True,
+                        )
 
 
 # ---------------------------------------------------------------------------
