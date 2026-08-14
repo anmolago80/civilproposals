@@ -149,36 +149,82 @@ with st.sidebar:
         "[Full Terms of Service](https://civilproposals.com/terms-of-service.html)"
     )
 
-    # Admin-only AI cost rollup (see db.AiCallLog / db.ai_cost_summary) --
-    # never rendered for regular users. Read-only, so any failure here is
-    # non-fatal by design: an observability panel must not be able to take
-    # the sidebar down with it.
-    if IS_SAAS_MODE and current_user and getattr(current_user, "is_admin", False):
-        with st.expander("AI cost (admin)"):
+    # Admin panel entry -- a real button (not just an expander) that opens a
+    # full-screen stats dialog. Rendered ONLY for admin accounts (the DB
+    # is_admin flag or auth.ADMIN_ACCOUNTS -- see auth.is_admin_user); other
+    # users never see the button. Everything inside is READ-ONLY
+    # observability (accounts, bids, subscriptions, AI cost) -- it cannot
+    # modify any account -- and every query is wrapped so a stats failure
+    # can never take the sidebar down with it.
+    if IS_SAAS_MODE and current_user and auth.is_admin_user(current_user):
+
+        @st.dialog("Admin -- accounts, usage & AI cost", width="large")
+        def _admin_stats_dialog():
             try:
+                _stats = db.admin_stats()
                 _cost = db.ai_cost_summary()
-                st.metric("Total estimated AI cost", f"${_cost['total_cost_usd']:.2f}")
-                st.caption(
-                    f"{_cost['total_calls']} calls logged"
-                    + (f" ({_cost['unpriced_calls']} with unpriced models -- token counts "
-                       f"recorded, cost unknown)" if _cost["unpriced_calls"] else "")
-                )
-                if _cost["per_project"]:
-                    st.dataframe(
-                        [
-                            {
-                                "Project": p["project_name"],
-                                "Calls": p["calls"],
-                                "Est. cost (USD)": round(p["cost_usd"], 2),
-                                "Tokens in": p["input_tokens"],
-                                "Tokens out": p["output_tokens"],
-                            }
-                            for p in _cost["per_project"]
-                        ],
-                        use_container_width=True, hide_index=True,
-                    )
             except Exception as _exc:
-                st.caption(f"Cost data unavailable right now: {_exc}")
+                st.error(f"Stats unavailable right now: {_exc}")
+                return
+
+            st.caption(
+                "Read-only view across ALL accounts. Visible only to admin accounts "
+                "(auth.ADMIN_ACCOUNTS / the users.is_admin flag)."
+            )
+
+            _m1, _m2, _m3, _m4 = st.columns(4)
+            _m1.metric("Accounts", _stats["total_users"],
+                       delta=f"+{_stats['new_users_30d']} in 30d" if _stats["new_users_30d"] else None)
+            _m2.metric("Bids run (all time)", _stats["total_bids"],
+                       delta=f"+{_stats['bids_30d']} in 30d" if _stats["bids_30d"] else None)
+            _m3.metric("Active subscriptions", _stats["active_subscriptions"],
+                       delta=(f"{_stats['past_due_subscriptions']} past due"
+                              if _stats["past_due_subscriptions"] else None),
+                       delta_color="inverse")
+            _m4.metric("Unspent bid credits", _stats["outstanding_bid_credits"])
+
+            st.markdown("#### AI cost")
+            _c1, _c2 = st.columns(2)
+            _c1.metric("Total estimated AI cost", f"${_cost['total_cost_usd']:.2f}")
+            _c2.metric("Last 30 days", f"${_stats['ai_cost_30d_usd']:.2f}")
+            st.caption(
+                f"{_cost['total_calls']} AI calls logged"
+                + (f" ({_cost['unpriced_calls']} with unpriced models -- token counts "
+                   f"recorded, cost unknown)" if _cost["unpriced_calls"] else "")
+                + ". Prices are estimates from ai_interface.MODEL_PRICES_PER_MTOK."
+            )
+            if _cost["per_project"]:
+                st.markdown("**Cost by project**")
+                st.dataframe(
+                    [
+                        {
+                            "Project": p["project_name"],
+                            "Calls": p["calls"],
+                            "Est. cost (USD)": round(p["cost_usd"], 2),
+                            "Tokens in": p["input_tokens"],
+                            "Tokens out": p["output_tokens"],
+                        }
+                        for p in _cost["per_project"]
+                    ],
+                    use_container_width=True, hide_index=True,
+                )
+
+            if _stats["recent_bids"]:
+                st.markdown("#### Recent bids")
+                st.dataframe(
+                    [
+                        {
+                            "When": b["when"].strftime("%d %b %Y %H:%M") if b["when"] else "",
+                            "Account": b["email"],
+                            "Project": b["project"],
+                        }
+                        for b in _stats["recent_bids"]
+                    ],
+                    use_container_width=True, hide_index=True,
+                )
+
+        if st.button("📊 Admin stats", key="_admin_stats_btn", use_container_width=True):
+            _admin_stats_dialog()
 
     # "My projects" / "This computer" and "Export / import a file" used to
     # live here, stacked below the steps. Moved into two popovers in the

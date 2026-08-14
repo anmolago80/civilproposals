@@ -975,6 +975,24 @@ SUBSCRIPTION_MONTHLY_BID_LIMIT = 3
 # case it's a secondary test account.
 UNLIMITED_ACCOUNTS = {"anmolago@icloud.com", "anmolago@hotmail.com"}
 
+# Accounts that get the admin panel (the "Admin stats" button in the
+# sidebar -- accounts/usage/AI-cost rollups across ALL users). Granted by
+# email here, in code, rather than only via the db.User.is_admin flag, so
+# admin access survives any database reset and needs no manual SQL to set
+# up. The DB flag still works too -- see is_admin_user(). Read-only
+# observability: nothing in the admin panel can modify another account.
+ADMIN_ACCOUNTS = {"anmolago@icloud.com", "anmolago@hotmail.com"}
+
+
+def is_admin_user(user: db.User | None) -> bool:
+    """True when this account may see the admin panel -- either flagged
+    is_admin in the database, or listed in ADMIN_ACCOUNTS above."""
+    if user is None:
+        return False
+    if getattr(user, "is_admin", False):
+        return True
+    return (user.email or "").strip().lower() in ADMIN_ACCOUNTS
+
 
 # ---------------------------------------------------------------------------
 # Trial / subscription access

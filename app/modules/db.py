@@ -373,6 +373,50 @@ def ai_cost_summary(limit_projects: int = 25) -> dict:
     }
 
 
+def admin_stats() -> dict:
+    """Read-only rollup for the admin panel (see app's sidebar "Admin
+    stats" button; gated by auth.is_admin_user). Aggregates across ALL
+    accounts: user counts, bids run, subscription/pay-as-you-go state, AI
+    cost, and the most recent bids. Nothing here mutates anything."""
+    from datetime import timedelta
+    now = _now()
+    month_ago = now - timedelta(days=30)
+    with get_session() as s:
+        total_users = s.query(func.count(User.id)).scalar() or 0
+        new_users_30d = s.query(func.count(User.id)).filter(User.created_at >= month_ago).scalar() or 0
+        active_subs = s.query(func.count(User.id)).filter(User.subscription_status == "active").scalar() or 0
+        past_due = s.query(func.count(User.id)).filter(User.subscription_status == "past_due").scalar() or 0
+        outstanding_credits = s.query(func.coalesce(func.sum(User.bid_credits), 0)).scalar() or 0
+        total_bids = s.query(func.count(ProposalUsage.id)).scalar() or 0
+        bids_30d = s.query(func.count(ProposalUsage.id)).filter(ProposalUsage.created_at >= month_ago).scalar() or 0
+        cost_30d = (
+            s.query(func.coalesce(func.sum(AiCallLog.estimated_cost_usd), 0.0))
+            .filter(AiCallLog.created_at >= month_ago)
+            .scalar() or 0.0
+        )
+        recent_bids = (
+            s.query(ProposalUsage.project_name, ProposalUsage.created_at, User.email)
+            .join(User, User.id == ProposalUsage.user_id)
+            .order_by(ProposalUsage.created_at.desc())
+            .limit(10)
+            .all()
+        )
+    return {
+        "total_users": int(total_users),
+        "new_users_30d": int(new_users_30d),
+        "active_subscriptions": int(active_subs),
+        "past_due_subscriptions": int(past_due),
+        "outstanding_bid_credits": int(outstanding_credits),
+        "total_bids": int(total_bids),
+        "bids_30d": int(bids_30d),
+        "ai_cost_30d_usd": float(cost_30d),
+        "recent_bids": [
+            {"project": r[0] or "(unnamed)", "when": r[1], "email": r[2] or ""}
+            for r in recent_bids
+        ],
+    }
+
+
 def project_ai_cost(project_key: str) -> dict:
     """Cost rollup for ONE project -- used to show a per-bid cost figure.
     Returns {"calls", "cost_usd", "input_tokens", "output_tokens",
