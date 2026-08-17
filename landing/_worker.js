@@ -485,10 +485,26 @@ async function serveBlog(request, env, url, ctx) {
     });
   }
 
+  // Nothing in KV for this path. Before 404ing, try the static assets --
+  // landing/blog/index.html is a styled "no posts yet" placeholder that
+  // covers the window between deploying the blog and publishing the first
+  // post. Without it, the Blog link in the nav of every page would lead to
+  // a bare "Post not found." for as long as the blog stayed empty.
+  const asset = await env.ASSETS.fetch(request);
+  if (asset.status === 200) {
+    return new Response(asset.body, {
+      status: 200,
+      headers: {
+        "Content-Type": asset.headers.get("Content-Type") || "text/html; charset=utf-8",
+        "Cache-Control": "public, max-age=60",
+      },
+    });
+  }
+
   const notFound = await env.BLOG.get("page:/blog/404/");
   return new Response(notFound || "Post not found.", {
     status: 404,
-    headers: { "Content-Type": notFound ? "text/html; charset=utf-8" : "text/plain" },
+    headers: { "Content-Type": notFound ? "text/html; charset=utf-8" : "text/plain; charset=utf-8" },
   });
 }
 

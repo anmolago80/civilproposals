@@ -17,11 +17,12 @@
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
-  <url>
-    <loc>https://civilproposals.com/blog/</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-  </url>
+<!-- /blog/ is deliberately absent from THIS fallback copy: before the first
+     post is published, that address serves landing/blog/index.html, which
+     is a noindex placeholder, and listing a noindex URL here is the exact
+     anti-pattern described above. The generated sitemap that replaces this
+     file at first publish does include /blog/, because by then it's a real
+     listing with real content. -->
   <url>
     <loc>https://civilproposals.com/security.html</loc>
     <changefreq>monthly</changefreq>

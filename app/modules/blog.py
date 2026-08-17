@@ -993,6 +993,11 @@ def publish_all(status_callback=None) -> dict:
     push_raw("__cards__", "text/html", render_home_cards_html(posts))
     push_raw("/sitemap.xml", "application/xml", render_sitemap_xml(posts))
 
+    # A styled 404 for /blog/<something-that-does-not-exist>/. Without this
+    # the Worker falls back to plain text, which is what a mistyped or
+    # retired post URL would otherwise show.
+    push_page("/blog/404/", render_404_html())
+
     # Any post that is no longer live must stop being served. Cheap to do
     # unconditionally: one small delete per non-live post.
     live_slugs = {p.slug for p in posts}
