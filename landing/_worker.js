@@ -31,7 +31,20 @@
 //      RESEND_FROM_EMAIL (plain var, can go in wrangler.toml [vars] or the
 //      Cloudflare dashboard). LEAD_NOTIFY_EMAIL is optional, defaults to
 //      hello@civilproposals.com.
-//   4. anything else that reaches this script anyway (shouldn't normally
+//   4. /blog, /blog/* -> the marketing blog. Pages are finished HTML held
+//      in the BLOG KV namespace, written by the Streamlit admin's blog
+//      editor (app/modules/blog.py) through the authenticated /api/blog/*
+//      endpoints below. Nothing on this read path touches Railway or
+//      Postgres, so the blog keeps serving -- and stays crawlable -- while
+//      the app is redeploying or down.
+//   5. /  -> static index.html, but streamed through HTMLRewriter to splice
+//      the current blog cards into <div id="blog-cards">. Lets a new post
+//      appear on the homepage with no rebuild and no redeploy, while
+//      keeping the cards in the server-rendered HTML where crawlers see
+//      them (rather than fetching them client-side).
+//   6. /sitemap.xml -> the generated version from KV when one exists,
+//      falling back to the static file before anything is published.
+//   7. anything else that reaches this script anyway (shouldn't normally
 //      happen given run_worker_first, but just in case) -> fall back to
 //      serving it from static assets via the ASSETS binding.
 //
@@ -217,8 +230,298 @@ async function handleLeadCapture(request, env) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Blog
+//
+// KV layout (the BLOG namespace -- see wrangler.toml):
+//   page:/blog/<slug>/     finished HTML for one post
+//   page:/blog/            the listing
+//   page:/blog/category/x/ a category listing
+//   page:__cards__         inner HTML of the homepage blog strip
+//   page:/sitemap.xml      the generated sitemap (served with its own type)
+//   asset:<key>            an uploaded image, base64 in a metadata-tagged value
+//   stat:<slug>:<date>:<shard>  pageview counters (see bumpViewCount)
+//
+// Everything under page:/ is written by app/modules/blog.py's publish_all(),
+// which always does a FULL re-push rather than patching. That means the KV
+// contents are exactly reproducible from the database, and a partial failure
+// is fixed by pressing Publish again rather than by reasoning about which
+// individual keys got through.
+// ---------------------------------------------------------------------------
+
+const BLOG_CACHE_SECONDS = 300;
+
+// Counters are read-modify-write against KV, which is eventually consistent
+// and has a ~1 write/sec/key ceiling -- two views landing together can read
+// the same number and both write N+1, losing one. Spreading each day's
+// counts across a few keys and summing on read cuts that contention without
+// needing Durable Objects or Analytics Engine (both of which would need
+// resources this config doesn't provision). These numbers are therefore
+// "close", not exact -- which is why the admin panel says so, and why
+// Plausible and Search Console remain the authoritative sources.
+const STAT_SHARDS = 8;
+
+function jsonResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function isAuthorised(request, env) {
+  if (!env.BLOG_PUBLISH_SECRET) return false;
+  const header = request.headers.get("Authorization") || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+  // Constant-time-ish compare: bail on length first, then OR every byte
+  // difference together so the loop's duration doesn't depend on where the
+  // first mismatch is.
+  const expected = env.BLOG_PUBLISH_SECRET;
+  if (token.length !== expected.length) return false;
+  let diff = 0;
+  for (let i = 0; i < token.length; i++) {
+    diff |= token.charCodeAt(i) ^ expected.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
+// Post paths are normalised to a single canonical form -- lowercase, one
+// leading slash, exactly one trailing slash -- so /blog/Foo, /blog/foo and
+// /blog/foo/ can't become three separate KV entries or three separate URLs
+// competing for the same search ranking.
+function normalisePagePath(pathname) {
+  let p = (pathname || "").trim().toLowerCase();
+  if (!p.startsWith("/")) p = "/" + p;
+  p = p.replace(/\/{2,}/g, "/");
+  if (!p.endsWith("/") && !p.includes(".")) p += "/";
+  return p;
+}
+
+async function bumpViewCount(env, slug, ctx) {
+  if (!env.BLOG || !slug) return;
+  const day = new Date().toISOString().slice(0, 10);
+  const shard = Math.floor(Math.random() * STAT_SHARDS);
+  const key = `stat:${slug}:${day}:${shard}`;
+  const task = (async () => {
+    try {
+      const current = parseInt((await env.BLOG.get(key)) || "0", 10) || 0;
+      // 90-day TTL: long enough for the admin panel's widest window, short
+      // enough that the namespace doesn't accumulate forever.
+      await env.BLOG.put(key, String(current + 1), { expirationTtl: 60 * 60 * 24 * 90 });
+    } catch (err) {
+      console.error("[blog stats] increment failed:", err);
+    }
+  })();
+  if (ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(task);   // never make a reader wait on analytics
+  }
+}
+
+async function collectStats(env, days) {
+  if (!env.BLOG) return { posts: [] };
+  const wanted = new Set();
+  const today = new Date();
+  for (let i = 0; i < days; i++) {
+    const d = new Date(today.getTime() - i * 86400000);
+    wanted.add(d.toISOString().slice(0, 10));
+  }
+
+  const totals = new Map();
+  let cursor;
+  do {
+    const listing = await env.BLOG.list({ prefix: "stat:", cursor });
+    for (const entry of listing.keys) {
+      // stat:<slug>:<date>:<shard> -- slug itself never contains a colon
+      // (blog.py's slugify only emits [a-z0-9-]), so a plain split is safe.
+      const parts = entry.name.split(":");
+      if (parts.length !== 4) continue;
+      const [, slug, date] = parts;
+      if (!wanted.has(date)) continue;
+      const value = parseInt((await env.BLOG.get(entry.name)) || "0", 10) || 0;
+      totals.set(slug, (totals.get(slug) || 0) + value);
+    }
+    cursor = listing.list_complete ? undefined : listing.cursor;
+  } while (cursor);
+
+  return {
+    days,
+    posts: [...totals.entries()]
+      .map(([slug, views]) => ({ slug, views }))
+      .sort((a, b) => b.views - a.views),
+  };
+}
+
+// The publish API. Four verbs, all requiring the shared secret:
+//   POST /api/blog/page    {path, html}                  write a page
+//   POST /api/blog/raw     {path, contentType, body}     write non-HTML (sitemap, cards)
+//   POST /api/blog/asset   {key, contentType, base64}    write an image
+//   POST /api/blog/remove  {path}                        delete a page
+//   GET  /api/blog/stats?days=30                         read the counters
+async function handleBlogApi(request, env, url) {
+  if (!isAuthorised(request, env)) {
+    return jsonResponse({ error: "unauthorised" }, 401);
+  }
+  if (!env.BLOG) {
+    return jsonResponse(
+      { error: "the BLOG KV namespace isn't bound to this Worker -- see DEPLOY.md" },
+      503,
+    );
+  }
+
+  const action = url.pathname.replace(/^\/api\/blog\/?/, "").replace(/\/$/, "");
+
+  if (request.method === "GET" && action === "stats") {
+    const days = Math.min(365, Math.max(1, parseInt(url.searchParams.get("days") || "30", 10) || 30));
+    return jsonResponse(await collectStats(env, days));
+  }
+
+  if (request.method !== "POST") {
+    return jsonResponse({ error: "method not allowed" }, 405);
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ error: "invalid JSON body" }, 400);
+  }
+
+  if (action === "page") {
+    if (typeof body.path !== "string" || typeof body.html !== "string") {
+      return jsonResponse({ error: "path and html are required" }, 400);
+    }
+    await env.BLOG.put(`page:${normalisePagePath(body.path)}`, body.html);
+    return jsonResponse({ ok: true });
+  }
+
+  if (action === "raw") {
+    // __cards__ is a sentinel, not a path -- don't normalise it into
+    // "/__cards__/" the way a real page path would be.
+    if (typeof body.path !== "string" || typeof body.body !== "string") {
+      return jsonResponse({ error: "path and body are required" }, 400);
+    }
+    const key = body.path === "__cards__" ? "page:__cards__" : `page:${normalisePagePath(body.path)}`;
+    await env.BLOG.put(key, body.body, {
+      metadata: { contentType: body.contentType || "text/plain" },
+    });
+    return jsonResponse({ ok: true });
+  }
+
+  if (action === "asset") {
+    if (typeof body.key !== "string" || typeof body.base64 !== "string") {
+      return jsonResponse({ error: "key and base64 are required" }, 400);
+    }
+    if (!/^[A-Za-z0-9._-]+$/.test(body.key)) {
+      return jsonResponse({ error: "invalid asset key" }, 400);
+    }
+    const binary = Uint8Array.from(atob(body.base64), (c) => c.charCodeAt(0));
+    await env.BLOG.put(`asset:${body.key}`, binary, {
+      metadata: { contentType: body.contentType || "application/octet-stream" },
+    });
+    return jsonResponse({ ok: true });
+  }
+
+  if (action === "remove") {
+    if (typeof body.path !== "string") {
+      return jsonResponse({ error: "path is required" }, 400);
+    }
+    await env.BLOG.delete(`page:${normalisePagePath(body.path)}`);
+    return jsonResponse({ ok: true });
+  }
+
+  return jsonResponse({ error: "unknown action" }, 404);
+}
+
+async function serveBlog(request, env, url, ctx) {
+  const path = normalisePagePath(url.pathname);
+
+  // /blog/media/<key> -- an uploaded image.
+  const mediaMatch = url.pathname.match(/^\/blog\/media\/([A-Za-z0-9._-]+)\/?$/);
+  if (mediaMatch) {
+    if (!env.BLOG) return new Response("Not found", { status: 404 });
+    const { value, metadata } = await env.BLOG.getWithMetadata(`asset:${mediaMatch[1]}`, {
+      type: "arrayBuffer",
+    });
+    if (!value) return new Response("Not found", { status: 404 });
+    return new Response(value, {
+      headers: {
+        "Content-Type": (metadata && metadata.contentType) || "application/octet-stream",
+        // Images are content-addressed by filename and replaced under a new
+        // key when changed, so they're safe to cache hard.
+        "Cache-Control": "public, max-age=31536000, immutable",
+      },
+    });
+  }
+
+  // Exactly one URL per page serves content; every other spelling of it
+  // (no trailing slash, mixed case, doubled slashes) 301s to the canonical
+  // form. Serving the same post at two addresses would split its search
+  // signal and is the single easiest SEO mistake to make here.
+  if (url.pathname !== path) {
+    const target = new URL(url);
+    target.pathname = path;
+    return Response.redirect(target.toString(), 301);
+  }
+
+  if (!env.BLOG) {
+    return new Response("The blog isn't configured yet.", {
+      status: 503,
+      headers: { "Content-Type": "text/plain" },
+    });
+  }
+
+  const html = await env.BLOG.get(`page:${path}`);
+  if (html) {
+    // Only count views of actual posts -- not the listing, not categories --
+    // so the per-post numbers in the admin panel mean what they say.
+    const postMatch = path.match(/^\/blog\/([a-z0-9-]+)\/$/);
+    if (postMatch && request.method === "GET") {
+      await bumpViewCount(env, postMatch[1], ctx);
+    }
+    return new Response(html, {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": `public, max-age=60, s-maxage=${BLOG_CACHE_SECONDS}`,
+      },
+    });
+  }
+
+  const notFound = await env.BLOG.get("page:/blog/404/");
+  return new Response(notFound || "Post not found.", {
+    status: 404,
+    headers: { "Content-Type": notFound ? "text/html; charset=utf-8" : "text/plain" },
+  });
+}
+
+// Splices the current blog cards into the static homepage. Falls through
+// untouched when there are no published posts yet, leaving index.html's own
+// placeholder copy in place.
+class BlogCardsInjector {
+  constructor(html) {
+    this.html = html;
+  }
+  element(element) {
+    element.setInnerContent(this.html, { html: true });
+    element.removeAttribute("data-blog-empty");
+  }
+}
+
+async function serveHomeWithBlogCards(request, env) {
+  const assetResponse = await env.ASSETS.fetch(request);
+  if (!env.BLOG) return assetResponse;
+
+  const contentType = assetResponse.headers.get("Content-Type") || "";
+  if (!contentType.includes("text/html")) return assetResponse;
+
+  const cards = await env.BLOG.get("page:__cards__");
+  if (!cards) return assetResponse;
+
+  return new HTMLRewriter()
+    .on("#blog-cards", new BlogCardsInjector(cards))
+    .transform(assetResponse);
+}
+
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     if (url.hostname === "www.civilproposals.com") {
@@ -235,6 +538,57 @@ export default {
           status: 500,
           headers: { "Content-Type": "application/json" },
         });
+      }
+    }
+
+    // Blog publish/stats API. Checked before the /blog read routes so a
+    // post could never be published at a slug that shadows it.
+    if (url.pathname === "/api/blog" || url.pathname.startsWith("/api/blog/")) {
+      try {
+        return await handleBlogApi(request, env, url);
+      } catch (err) {
+        console.error("[blog api] failed:", err);
+        return jsonResponse({ error: "internal error" }, 500);
+      }
+    }
+
+    if (url.pathname === "/blog" || url.pathname.startsWith("/blog/")) {
+      try {
+        return await serveBlog(request, env, url, ctx);
+      } catch (err) {
+        console.error("[blog] failed to serve:", err);
+        return new Response("The blog is temporarily unavailable.", {
+          status: 503,
+          headers: { "Content-Type": "text/plain" },
+        });
+      }
+    }
+
+    // Generated sitemap once anything has been published; the static file
+    // in landing/ is the fallback before that.
+    if (url.pathname === "/sitemap.xml" && env.BLOG) {
+      try {
+        const generated = await env.BLOG.get("page:/sitemap.xml");
+        if (generated) {
+          return new Response(generated, {
+            headers: {
+              "Content-Type": "application/xml; charset=utf-8",
+              "Cache-Control": "public, max-age=3600",
+            },
+          });
+        }
+      } catch (err) {
+        console.error("[sitemap] KV read failed, falling back to the static file:", err);
+      }
+    }
+
+    if (url.pathname === "/" || url.pathname === "/index.html") {
+      try {
+        return await serveHomeWithBlogCards(request, env);
+      } catch (err) {
+        // A failure to inject cards must never cost us the homepage.
+        console.error("[blog cards] injection failed, serving the page as-is:", err);
+        return env.ASSETS.fetch(request);
       }
     }
 

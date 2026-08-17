@@ -226,6 +226,16 @@ with st.sidebar:
         if st.button("📊 Admin stats", key="_admin_stats_btn", use_container_width=True):
             _admin_stats_dialog()
 
+        # Blog editor. Deliberately NOT a dialog like the stats panel above:
+        # writing an article needs the full page, so this just flips a flag
+        # and reruns -- modules/pages/15_admin_blog.py picks it up on the way
+        # through (it runs before this file) and renders the editor
+        # full-width, st.stop()ing before the sidebar and workflow tabs are
+        # ever built. See that file's docstring.
+        if st.button("✍️ Write / edit blog", key="_admin_blog_btn", use_container_width=True):
+            st.session_state._blog_admin_mode = True
+            st.rerun()
+
     # "My projects" / "This computer" and "Export / import a file" used to
     # live here, stacked below the steps. Moved into two popovers in the
     # fixed top-right banner instead (see _render_my_projects_popover() and

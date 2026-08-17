@@ -26,9 +26,30 @@ main = "./landing/_worker.js"
 # Workers & Pages -> civilproposals -> Settings -> Variables and Secrets.
 # This is a separate value from Railway's RESEND_API_KEY variable -- same
 # Resend account, but each platform needs its own copy of the key.
+#
+# BLOG_PUBLISH_SECRET is also NOT set here -- same reasoning, it's a secret:
+#   wrangler secret put BLOG_PUBLISH_SECRET
+# It authenticates the blog editor in the Streamlit app (app/modules/blog.py)
+# when it pushes rendered pages to this Worker. Railway needs the SAME value
+# in its own BLOG_PUBLISH_SECRET variable, or Publish returns 401.
 [vars]
 RESEND_FROM_EMAIL = "CivilProposals <noreply@civilproposals.com>"
 LEAD_NOTIFY_EMAIL = "hello@civilproposals.com"
+
+# Storage for the blog: rendered post pages, uploaded images, and per-post
+# view counters (see the "Blog" section of landing/_worker.js). Create the
+# namespace once with:
+#
+#   wrangler kv namespace create BLOG
+#
+# and paste the id it prints in below, in BOTH this file and
+# landing/wrangler.toml -- the same "keep the two configs in sync" rule that
+# already applies to [vars] above. Until it's filled in, `wrangler deploy`
+# fails with an unknown-namespace error rather than deploying a Worker whose
+# every blog URL would 503.
+[[kv_namespaces]]
+binding = "BLOG"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
 
 # Binds this Worker to www.civilproposals.com as well as the bare domain.
 # The Cloudflare dashboard's "Connect domain" flow under Domains only

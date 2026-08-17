@@ -308,6 +308,86 @@ class AiCallLog(Base):
     created_at = Column(DateTime, default=_now)
 
 
+class BlogPost(Base):
+    """One row per marketing-blog article (see modules/blog.py and the Blog
+    tab in the admin panel). This table is the SOURCE OF TRUTH for post
+    content; the public pages readers actually hit are rendered HTML pushed
+    into Cloudflare Workers KV at publish time, so the live blog keeps
+    serving even when this database (or the whole Railway service) is down.
+    Re-publishing simply re-renders from these rows.
+
+    Deliberately NOT user-scoped, unlike every other model in this file:
+    there is exactly one company blog, and only admin accounts
+    (auth.is_admin_user) can reach the editor at all. author_id records who
+    wrote a post for display/attribution -- it is not an ownership or
+    access-control boundary.
+
+    status is "draft" | "scheduled" | "published" | "unpublished":
+      draft        never public; visible only in the editor
+      scheduled    publishes itself once published_at passes
+      published    live in KV, in the sitemap, in the homepage strip
+      unpublished  pulled from the live site but kept here, so an
+                   accidental publish is reversible without losing the text
+    """
+    __tablename__ = "blog_posts"
+
+    id = Column(String, primary_key=True, default=_uid)
+
+    # The URL: /blog/<slug>/. Unique and effectively permanent once
+    # published -- changing it orphans any inbound link or search result
+    # pointing at the old one, so blog.py warns before allowing an edit to
+    # a slug that has already been live.
+    slug = Column(String, nullable=False, unique=True, index=True)
+
+    title = Column(String, nullable=False, default="")
+    excerpt = Column(Text, default="")        # card text + fallback meta description
+    body_md = Column(Text, default="")        # the post itself, markdown
+    hero_image_key = Column(String, default="")  # -> BlogImage.key, card + OG image
+
+    category = Column(String, default="")     # one of blog.CATEGORIES
+    tags = Column(String, default="")         # comma-separated, free-form
+
+    status = Column(String, default="draft", index=True)
+    published_at = Column(DateTime, nullable=True, index=True)
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+    # Optional SEO overrides -- used when the headline that reads well on
+    # the page isn't the phrase the post should rank for. Both fall back to
+    # title/excerpt when blank.
+    seo_title = Column(String, default="")
+    seo_description = Column(Text, default="")
+
+    author_id = Column(String, nullable=True)
+    author_name = Column(String, default="")
+
+    # Set the first time this post is successfully pushed to KV. Lets the
+    # editor show "published, but with unsaved changes since" by comparing
+    # against updated_at.
+    last_published_at = Column(DateTime, nullable=True)
+
+
+class BlogImage(Base):
+    """An image uploaded through the blog editor -- hero shots and in-body
+    figures. Stored as bytes here (same pattern as LibraryEntry.docx_bytes)
+    and mirrored into KV at publish time, served to readers from
+    /blog/media/<key>.
+
+    Kept in the database rather than committed to landing/assets/ so that
+    adding an image to a post needs no git commit and no site redeploy --
+    publishing is the only step."""
+    __tablename__ = "blog_images"
+
+    id = Column(String, primary_key=True, default=_uid)
+    # Filename-safe, unique, and used verbatim in the public URL.
+    key = Column(String, nullable=False, unique=True, index=True)
+    filename = Column(String, default="")
+    content_type = Column(String, default="image/jpeg")
+    alt_text = Column(String, default="")
+    image_bytes = Column(LargeBinary, nullable=False)
+    uploaded_at = Column(DateTime, default=_now)
+
+
 def log_ai_call(user_id: str | None, project_key: str, project_name: str, purpose: str,
                 provider: str, model: str, input_tokens: int | None,
                 output_tokens: int | None, estimated_cost_usd: float | None) -> None:

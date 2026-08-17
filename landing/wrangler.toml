@@ -21,9 +21,28 @@ main = "./_worker.js"
 # & Pages -> civilproposals -> Settings -> Variables and Secrets. This is a
 # separate value from Railway's RESEND_API_KEY variable -- same Resend
 # account, but each platform needs its own copy of the key.
+#
+# BLOG_PUBLISH_SECRET is also NOT set here -- same reasoning, it's a secret:
+#   wrangler secret put BLOG_PUBLISH_SECRET
+# The Railway side needs the SAME value in its own BLOG_PUBLISH_SECRET
+# variable, or the blog editor's Publish button gets a 401.
 [vars]
 RESEND_FROM_EMAIL = "CivilProposals <noreply@civilproposals.com>"
 LEAD_NOTIFY_EMAIL = "hello@civilproposals.com"
+
+# Storage for the blog's rendered pages, images and view counters (see the
+# "Blog" section of _worker.js). Create the namespace once with:
+#
+#   wrangler kv namespace create BLOG
+#
+# and paste the id it prints in below, in BOTH this file and ../wrangler.toml.
+# Until that's done `wrangler deploy` fails with an unknown-namespace error --
+# which is the intended behaviour: a Worker that deployed successfully but
+# silently had no KV binding would serve 503s on every blog URL and take a
+# while to diagnose.
+[[kv_namespaces]]
+binding = "BLOG"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
 
 [assets]
 # The landing page's own static files -- "." means "this directory" since

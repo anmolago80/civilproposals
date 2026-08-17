@@ -27,6 +27,12 @@ stripe>=10.0
 redis>=5.0
 rq>=1.16
 
+# --- Added for the marketing blog (see modules/blog.py) ---
+# Only used to render post markdown to HTML. blog.py falls back to a small
+# built-in renderer if this isn't installed, so a missing wheel degrades the
+# formatting of a post rather than breaking the app or the live blog.
+markdown>=3.6
+
 # --- Added for the scanned-PDF OCR fallback (see modules/document_processor.py) ---
 # Also needs the tesseract-ocr SYSTEM package at runtime -- installed on
 # Railway via nixpacks.toml's aptPkgs (see that file). Without the binary,

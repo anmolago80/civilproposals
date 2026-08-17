@@ -197,6 +197,16 @@
     transition:background .15s,transform .15s;
   }
   .nav-cta:hover{background:var(--blue-dark);transform:translateY(-1px);}
+  /* nav is justify-content:space-between with two children (logo, actions),
+     so the links and the CTA share one flex container rather than becoming
+     a third top-level child that would spread them across the bar. */
+  .nav-actions{display:flex;align-items:center;gap:22px;}
+  .nav-link{
+    text-decoration:none;color:var(--text-muted);font-weight:700;font-size:.92rem;
+    transition:color .15s;
+  }
+  .nav-link:hover{color:var(--ink);}
+  @media(max-width:520px){.nav-actions{gap:14px;}.nav-link{display:none;}}
 
   /* Hero -- calm, light, plenty of whitespace, plain background */
   header.hero{
@@ -314,6 +324,30 @@
   .feature-icon{font-size:1.4rem;margin-bottom:14px;}
   .feature-card h3{font-size:1.02rem;margin-bottom:8px;}
   .feature-card p{color:var(--text-muted);font-size:.92rem;}
+
+  /* Blog strip. The cards themselves are injected server-side by
+     _worker.js (HTMLRewriter, from the BLOG KV namespace) into
+     #blog-cards, so publishing a post updates this section with no
+     rebuild -- but the markup still arrives in the HTML the crawler
+     sees, which a client-side fetch wouldn't give us. The styles have to
+     live here rather than travelling with the injected fragment, since
+     the fragment is inner HTML only. Kept deliberately close to
+     .post-card in app/modules/blog.py so the homepage cards and the
+     /blog/ listing cards look identical. */
+  .blog-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:34px;text-align:left;}
+  @media(max-width:900px){.blog-strip{grid-template-columns:1fr 1fr;}}
+  @media(max-width:600px){.blog-strip{grid-template-columns:1fr;}}
+  .post-card{border:1px solid var(--border);border-radius:14px;overflow:hidden;background:#fff;
+    display:flex;flex-direction:column;text-decoration:none;transition:box-shadow .18s,transform .18s;}
+  .post-card:hover{box-shadow:0 10px 30px rgba(17,24,39,.09);transform:translateY(-2px);}
+  .post-card-img{aspect-ratio:16/9;background:var(--surface-2);overflow:hidden;}
+  .post-card-img img{width:100%;height:100%;object-fit:cover;display:block;}
+  .post-card-body{padding:20px 22px 24px;display:flex;flex-direction:column;gap:9px;flex:1;}
+  .post-card-cat{font-size:.74rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--blue);}
+  .post-card h2{font-size:1.08rem;font-weight:800;line-height:1.35;letter-spacing:-.01em;}
+  .post-card p{color:var(--text-muted);font-size:.92rem;flex:1;}
+  .post-card-meta{color:var(--text-muted);font-size:.79rem;font-weight:600;}
+  .blog-strip-placeholder{color:var(--text-muted);font-size:.95rem;padding:18px 0;}
 
   /* Capability deep-dive -- screenshot-led cards for features that used to
      be invisible on this page (pitch review, gap analysis, fee benchmarks,
@@ -440,7 +474,10 @@
 
 <nav class="wrap">
   <div class="logo"><img src="assets/logo_mark.png" alt="CivilProposals"> CivilProposals <span class="beta-tag">Beta</span></div>
-  <a class="nav-cta plausible-event-name=CTA+Click plausible-event-position=nav" href="https://app.civilproposals.com">Try it free</a>
+  <div class="nav-actions">
+    <a class="nav-link" href="/blog/">Blog</a>
+    <a class="nav-cta plausible-event-name=CTA+Click plausible-event-position=nav" href="https://app.civilproposals.com">Try it free</a>
+  </div>
 </nav>
 
 <header class="hero">
@@ -840,6 +877,34 @@
   </div>
 </section>
 
+<!-- Blog strip.
+     Placed here on purpose: a reader who has scrolled past pricing, the FAQ
+     and the final CTA without clicking is exactly the person who'd rather
+     read something than sign up, and the newsletter block immediately below
+     already opens with "Not ready to upload a brief yet?" -- so reading
+     leads naturally into subscribing. It also sits outside the
+     pricing -> FAQ -> CTA path rather than interrupting it.
+
+     #blog-cards is filled server-side by _worker.js from the BLOG KV
+     namespace, so a newly published post shows up here with no rebuild.
+     The fallback content below is what renders before anything has ever
+     been published (and if the KV read ever fails). -->
+<section>
+  <div class="wrap" style="text-align:center;">
+    <span class="section-label">From the blog</span>
+    <h2 class="section-title">Notes on winning civil work</h2>
+    <p class="section-sub">Practical writing on tendering, fee proposals and bid strategy.</p>
+    <div class="blog-strip" id="blog-cards" data-blog-empty>
+      <p class="blog-strip-placeholder">
+        First articles coming shortly &mdash; <a href="/blog/" style="color:var(--blue);">the blog lives here</a>.
+      </p>
+    </div>
+    <p style="margin-top:26px;">
+      <a class="btn-secondary" href="/blog/">Read all articles</a>
+    </p>
+  </div>
+</section>
+
 <section style="background:var(--ink);">
   <div class="wrap" style="max-width:640px;text-align:center;">
     <span class="promo-label">Not ready to upload a brief yet?</span>
@@ -859,6 +924,12 @@
     <div class="footer-brand">
       <div class="logo"><img src="assets/logo_mark.png" alt="CivilProposals"> CivilProposals</div>
       <p class="footer-tagline">AI-assisted tender & proposal preparation, built for civil engineering firms.</p>
+    </div>
+    <div class="footer-col">
+      <div class="footer-col-title">Resources</div>
+      <a href="/blog/">Blog</a>
+      <a href="/blog/category/fee-and-pricing/">Fee &amp; pricing</a>
+      <a href="/blog/category/tendering-and-compliance/">Tendering &amp; compliance</a>
     </div>
     <div class="footer-col">
       <div class="footer-col-title">Contact</div>

@@ -1,7 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Only the homepage is listed -- terms-of-service.html, privacy-policy.html,
-     and cookie-policy.html all carry <meta name="robots" content="noindex">
-     on purpose (legal boilerplate, not content anyone should land on from
+<!-- FALLBACK ONLY. Once the blog has been published even once, _worker.js
+     serves a generated sitemap from KV instead of this file -- it has to,
+     because posts appear and disappear without a redeploy, and a static
+     file can't track them. This copy is what's served before that first
+     publish. See app/modules/blog.py's render_sitemap_xml().
+
+     terms-of-service.html, privacy-policy.html and cookie-policy.html are
+     all left out on purpose -- they carry <meta name="robots" content=
+     "noindex"> (legal boilerplate, not content anyone should land on from
      search), and listing noindex pages in a sitemap is a known anti-pattern
      that just generates "Submitted URL marked noindex" warnings in Search
      Console. -->
@@ -10,6 +16,11 @@
     <loc>https://civilproposals.com/</loc>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://civilproposals.com/blog/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
   </url>
   <url>
     <loc>https://civilproposals.com/security.html</loc>
