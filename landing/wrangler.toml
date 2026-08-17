@@ -42,7 +42,7 @@ LEAD_NOTIFY_EMAIL = "hello@civilproposals.com"
 # while to diagnose.
 [[kv_namespaces]]
 binding = "BLOG"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "da2889c309a841f9b7709b84ffb15c51"
 
 [assets]
 # The landing page's own static files -- "." means "this directory" since

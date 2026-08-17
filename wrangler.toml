@@ -49,7 +49,7 @@ LEAD_NOTIFY_EMAIL = "hello@civilproposals.com"
 # every blog URL would 503.
 [[kv_namespaces]]
 binding = "BLOG"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "da2889c309a841f9b7709b84ffb15c51"
 
 # Binds this Worker to www.civilproposals.com as well as the bare domain.
 # The Cloudflare dashboard's "Connect domain" flow under Domains only
