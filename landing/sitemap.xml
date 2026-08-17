@@ -1,28 +1,35 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- FALLBACK ONLY. Once the blog has been published even once, _worker.js
-     serves a generated sitemap from KV instead of this file -- it has to,
-     because posts appear and disappear without a redeploy, and a static
-     file can't track them. This copy is what's served before that first
-     publish. See app/modules/blog.py's render_sitemap_xml().
+<!--
+     FALLBACK ONLY. Once the blog has been published even once, _worker.js
+     serves a generated sitemap out of KV instead of this file. It has to:
+     posts appear and disappear without a redeploy, and a static file can't
+     track them. This copy is what gets served before that first publish.
+     See render_sitemap_xml() in app/modules/blog.py.
 
      terms-of-service.html, privacy-policy.html and cookie-policy.html are
-     all left out on purpose -- they carry <meta name="robots" content=
-     "noindex"> (legal boilerplate, not content anyone should land on from
-     search), and listing noindex pages in a sitemap is a known anti-pattern
-     that just generates "Submitted URL marked noindex" warnings in Search
-     Console. -->
+     all left out on purpose. They carry a noindex robots meta tag (legal
+     boilerplate, not content anyone should reach from a search result),
+     and listing noindex pages in a sitemap is a known anti-pattern that
+     just produces "Submitted URL marked noindex" warnings in Search
+     Console.
+
+     /blog/ is absent for the same reason while the blog is empty: that
+     address currently serves landing/blog/index.html, a noindex
+     placeholder. The generated sitemap that replaces this file at first
+     publish does include /blog/, because by then it is a real listing.
+
+     CAREFUL: a double hyphen is not legal inside an XML comment. Two of
+     them in this file's previous version made the whole sitemap
+     unparseable, and Google reported it as "1 error, 0 discovered pages"
+     with no indication of the cause. Use commas or full stops instead of
+     dashes when editing this header.
+-->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://civilproposals.com/</loc>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
-<!-- /blog/ is deliberately absent from THIS fallback copy: before the first
-     post is published, that address serves landing/blog/index.html, which
-     is a noindex placeholder, and listing a noindex URL here is the exact
-     anti-pattern described above. The generated sitemap that replaces this
-     file at first publish does include /blog/, because by then it's a real
-     listing with real content. -->
   <url>
     <loc>https://civilproposals.com/security.html</loc>
     <changefreq>monthly</changefreq>
