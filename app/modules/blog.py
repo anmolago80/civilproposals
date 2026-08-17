@@ -484,10 +484,17 @@ _BASE_CSS = """
   .nav-links{display:flex;align-items:center;gap:22px;font-size:.92rem;font-weight:600;}
   .nav-links a{text-decoration:none;color:var(--text-muted);}
   .nav-links a:hover{color:var(--ink);}
-  .nav-cta{
-    background:var(--blue);color:#fff;text-decoration:none;padding:10px 18px;
-    border-radius:8px;font-weight:700;font-size:.9rem;
+  /* Qualified with .nav-links on purpose. A bare `.nav-cta` rule loses to
+     `.nav-links a` -- both are one class, but the descendant selector adds
+     an element to the specificity, so the button inherited the muted grey
+     link colour and read as dark-on-blue. Matches the landing page's own
+     .nav-cta styling. */
+  .nav-links a.nav-cta{
+    background:var(--blue);color:#fff;text-decoration:none;padding:11px 22px;
+    border-radius:10px;font-weight:700;font-size:.92rem;
+    transition:background .15s,transform .15s;
   }
+  .nav-links a.nav-cta:hover{background:var(--blue-dark);color:#fff;transform:translateY(-1px);}
   .site-footer{background:var(--ink);color:#9CA3AF;margin-top:80px;padding:48px 0 32px;font-size:.88rem;}
   .site-footer a{color:#9CA3AF;text-decoration:none;}
   .site-footer a:hover{color:#fff;}
