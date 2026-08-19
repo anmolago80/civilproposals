@@ -98,7 +98,7 @@ if _blog_admin_allowed and st.session_state.get("_blog_admin_mode"):
             "**Publishing isn't switched on yet.** You can write and save posts now, but "
             "nothing can go live until `BLOG_PUBLISH_SECRET` is set on this service and "
             "matches the Worker's own secret (`wrangler secret put BLOG_PUBLISH_SECRET`). "
-            "See DEPLOY.md → Blog."
+            "See BLOG_SETUP.md."
         )
 
     _tab_posts, _tab_editor, _tab_media, _tab_stats = st.tabs(

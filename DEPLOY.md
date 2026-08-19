@@ -253,6 +253,19 @@ changes; unknown models log token counts with cost recorded as unknown.
 
 ---
 
+## 8. Blog
+
+The marketing blog is written inside the app itself — log in with an admin
+account and use the sidebar's **✍️ Write / edit blog** button. Pressing
+Publish renders every live page and pushes it to Cloudflare KV, which is
+what readers actually hit, so the blog stays up while Railway redeploys.
+
+Its one-time setup (the KV namespace, the shared `BLOG_PUBLISH_SECRET` that
+Railway and the Worker must both hold) and the full architecture are in
+[`BLOG_SETUP.md`](BLOG_SETUP.md).
+
+---
+
 ## Go-live checklist (steps 11–15 from the original plan)
 
 - [ ] Landing page loads at civilproposals.com and the "Get Started" button reaches the app
