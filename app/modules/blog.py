@@ -39,6 +39,7 @@ editor can warn before someone renames one and orphans a search result.
 from __future__ import annotations
 
 import base64
+import html as _stdlib_html
 import os
 import re
 import unicodedata
@@ -325,17 +326,20 @@ def image_url(key: str) -> str:
 def _md_to_html(text: str) -> str:
     """Renders post markdown. Uses the `markdown` package when available and
     falls back to a small built-in renderer otherwise, so a missing optional
-    dependency degrades the formatting rather than taking the blog down."""
+    dependency degrades the formatting rather than taking the blog down.
+
+    Both paths end in _sanitise_html() -- see the note above it for why."""
     text = text or ""
     try:
         import markdown as _markdown  # noqa: PLC0415 -- optional dependency
-        return _markdown.markdown(
+        html = _markdown.markdown(
             text,
             extensions=["extra", "sane_lists", "smarty", "toc"],
             output_format="html5",
         )
     except Exception:
-        return _fallback_md(text)
+        html = _fallback_md(text)
+    return _sanitise_html(html)
 
 
 def _fallback_md(text: str) -> str:
@@ -425,6 +429,119 @@ def _escape(text: str) -> str:
 def _attr(text: str) -> str:
     """Escape for use inside a double-quoted HTML attribute."""
     return _escape(text).replace("'", "&#39;")
+
+
+# ---------------------------------------------------------------------------
+# Sanitising rendered post HTML
+#
+# Markdown deliberately passes raw HTML straight through, so whatever an
+# author types into a post body reaches a public page verbatim. Today only
+# admin accounts can reach the editor, which makes that self-inflicted-only
+# -- but "only trusted people can write posts" is a property of the current
+# access rules, not of this code, and it is exactly the kind of property
+# that quietly stops being true (a guest author, a contractor, a draft
+# pasted in from somewhere else). Closing it now costs one pass over the
+# rendered body.
+#
+# Deliberately a small, surgical pass rather than a parse-and-re-serialise:
+# anything it does not recognise as dangerous is returned byte-for-byte
+# unchanged, so ordinary markdown output -- headings, lists, links, images,
+# code blocks, tables -- renders exactly as it did before this existed.
+# (Fenced code samples are already escaped to &lt;script&gt; by the renderer,
+# so a post *about* HTML keeps working; only real live markup is stripped.)
+#
+# Three things go:
+#   1. script/style/iframe/object/embed/form elements, tags and content
+#   2. every on* event-handler attribute
+#   3. href/src values whose scheme is javascript: or data:, except
+#      data:image/ in a src (an inline image is a legitimate thing to write)
+# ---------------------------------------------------------------------------
+
+_UNSAFE_ELEMENTS = ("script", "style", "iframe", "object", "embed", "form")
+
+# Element plus content. Non-greedy so two <script> blocks don't collapse
+# everything between them into one match.
+_UNSAFE_BLOCK_RE = re.compile(
+    r"<\s*(" + "|".join(_UNSAFE_ELEMENTS) + r")\b[^>]*>.*?</\s*\1\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# An opening tag with no matching close (or a stray close) is still worth
+# removing: browsers happily execute <script> that runs to end of document.
+_UNSAFE_STRAY_RE = re.compile(
+    r"<\s*/?\s*(?:" + "|".join(_UNSAFE_ELEMENTS) + r")\b[^>]*>",
+    re.IGNORECASE,
+)
+
+# A whole tag, quote-aware so a > inside an attribute value doesn't end it.
+_TAG_RE = re.compile(r"""<[a-zA-Z][^\s>]*(?:[^>"']|"[^"]*"|'[^']*')*>""")
+
+# ` onclick="..."`, ` onerror=x`, ` ONLOAD = '...'`. The leading whitespace
+# is required so that attributes that merely contain "on" (data-only, and
+# anything hyphenated) are left alone.
+_EVENT_ATTR_RE = re.compile(
+    r"""\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)""",
+    re.IGNORECASE,
+)
+
+_URL_ATTR_RE = re.compile(
+    r"""\s+(href|src)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)""",
+    re.IGNORECASE,
+)
+
+
+def _url_is_unsafe(value: str, attr: str) -> bool:
+    """True for a URL a browser would treat as script.
+
+    Entities are decoded and whitespace/control characters dropped before
+    the scheme is read, because `java&#9;script:x` and `  JaVaScRiPt:x` are
+    both live links to a browser and must be to us too."""
+    probe = _stdlib_html.unescape(value or "")
+    probe = re.sub(r"[\s\x00-\x20]", "", probe).lower()
+    if probe.startswith("javascript:"):
+        return True
+    if probe.startswith("data:"):
+        # data:text/html is a same-origin script in disguise; an inline
+        # image is not.
+        return not (attr == "src" and probe.startswith("data:image/"))
+    return False
+
+
+def _clean_url_attr(match: "re.Match") -> str:
+    raw = match.group(2)
+    value = raw[1:-1] if raw[:1] in ('"', "'") else raw
+    if not _url_is_unsafe(value, match.group(1).lower()):
+        return match.group(0)
+    # Drop the attribute rather than blanking it: a link with no href
+    # renders as plain text and an image with no src renders as its alt
+    # text, both of which visibly say "this didn't work" instead of
+    # silently looking like a working link.
+    return ""
+
+
+def _clean_tag(match: "re.Match") -> str:
+    tag = match.group(0)
+    inner = tag[1:-1]
+    cleaned = _EVENT_ATTR_RE.sub("", inner)
+    cleaned = _URL_ATTR_RE.sub(_clean_url_attr, cleaned)
+    return tag if cleaned == inner else f"<{cleaned}>"
+
+
+def _sanitise_html(html: str) -> str:
+    """Strips the three script-execution routes above from rendered post
+    HTML. Called on the output of both render paths in _md_to_html()."""
+    if not html:
+        return html
+    # Loop to a fixed point: removing an element can splice two halves of a
+    # neighbouring tag back together (`<scri<script></script>pt>`), and the
+    # result has to be re-examined rather than shipped. Each pass can only
+    # shorten the string, so this terminates.
+    previous = None
+    while previous != html:
+        previous = html
+        html = _UNSAFE_BLOCK_RE.sub("", html)
+        html = _UNSAFE_STRAY_RE.sub("", html)
+    return _TAG_RE.sub(_clean_tag, html)
 
 
 def reading_minutes(body_md: str) -> int:
