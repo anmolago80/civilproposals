@@ -3,6 +3,12 @@
 Everything below is one-time setup. Nothing has been deployed; these are the
 steps to switch it on.
 
+> The one-shot script that performed this setup lives at
+> `scripts/setup_blog.js` (run it from the repo root as
+> `node scripts/setup_blog.js`). It has already been run — the KV namespace
+> exists — and is kept as a record of how the blog infrastructure was
+> created. The manual steps below are the authoritative description.
+
 ---
 
 ## How it fits together

@@ -2,7 +2,7 @@
 /*
  * setup_blog.js -- one-shot setup for the CivilProposals blog.
  *
- *     node setup_blog.js
+ *     node scripts/setup_blog.js
  *
  * Steps:
  *   1. check the Cloudflare login
@@ -42,7 +42,10 @@ const { readFileSync, writeFileSync, existsSync, unlinkSync, mkdtempSync } = req
 const { join } = require("node:path");
 const { tmpdir } = require("node:os");
 
-const ROOT = __dirname;
+// The repo root, one level up from this script's own scripts/ directory --
+// every path below (both wrangler.toml files, the deploy) is relative to
+// the root, not to wherever this file happens to live.
+const ROOT = join(__dirname, "..");
 const ARGS = process.argv.slice(2);
 const DRY = ARGS.includes("--dry-run");
 const NO_DEPLOY = ARGS.includes("--no-deploy");
