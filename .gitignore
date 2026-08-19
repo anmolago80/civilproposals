@@ -13,6 +13,9 @@ push_commands*.txt
 # Local scratch/recycle area (files awaiting manual deletion on Windows).
 _to_delete/
 
+# Wrangler's machine-local cache/state -- never repo content.
+.wrangler/
+
 __pycache__/
 *.pyc
 venv/
