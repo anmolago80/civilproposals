@@ -536,6 +536,65 @@ def _firm_profile_is_empty() -> bool:
     return firm_profile.is_empty(_firm_profile())
 
 
+def _structured_material_by_section(sections: list) -> dict:
+    """{section_title: material} for sections whose content the user has
+    already reviewed in structured form.
+
+    Relevant Experience is drafted from the reference-project cards the user
+    edited, and Key Personnel from the resourcing plan's own profiles,
+    instead of from the raw truncated text of whatever was uploaded. Those
+    two disagreed inside the same exported document: the cards showed the
+    user's corrections and the drafted prose argued from the original."""
+    out = {}
+    for section in sections or []:
+        title = getattr(section, "title", "")
+        lowered = title.lower()
+        if "experience" in lowered and st.session_state.reference_projects:
+            lines = []
+            for ref in st.session_state.reference_projects:
+                lines.append(f"--- Reference project: {ref.title} ---")
+                if ref.client:
+                    lines.append(f"Client: {ref.client}")
+                if ref.description:
+                    lines.append(ref.description)
+                if ref.relevance_text:
+                    lines.append(f"Why it is relevant: {ref.relevance_text}")
+                if ref.personnel_involved:
+                    lines.append("Personnel involved: " + ", ".join(ref.personnel_involved))
+            out[title] = (
+                "--- USER-REVIEWED REFERENCE PROJECTS (these are the corrected, "
+                "structured entries -- use ONLY these, not any raw uploaded text) ---\n"
+                + "\n".join(lines)
+            )
+        elif "personnel" in lowered and st.session_state.resource_plan:
+            from modules.resourcing import personnel_profiles_deduped
+            lines = []
+            for entry in personnel_profiles_deduped(st.session_state.resource_plan):
+                # The include/exclude tick lives on the assignment itself, not
+                # on the flattened profile dict -- someone unticked must not
+                # be named in the drafted prose either.
+                assignment = entry.get("assignment")
+                if not getattr(assignment, "include_in_proposal", True):
+                    continue
+                if not (entry.get("name") or "").strip():
+                    continue
+                lines.append(f"--- {entry['name']} ({', '.join(entry.get('roles') or [])}) ---")
+                for label, key in (("Qualification", "qualification"), ("RPEQ", "rpeq_status"),
+                                   ("Years of experience", "years_experience"),
+                                   ("On this project they will", "value_to_project")):
+                    value = (entry.get(key) or "").strip()
+                    if value:
+                        lines.append(f"{label}: {value}")
+                for project in entry.get("relevant_projects") or []:
+                    lines.append(f"Relevant project: {project}")
+            if lines:
+                out[title] = (
+                    "--- NOMINATED PERSONNEL, AS ENTERED BY THE BID TEAM (use ONLY these "
+                    "people and only these facts about them) ---\n" + "\n".join(lines)
+                )
+    return out
+
+
 def _firm_materials_flags() -> dict:
     """Firm-profile facts the compliance matrix should treat as covered."""
     profile = _firm_profile()

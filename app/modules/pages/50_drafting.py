@@ -92,10 +92,37 @@ with tabs[5]:
             # pack), so it gets the same treatment, including the redacted
             # ai_config on the queued path (see job_queue.py's docstring).
             _redacted_ai_config = {**st.session_state.ai_config, "api_key": ""}
+
+            # Context the drafter never used to receive. All of it already
+            # existed in state: the client's own name, the brief's scope items
+            # and deliverables, its objectives, the risks it raises, the
+            # mandatory requirements, the compliance rows that map to each
+            # section, and the bid team's own win themes. A "Methodology and
+            # Deliverables" section literally could not list the real
+            # deliverables before this.
+            _draft_win_themes = "\n\n".join(
+                part for part in (
+                    (st.session_state.project_differentiator or "").strip(),
+                    (st.session_state.project_sales_pitch or "").strip(),
+                ) if part
+            )
+            # Structured, user-edited content replaces the raw upload blob for
+            # the sections that have it -- otherwise the draft argues from
+            # truncated raw text while the cards beside it in the same
+            # document show the corrected version.
+            _structured_material = _structured_material_by_section(targets)
+
+            _draft_kwargs = {
+                "team_context": draft_generator.format_team_context(st.session_state.resource_plan),
+                "project_info": _project_info(),
+                "compliance_items": st.session_state.compliance_items or [],
+                "win_themes": _draft_win_themes,
+                "structured_material": _structured_material,
+            }
             new_drafts = _run_job_or_inline(
                 "draft_generation", draft_generator.generate_all_drafts,
                 args=(targets, st.session_state.analysis, _material_for_draft, st.session_state.ai_config),
-                kwargs={"team_context": draft_generator.format_team_context(st.session_state.resource_plan)},
+                kwargs=_draft_kwargs,
                 progress=progress,
                 queued_text="Queued for drafting...", running_text="Drafting...",
                 inline_extra_kwargs={"progress_callback": _progress_cb},

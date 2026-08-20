@@ -29,6 +29,67 @@ from modules.tender_analyser import TenderAnalysis
 # the AI provider at once and risk a rate limit.
 MAX_CONCURRENT_DRAFTS = 5
 
+# Roughly how many words of body text fit on one page of the exported pack
+# at its font/margins/leading. Used to turn a page allocation into a word
+# target the model can actually aim at -- "3 pages" means nothing to a
+# language model, "about 1350 words" means quite a lot.
+WORDS_PER_PAGE = 450
+
+# Output budget. This used to be a flat 2000 tokens for every section, which
+# capped even a 6-page allocation at roughly two pages of prose: the prompt
+# asked for six pages and the budget made six pages impossible. Scaled from
+# the allocation now, with a floor so a 1-page section still has room to be
+# written properly and a ceiling so a mis-parsed 40-page allocation can't
+# order an enormous, expensive generation.
+MIN_DRAFT_TOKENS = 2000
+MAX_DRAFT_TOKENS = 12000
+TOKENS_PER_WORD = 1.7   # generous: JSON escaping and the heading/inputs fields ride along
+
+# Beyond this far from its page budget, the export's guidance note says so.
+# Deliberately wide -- a draft is a first pass and nobody should be chasing
+# a word count -- but a section at a third of its allocation is a real
+# finding an evaluator will notice as thin.
+LENGTH_TOLERANCE = 0.40
+
+
+def target_words(section) -> int:
+    """The word target for one section, from its page allocation.
+
+    A brief that states its own formatting rules (10pt, single spacing, etc.)
+    changes how much text a page holds, so where those were extracted they
+    nudge the target rather than being ignored entirely."""
+    pages = max(1, int(getattr(section, "allocated_pages", 1) or 1))
+    words = pages * WORDS_PER_PAGE
+    requirements = (getattr(section, "format_requirements", "") or "").lower()
+    # A tight font/spacing rule fits materially more on a page; a large one
+    # fits less. Only the unambiguous cases are acted on.
+    if any(hint in requirements for hint in ("9pt", "9 pt", "10pt", "10 pt", "single spac")):
+        words = int(words * 1.15)
+    if any(hint in requirements for hint in ("12pt", "12 pt", "14pt", "double spac", "1.5 spac")):
+        words = int(words * 0.8)
+    return max(150, words)
+
+
+def draft_token_budget(section) -> int:
+    budget = int(target_words(section) * TOKENS_PER_WORD)
+    return max(MIN_DRAFT_TOKENS, min(budget, MAX_DRAFT_TOKENS))
+
+
+def length_verdict(section, draft) -> str:
+    """"", "under" or "over" -- how a finished draft sits against its page
+    budget. Used at export time to flag a section that will read as thin (or
+    won't fit) before anyone has to notice it by eye."""
+    text = (getattr(draft, "draft_text", "") or "").strip()
+    if not text:
+        return ""
+    words = len(text.split())
+    target = target_words(section)
+    if words < target * (1 - LENGTH_TOLERANCE):
+        return "under"
+    if words > target * (1 + LENGTH_TOLERANCE):
+        return "over"
+    return ""
+
 PLACEHOLDER_EXAMPLES = [
     "[USER TO INSERT PROJECT-SPECIFIC DETAIL]",
     "[INSERT RELEVANT PROJECT REFERENCE]",
@@ -76,9 +137,18 @@ narrated."""
 
 DRAFT_PROMPT_TEMPLATE = """Draft first-pass content for this proposal section.
 
-SECTION: {title}
-PAGE LIMIT: {page_limit} pages
+PROJECT: {project_name}
+CLIENT: {client_name}
+BIDDER (the firm writing this response -- "we"): {bidder_name}
+
+SECTION: {title}{criterion_code}
+PAGE LIMIT: {page_limit} pages -- aim for roughly {target_words} words of body text. This is a \
+target, not a rule: never pad with generic filler to reach it, and never invent content to \
+fill space. Coming in short with honest placeholders is correct; coming in short because you \
+stopped early is not.
 EVALUATION WEIGHTING: {weighting}
+FORMATTING RULES THE BRIEF IMPOSES: {format_requirements}
+
 BRIEF REQUIREMENTS FOR THIS SECTION:
 {brief_requirements}
 
@@ -88,6 +158,30 @@ RECOMMENDED CONTENT TO COVER:
 TENDER CONTEXT (project scope, for grounding -- do not restate verbatim, use it to inform \
 relevance):
 {project_scope}
+
+SCOPE OF WORK THE BRIEF DEFINES (the actual work packages and their tasks -- reference the real \
+ones where this section calls for it):
+{scope_items}
+
+DELIVERABLES THE BRIEF REQUIRES (name the real ones; never invent an extra deliverable):
+{deliverables}
+
+WHAT THE CLIENT SAYS IT WANTS TO ACHIEVE:
+{client_objectives}
+
+RISKS THE BRIEF ITSELF RAISES (address the real ones where relevant; do not invent new risks):
+{risks}
+
+MANDATORY REQUIREMENTS (must not be contradicted anywhere in this draft):
+{mandatory_requirements}
+
+COMPLIANCE ITEMS MAPPED TO THIS SECTION (each with its current status -- this section is where \
+they get answered):
+{compliance_items}
+
+USER-STATED WIN THEMES (the bid team's own words on why this firm should win -- REPHRASE ONLY, \
+never extend into a claim they did not make):
+{win_themes}
 
 NOMINATED TEAM (the ACTUAL people staffed to this bid -- when this section refers to who will \
 do the work, use THESE names and roles exactly; never invent a different name or make one up. \
@@ -122,22 +216,47 @@ def generate_draft_section(
     company_material_text: dict[str, str] | None = None,
     config: dict | None = None,
     team_context: str | None = None,
+    project_info: dict | None = None,
+    compliance_items: list | None = None,
+    win_themes: str = "",
+    structured_material: str = "",
 ) -> SectionDraft:
+    """`structured_material`: user-reviewed structured content that should
+    REPLACE the raw uploaded blob for this section -- the edited reference
+    projects for a Relevant Experience section, the personnel profiles for a
+    Key Personnel one. Without it those sections drafted from truncated raw
+    upload text while the cards beside them showed the user's corrected
+    version, so the two disagreed in the same document."""
     company_material_text = company_material_text or {}
-    material_block = _format_company_material(company_material_text)
+    project_info = project_info or {}
+    material_block = structured_material.strip() or _format_company_material(company_material_text)
 
     prompt = DRAFT_PROMPT_TEMPLATE.format(
+        project_name=project_info.get("project_name") or "(not supplied)",
+        client_name=project_info.get("client_name") or "(not supplied)",
+        bidder_name=project_info.get("bidder_name") or "(not supplied)",
         title=section.title,
+        criterion_code=f"  (evaluation criterion {section.criterion_code})" if getattr(section, "criterion_code", None) else "",
         page_limit=section.allocated_pages,
+        target_words=target_words(section),
         weighting=f"{section.weighting:.0f}%" if section.weighting else "not separately weighted",
+        format_requirements=(getattr(section, "format_requirements", "") or "").strip() or "(none stated)",
         brief_requirements="\n".join(f"- {r}" for r in section.brief_requirements) or "- (none extracted -- use general judgement based on the section title)",
         recommended_content="\n".join(f"- {c}" for c in section.recommended_content) or "- (none)",
         project_scope=analysis.project_scope or "(not extracted)",
+        scope_items=_format_scope_items(analysis),
+        deliverables=_bullets(getattr(analysis, "deliverables", None)),
+        client_objectives=_bullets(getattr(analysis, "client_objectives", None)),
+        risks=_bullets(getattr(analysis, "risks", None)),
+        mandatory_requirements=_bullets(getattr(analysis, "mandatory_requirements", None)),
+        compliance_items=_format_compliance(compliance_items, section.title),
+        win_themes=(win_themes or "").strip() or "(none written)",
         team_context=(team_context or "").strip() or "(no team assigned yet -- use bracketed placeholders for any named roles)",
         company_material=material_block,
     )
 
-    data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=2000)
+    data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config,
+                        max_tokens=draft_token_budget(section))
 
     return SectionDraft(
         section_title=section.title,
@@ -155,6 +274,10 @@ def generate_all_drafts(
     config: dict | None = None,
     progress_callback=None,
     team_context: str | None = None,
+    project_info: dict | None = None,
+    compliance_items: list | None = None,
+    win_themes: str = "",
+    structured_material: dict[str, str] | None = None,
 ) -> dict[str, SectionDraft]:
     """Drafts every section, one AI call each, run concurrently (up to
     MAX_CONCURRENT_DRAFTS at a time) rather than one-at-a-time -- each
@@ -180,6 +303,10 @@ def generate_all_drafts(
             pool.submit(
                 generate_draft_section, section, analysis, company_material_text, config,
                 team_context=team_context,
+                project_info=project_info,
+                compliance_items=compliance_items,
+                win_themes=win_themes,
+                structured_material=(structured_material or {}).get(section.title, ""),
             ): section
             for section in sections
         }
@@ -220,6 +347,41 @@ def format_team_context(resource_plan: list | None) -> str:
         if name and slot:
             lines.append(f"- {slot}: {name}")
     return "\n".join(lines)
+
+
+def _bullets(values, empty: str = "(none extracted)") -> str:
+    values = [str(v).strip() for v in (values or []) if str(v or "").strip()]
+    return "\n".join(f"- {v}" for v in values) or f"- {empty}"
+
+
+def _format_scope_items(analysis) -> str:
+    lines = []
+    for item in (getattr(analysis, "scope_items", None) or []):
+        title = (getattr(item, "title", "") or "").strip()
+        if not title:
+            continue
+        tasks = [str(t).strip() for t in (getattr(item, "tasks", None) or []) if str(t or "").strip()]
+        lines.append(f"- {title}" + (f": {'; '.join(tasks)}" if tasks else ""))
+    return "\n".join(lines) or "- (none extracted)"
+
+
+def _format_compliance(compliance_items: list | None, section_title: str) -> str:
+    """The compliance rows this section is responsible for answering.
+
+    The matrix already works out which section each requirement maps to, and
+    the drafter never saw any of it -- so a section could be drafted without
+    knowing it was the one place a mandatory requirement had to be
+    addressed."""
+    rows = []
+    for item in (compliance_items or []):
+        if (getattr(item, "mapped_section", "") or "") != section_title:
+            continue
+        description = (getattr(item, "description", "") or "").strip()
+        if not description:
+            continue
+        status = (getattr(item, "status", "") or "").strip()
+        rows.append(f"- {description}" + (f"  [status: {status}]" if status else ""))
+    return "\n".join(rows) or "- (none mapped to this section)"
 
 
 def _format_company_material(company_material_text: dict[str, str]) -> str:
