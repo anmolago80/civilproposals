@@ -513,6 +513,38 @@ def _build_letter_fee_buildup(doc: Document, discipline_fee_lines: list, theme: 
         run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
 
 
+def format_fee_percentages(values: list[float]) -> list[str]:
+    """Format a set of fee percentages so the printed figures add up to the
+    printed total.
+
+    Rounding each share to a whole number independently is what a reader
+    notices: three disciplines at 33.4/33.3/33.3 print as 33/33/33 and total
+    99%, and a fee table that doesn't add to 100% reads as an arithmetic
+    error in a priced offer. Largest-remainder rounding assigns the leftover
+    whole points to the shares with the biggest fractional parts, so the
+    printed numbers are each within one point of the true value AND sum to
+    the true total.
+
+    Deliberately whole numbers rather than a decimal place: a fee split is a
+    judgement, and "33.3%" implies a precision the estimate doesn't have.
+    Only applied when the underlying values genuinely total ~100; a split
+    that really is 95% or 110% must keep showing that, not be quietly
+    normalised into looking correct."""
+    values = [float(v or 0) for v in values]
+    total = sum(values)
+    if not values or abs(total - 100.0) > 0.5:
+        # Not a 100% split (or empty) -- show each value as it is, with a
+        # decimal place where rounding would otherwise hide a difference.
+        return [f"{v:.1f}%".replace(".0%", "%") for v in values]
+
+    floors = [int(v) for v in values]
+    remainder = round(total) - sum(floors)
+    order = sorted(range(len(values)), key=lambda i: values[i] - floors[i], reverse=True)
+    for i in order[:max(0, remainder)]:
+        floors[i] += 1
+    return [f"{v}%" for v in floors]
+
+
 def _build_letter_fee_split(doc: Document, fee_estimates: list, theme: dict):
     """Discipline fee % breakdown -- the table that replaced the old per-scope-item
     fee table as the one that actually goes into the pack. Deliberately
@@ -529,9 +561,11 @@ def _build_letter_fee_split(doc: Document, fee_estimates: list, theme: dict):
     run.font.color.rgb = RED
 
     headers = ["Discipline", "Fee %", "Confidence", "Source"]
-    rows = [[e.discipline, f"{e.fee_percentage:.0f}%", e.confidence, e.source] for e in fee_estimates]
+    printed = format_fee_percentages([e.fee_percentage for e in fee_estimates])
+    rows = [[e.discipline, pct, e.confidence, e.source]
+            for e, pct in zip(fee_estimates, printed)]
     total_pct = sum(e.fee_percentage or 0 for e in fee_estimates)
-    rows.append(["Total", f"{total_pct:.0f}%", "-", "-"])
+    rows.append(["Total", format_fee_percentages([total_pct])[0], "-", "-"])
 
     table = _add_table(doc, headers, rows, theme=theme)
     total_row = table.rows[-1]
@@ -874,19 +908,20 @@ def _build_fee_estimate(
     total_pct = 0.0
     total_amount = 0.0
     any_amount = False
-    for e in fee_estimates:
+    printed = format_fee_percentages([e.fee_percentage for e in fee_estimates])
+    for e, pct in zip(fee_estimates, printed):
         amount = indicative_amounts.get(e.discipline, e.fee_amount)
         total_pct += e.fee_percentage or 0
         if amount:
             total_amount += amount
             any_amount = True
         rows.append([
-            e.discipline, f"{e.fee_percentage:.0f}%",
+            e.discipline, pct,
             f"${amount:,.0f}" if amount else "-", e.confidence, e.source,
         ])
     if fee_estimates:
         rows.append([
-            "Total", f"{total_pct:.0f}%",
+            "Total", format_fee_percentages([total_pct])[0],
             f"${total_amount:,.0f}" if any_amount else "-", "-", "-",
         ])
 

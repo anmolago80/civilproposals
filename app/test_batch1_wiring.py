@@ -232,6 +232,25 @@ def test_excel_fee_exports(failures: list[str]) -> None:
         failures.append("[1h] the fee-split workbook doesn't identify the project")
 
 
+def test_fee_percentages_add_up(failures: list[str]) -> None:
+    """1(i): independently rounding each share printed fee tables that
+    totalled 99% or 101%."""
+    from modules.export_docx import format_fee_percentages
+
+    for values in ([33.4, 33.3, 33.3], [58.3, 25.4, 16.3], [16.7] * 6):
+        printed = format_fee_percentages(values)
+        total = sum(int(p.rstrip("%")) for p in printed)
+        if total != 100:
+            failures.append(f"[1i] {values} printed as {printed}, totalling {total}%")
+        for value, shown in zip(values, printed):
+            if abs(int(shown.rstrip("%")) - value) > 1:
+                failures.append(f"[1i] {value} was printed as {shown} -- more than a point out")
+
+    # A split that genuinely isn't 100% must keep showing that.
+    if format_fee_percentages([40.0, 30.0]) == ["40%", "60%"]:
+        failures.append("[1i] a 70% split was silently normalised to 100%")
+
+
 def main() -> int:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     failures: list[str] = []
@@ -242,6 +261,7 @@ def main() -> int:
     test_program_start_date(failures)
     test_graphics_recommendations_are_current(failures)
     test_excel_fee_exports(failures)
+    test_fee_percentages_add_up(failures)
 
     if failures:
         print("BATCH 1 WIRING TESTS FAILED:")
