@@ -47,6 +47,36 @@ def make_placeholder(label: str) -> str:
 # Order matters where synonyms overlap -- more specific entries first.
 # ---------------------------------------------------------------------------
 
+# Firm-level labels a returnable schedule asks about. These used to be in
+# the NEVER_KNOWN bucket below, unconditionally -- correct while the app had
+# nowhere to store an ABN or an insurance policy, and wrong the moment the
+# firm profile existed. They are matched BEFORE the never-known patterns and
+# only answered when the profile actually holds a value; with an empty
+# profile the never-known behaviour is unchanged, placeholder and all.
+#
+# "signature" is deliberately absent and always will be: nobody should be
+# able to sign a legal form out of a saved setting.
+FIRM_FIELD_SYNONYMS: list[tuple[str, list[str]]] = [
+    ("professional_indemnity_insurer", ["professional indemnity insurer", "pi insurer"]),
+    ("professional_indemnity_policy", ["professional indemnity policy", "pi policy"]),
+    ("professional_indemnity_cover", ["professional indemnity cover", "professional indemnity limit",
+                                       "professional indemnity amount", "pi cover"]),
+    ("professional_indemnity_expiry", ["professional indemnity expiry", "pi expiry"]),
+    ("public_liability_insurer", ["public liability insurer"]),
+    ("public_liability_policy", ["public liability policy"]),
+    ("public_liability_cover", ["public liability cover", "public liability limit",
+                                 "public liability amount"]),
+    ("public_liability_expiry", ["public liability expiry"]),
+    ("workers_compensation_insurer", ["workers compensation insurer", "workers comp insurer"]),
+    ("workers_compensation_policy", ["workers compensation policy", "workers comp policy"]),
+    ("workers_compensation_cover", ["workers compensation cover", "workers comp cover"]),
+    ("workers_compensation_expiry", ["workers compensation expiry", "workers comp expiry"]),
+    ("company_abn", ["abn", "australian business number"]),
+    ("company_acn", ["acn", "australian company number"]),
+    ("certifications", ["certification", "accreditation", "quality certification",
+                        "iso certification", "quality accreditation"]),
+]
+
 FIELD_SYNONYMS: list[tuple[str, list[str]]] = [
     ("contact_email",   ["email address", "e-mail", "email"]),
     ("contact_phone",   ["phone number", "telephone", "phone", "mobile", "contact number"]),
@@ -110,10 +140,15 @@ class FillResult:
 # Fill data -- everything the project knows, in one flat dict + lists
 # ---------------------------------------------------------------------------
 
-def build_fill_data(state) -> dict:
+def build_fill_data(state, firm_data: dict | None = None) -> dict:
     """`state` is anything with .get() -- in practice st.session_state.
     Only REAL user-entered values end up here; blank stays absent, so the
-    filler placeholders it."""
+    filler placeholders it.
+
+    `firm_data`: firm-level answers from the firm profile (see
+    firm_profile.schedule_fill_data) -- ABN, insurances, certifications,
+    registered address. Absent or empty leaves every one of those labels
+    placeholdered exactly as before."""
 
     def _s(key):
         return (state.get(key) or "").strip() if isinstance(state.get(key), str) else ""
@@ -130,6 +165,18 @@ def build_fill_data(state) -> dict:
         "contact_email": _s("letter_sender_email"),
         "contact_address": _s("letter_sender_address"),
     }
+
+    # Firm-level facts, where the account has entered them. Merged rather
+    # than overwritten: a value typed for THIS bid wins over the standing
+    # profile, since someone who overrode the address on this project meant
+    # it.
+    for key, value in (firm_data or {}).items():
+        if value and not data.get(key):
+            data[key] = value
+    if not data.get("contact_address") and data.get("company_address"):
+        data["contact_address"] = data["company_address"]
+    if not data.get("company_name") and data.get("company_legal_name"):
+        data["company_name"] = data["company_legal_name"]
 
     # Personnel: the resourcing plan is the source of truth for the whole
     # person -- who they are (person_name), what they're doing here
@@ -214,6 +261,16 @@ def match_label(label: str, fill_data: dict) -> tuple[str | None, str | None]:
     label_norm = _normalise_label(label)
     if not label_norm or len(label_norm) > 120:
         return None, None
+    # Firm-level labels first: an ABN or an insurer IS knowable now, if the
+    # firm profile holds it. Falls through to never_known when it doesn't,
+    # which is the original behaviour.
+    for field_key, synonyms in FIRM_FIELD_SYNONYMS:
+        for syn in synonyms:
+            if re.search(rf"(?<![a-z]){re.escape(syn)}(?:s|es)?(?![a-z])", label_norm):
+                value = (fill_data.get(field_key) or "").strip()
+                if value:
+                    return field_key, value
+                return "never_known", None
     if _is_never_known(label_norm):
         return "never_known", None
     for field_key, synonyms in FIELD_SYNONYMS:

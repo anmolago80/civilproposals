@@ -510,6 +510,49 @@ def _is_letter() -> bool:
     return st.session_state.proposal_format == "letter"
 
 
+def _firm_profile() -> "object | None":
+    """This account's firm profile, or None.
+
+    Cached for the run: it is read by the sidebar, the project seeder and
+    several exporters, and re-querying per rerun for a row that changes
+    perhaps once a year is waste. Never raises -- a database hiccup must
+    degrade to "no profile" (i.e. today's placeholders), not to an error
+    page in the middle of a bid."""
+    if "_firm_profile_cache" not in st.session_state:
+        try:
+            st.session_state._firm_profile_cache = firm_profile.get_profile(
+                current_user.id if (IS_SAAS_MODE and current_user) else None  # noqa: F821
+            )
+        except Exception:
+            st.session_state._firm_profile_cache = None
+    return st.session_state._firm_profile_cache
+
+
+def _firm_profile_is_empty() -> bool:
+    return firm_profile.is_empty(_firm_profile())
+
+
+def _firm_export_context() -> dict:
+    """The firm profile as the exporters want it (see
+    firm_profile.export_context) -- one bundle rather than six new keyword
+    arguments on two already-long builder signatures."""
+    return firm_profile.export_context(_firm_profile(), st.session_state.get("bidder_name", ""))
+
+
+def _seed_project_from_firm_profile() -> None:
+    """Fill this project's blank fields from the firm profile.
+
+    Only ever writes where the project's own value is still empty. A seed
+    that overwrote something typed for THIS bid would be the worst kind of
+    bug in a proposal tool -- silent, and wrong in a document."""
+    profile = _firm_profile()
+    if profile is None:
+        return
+    for key, value in firm_profile.project_seed(profile).items():
+        if not (st.session_state.get(key) or "").strip():
+            st.session_state[key] = value
+
+
 def _program_week_count() -> int:
     """How many week columns the delivery program actually has.
 
@@ -808,6 +851,19 @@ def _ensure_divider_config(sections) -> None:
 
 
 _init_state()
+
+# Seed a NEW project's blank fields from the firm profile -- bidder name,
+# signatory block, standing terms. Once per session, not per rerun: seeding
+# on every rerun would silently refill a field the user had deliberately
+# cleared for this bid, which is exactly the kind of quiet wrongness a
+# proposal tool must not have. Loading a saved project overwrites these
+# fields from the file anyway, so the two paths don't fight.
+if not st.session_state.get("_firm_profile_seeded"):
+    try:
+        _seed_project_from_firm_profile()
+    except Exception:
+        pass
+    st.session_state._firm_profile_seeded = True
 
 # Attribute every AI call made inline in THIS script run (i.e. not via the
 # job queue -- that path carries its own usage_context, see

@@ -388,6 +388,64 @@ class BlogImage(Base):
     uploaded_at = Column(DateTime, default=_now)
 
 
+class FirmProfile(Base):
+    """The bidding firm's own standing facts -- one row per account.
+
+    Everything here is the same on every bid this firm ever writes: legal
+    name, ABN, registered address, logo, insurances, certifications, the
+    signatory block, offices, rate card, standing terms. Before this table
+    existed the app had no way to know any of it, which is where roughly ten
+    recurring red placeholders in every exported pack came from: the "ABN
+    [XX XXX XXX XXX] | [REGISTERED ADDRESS]" footer on every Small Scope
+    page, the [COMPANY LOGO] box on page 1, the schedule filler's permanent
+    inability to answer an insurance or ABN label, the compliance matrix's
+    standing "Missing -- must come from the user" against insurance
+    requirements. None of that was missing information; it was information
+    nobody had been asked for.
+
+    Scoped by user_id, like every other model in this file except BlogPost.
+    In local mode (SAAS_MODE=false) there is no logged-in user, so the row
+    is keyed by LOCAL_USER_ID -- the same single-user fallback the rest of
+    the local path uses.
+
+    List/table fields are JSON-encoded text rather than separate tables:
+    they are small, always read as a whole, and never queried across
+    accounts, so a join buys nothing and costs a migration.
+    """
+    __tablename__ = "firm_profiles"
+
+    id = Column(String, primary_key=True, default=_uid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, unique=True, index=True)
+
+    # Identity
+    company_name = Column(String, default="")       # legal entity name
+    abn = Column(String, default="")
+    acn = Column(String, default="")
+    registered_address = Column(Text, default="")
+    logo_bytes = Column(LargeBinary, nullable=True)
+    logo_filename = Column(String, default="")
+
+    # Standing signatory / contact block, seeded into each new project
+    signatory_name = Column(String, default="")
+    signatory_title = Column(String, default="")
+    signatory_phone = Column(String, default="")
+    signatory_email = Column(String, default="")
+
+    # JSON text columns -- see the class note above.
+    insurances_json = Column(Text, default="")      # [{type, insurer, policy_no, cover, expiry}]
+    certifications_json = Column(Text, default="")  # ["ISO 9001:2015", ...]
+    rate_card_json = Column(Text, default="")       # {discipline: rate_per_hour}
+
+    offices_text = Column(Text, default="")         # offices + local presence
+    community_text = Column(Text, default="")       # community/reinvestment programs
+    leadership_text = Column(Text, default="")      # standing leadership names/roles
+    terms_of_engagement_text = Column(Text, default="")
+    qa_statement = Column(Text, default="")         # e.g. the WVR/QA commitment
+
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+
 def log_ai_call(user_id: str | None, project_key: str, project_name: str, purpose: str,
                 provider: str, model: str, input_tokens: int | None,
                 output_tokens: int | None, estimated_cost_usd: float | None) -> None:

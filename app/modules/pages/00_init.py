@@ -106,6 +106,7 @@ from modules import (
     org_chart_pptx,
     methodology_pptx,
     methodology_stages,
+    firm_profile,
     program_pptx,
     proposal_library,
     reference_library,

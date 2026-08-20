@@ -89,15 +89,18 @@ def build_docx(
     program_schedule: dict[str, list[bool]] | None = None,
     program_week_labels: list[str] | None = None,
     methodology_stages_png: bytes | None = None,
+    firm: dict | None = None,
 ) -> io.BytesIO:
     theme = _theme_colours(project_info.get("proposal_theme"))
+    firm = firm or {}
     font = body_font or DEFAULT_FONT
 
     doc = Document()
     _set_base_styles(doc, theme, font)
     _add_page_numbers(doc)
 
-    _build_cover_page(doc, project_info, cover_image_bytes, cover_theme_image_bytes, theme)
+    _build_cover_page(doc, project_info, cover_image_bytes, cover_theme_image_bytes, theme,
+                      firm=firm)
 
     _add_ocr_notice(doc, ocr_note)
 
@@ -126,7 +129,8 @@ def build_docx(
                              sales_pitch_text=sales_pitch_text,
                              program_schedule=program_schedule,
                              program_week_labels=program_week_labels,
-                             methodology_stages_png=methodology_stages_png)
+                             methodology_stages_png=methodology_stages_png,
+                             firm=firm)
 
     buffer = io.BytesIO()
     doc.save(buffer)
@@ -241,6 +245,7 @@ def build_letter_docx(
     differentiator_text: str | None = None,
     sales_pitch_text: str | None = None,
     ocr_note: str | None = None,
+    firm: dict | None = None,
 ) -> io.BytesIO:
     """
     Builds the Small Scope Proposal Response Pack -- the leaner, content-agnostic
@@ -280,15 +285,17 @@ def build_letter_docx(
       underlying hours/rate. Omitted entirely from the export when not entered.
     """
     theme = _theme_colours(project_info.get("proposal_theme"))
+    firm = firm or {}
 
     doc = Document()
     _set_base_styles(doc, theme)
     _add_page_numbers(doc)
 
-    _build_cover_page(doc, project_info, cover_image_bytes, cover_theme_image_bytes, theme)
+    _build_cover_page(doc, project_info, cover_image_bytes, cover_theme_image_bytes, theme,
+                      firm=firm)
 
     _add_ocr_notice(doc, ocr_note)
-    _add_company_footer_line(doc.sections[-1].footer, project_info)
+    _add_company_footer_line(doc.sections[-1].footer, project_info, firm)
 
     _build_executive_summary(doc, executive_summary, project_info, theme, differentiator_text=differentiator_text)
     doc.add_page_break()
@@ -352,20 +359,30 @@ def build_letter_docx(
 # Small Scope pack-specific sections
 # ---------------------------------------------------------------------------
 
-def _add_company_footer_line(footer, project_info: dict) -> None:
+def _add_company_footer_line(footer, project_info: dict, firm: dict | None = None) -> None:
     """Second footer line, below the "Page X of Y" one _build_cover_page already
     wrote -- the bidder's registered company details, for the user to confirm
     before sending. Pre-fills the real bidder name where we have it; ABN and
     registered address are never invented, always a bracketed placeholder,
     same convention as every other "confirm before submission" note in this
     tool."""
+    firm = firm or {}
     p = footer.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    bidder = (project_info.get("bidder_name") or "").strip() or "[BIDDER COMPANY NAME]"
-    run = p.add_run(f"{bidder} | ABN [XX XXX XXX XXX] | [REGISTERED ADDRESS]")
+    # With a firm profile this is the real "Firm | ABN ... | address" line on
+    # every page. Without one it is the same red placeholder it always was --
+    # and it stays red whenever ANY of the three parts is still missing, so a
+    # half-filled profile can't produce a black line that looks finished.
+    text = firm.get("footer_line")
+    complete = bool(firm.get("footer_complete"))
+    if not text:
+        bidder = (project_info.get("bidder_name") or "").strip() or "[BIDDER COMPANY NAME]"
+        text = f"{bidder} | ABN [XX XXX XXX XXX] | [REGISTERED ADDRESS]"
+        complete = False
+    run = p.add_run(text)
     run.font.size = Pt(8)
-    run.font.color.rgb = RED
-    run.italic = True
+    run.font.color.rgb = DARK_GREY if complete else RED
+    run.italic = not complete
 
 
 def _build_letter_methodology(doc: Document, methodology_text: str, theme: dict | None,
@@ -638,6 +655,7 @@ def _build_letter_review_checklist(doc: Document):
 def _build_cover_page(
     doc: Document, project_info: dict, cover_image_bytes: bytes | None,
     cover_theme_image_bytes: bytes | None = None, theme: dict | None = None,
+    firm: dict | None = None,
 ):
     theme = theme or _theme_colours(project_info.get("proposal_theme"))
 
@@ -665,6 +683,9 @@ def _build_cover_page(
         photo_bytes=image_bytes,
         theme_name=project_info.get("proposal_theme"),
         disclaimer_text=disclaimer_text,
+        # The firm's real logo, where the profile holds one -- otherwise the
+        # cover keeps its [COMPANY LOGO] box, as it always has.
+        logo_bytes=(firm or {}).get("logo_bytes"),
     )
     if cover_png:
         _add_full_bleed_cover_image(doc, cover_png)
@@ -992,7 +1013,9 @@ def _build_proposal_response(
     program_schedule: dict[str, list[bool]] | None = None,
     program_week_labels: list[str] | None = None,
     methodology_stages_png: bytes | None = None,
+    firm: dict | None = None,
 ):
+    firm = firm or {}
     divider_images = divider_images or {}
     resource_plan = resource_plan or []
     reference_projects = reference_projects or []
@@ -1078,15 +1101,15 @@ def _build_proposal_response(
         if _is_methodology_section(section.title) and analysis is not None:
             _build_methodology_table(doc, analysis, theme, stages_png=methodology_stages_png)
         if _is_relationship_section(section.title):
-            _build_relationship_management(doc, project_info, theme)
+            _build_relationship_management(doc, project_info, theme, firm)
         if _is_commercial_section(section.title):
             _build_commercial_section(doc, discipline_fee_lines, theme,
                                       program_schedule=program_schedule,
                                       program_week_labels=program_week_labels)
             if local_benefit_needed:
-                _build_local_benefits(doc, project_info, theme)
+                _build_local_benefits(doc, project_info, theme, firm)
         elif _is_local_benefit_section(section.title):
-            _build_local_benefits(doc, project_info, theme)
+            _build_local_benefits(doc, project_info, theme, firm)
 
         # 5. The first-pass draft body, in two columns like a real proposal --
         # skipped where structured, deterministic content already covers the
@@ -1900,7 +1923,8 @@ def _local_benefit_signal(analysis) -> bool:
     return any(k in haystack for k in _LOCAL_BENEFIT_SIGNAL_KEYWORDS)
 
 
-def _build_relationship_management(doc: Document, project_info: dict | None, theme: dict | None):
+def _build_relationship_management(doc: Document, project_info: dict | None, theme: dict | None,
+                                   firm: dict | None = None):
     """A standard relationship-management narrative + principles table, used as a
     more pertinent starting point than generic AI-drafted prose for this kind of
     section -- the structure and process language a firm actually uses across
@@ -1920,6 +1944,15 @@ def _build_relationship_management(doc: Document, project_info: dict | None, the
         f"communication are central to our relationship management approach and underpin our "
         f"proven ability to deliver projects on time."
     )
+    firm = firm or {}
+    leadership = (firm.get("leadership_text") or "").strip()
+    if leadership:
+        # The firm profile names the leadership who actually oversee delivery,
+        # so say who they are instead of shipping the same anonymous paragraph
+        # to every client.
+        lead_p = doc.add_paragraph()
+        lead_p.add_run("Leadership oversight. ").bold = True
+        lead_p.add_run(leadership)
     note = doc.add_paragraph()
     r = note.add_run(
         "[STANDARD TEXT -- confirm real local staff/offices, and tailor to this project's actual "
@@ -2081,7 +2114,8 @@ def _build_cash_flow(doc: Document, discipline_fee_lines: list | None,
     doc.add_paragraph()
 
 
-def _build_local_benefits(doc: Document, project_info: dict | None, theme: dict | None):
+def _build_local_benefits(doc: Document, project_info: dict | None, theme: dict | None,
+                          firm: dict | None = None):
     """A Local Benefits sub-section, added only when the brief itself signals a
     local-benefit/local-content requirement (see _local_benefit_signal) or the
     section is explicitly a named local-benefit criterion. Structure only --
@@ -2089,6 +2123,7 @@ def _build_local_benefits(doc: Document, project_info: dict | None, theme: dict 
     office split or reinvestment program is specific to that firm and bid, and
     reusing another bid's real numbers here would be worse than a gap)."""
     theme = theme or _theme_colours(None)
+    firm = firm or {}
     client = (project_info or {}).get("client_name") or "the client"
 
     doc.add_heading("Local benefits", level=2)
@@ -2101,21 +2136,40 @@ def _build_local_benefits(doc: Document, project_info: dict | None, theme: dict 
     r.italic = True
     r.font.color.rgb = RED
 
-    for heading, placeholder in [
+    # Two of these four are standing firm facts -- where the firm's offices
+    # are, and what it puts back into the community. Both live in the firm
+    # profile now, so they render as the firm's own words instead of an
+    # instruction to go and write them again for this bid. The other two are
+    # genuinely per-bid (which office delivers THIS job, which local strategy
+    # THIS brief names) and keep their placeholders.
+    for heading, placeholder, real_text in [
         ("Local resources and location",
-         "[CONFIRM % OF THE TEAM BASED LOCALLY AND WHICH OFFICE(S) WILL DELIVER THE WORK]"),
+         "[CONFIRM % OF THE TEAM BASED LOCALLY AND WHICH OFFICE(S) WILL DELIVER THE WORK]",
+         firm.get("offices_text")),
         ("Contribution to the local economy",
          f"[DESCRIBE HOW THIS BID SUPPORTS LOCAL EMPLOYMENT, LOCAL SUPPLIERS/SUBCONSULTANTS, AND "
-         f"REINVESTMENT IN {client.upper()}'S REGION]"),
+         f"REINVESTMENT IN {client.upper()}'S REGION]",
+         None),
         ("Alignment with local strategy / vision",
-         "[REFERENCE ANY NAMED LOCAL/REGIONAL STRATEGY OR VISION DOCUMENT THE BRIEF CALLS OUT]"),
+         "[REFERENCE ANY NAMED LOCAL/REGIONAL STRATEGY OR VISION DOCUMENT THE BRIEF CALLS OUT]",
+         None),
         ("Profit / community reinvestment",
-         "[CONFIRM A REAL, CURRENT FIRM COMMUNITY/REINVESTMENT PROGRAM TO REFERENCE HERE]"),
+         "[CONFIRM A REAL, CURRENT FIRM COMMUNITY/REINVESTMENT PROGRAM TO REFERENCE HERE]",
+         firm.get("community_text")),
     ]:
         doc.add_heading(heading, level=3)
-        p = doc.add_paragraph()
-        pr = p.add_run(placeholder)
-        pr.font.color.rgb = RED
+        if (real_text or "").strip():
+            for para in str(real_text).split("\n\n"):
+                if para.strip():
+                    doc.add_paragraph(para.strip())
+            confirm = doc.add_paragraph()
+            cr = confirm.add_run("[FROM YOUR FIRM PROFILE -- confirm it still reads correctly for this bid]")
+            cr.font.color.rgb = RED
+            cr.italic = True
+        else:
+            p = doc.add_paragraph()
+            pr = p.add_run(placeholder)
+            pr.font.color.rgb = RED
     doc.add_paragraph()
 
 

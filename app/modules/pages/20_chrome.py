@@ -236,6 +236,21 @@ with st.sidebar:
             st.session_state._blog_admin_mode = True
             st.rerun()
 
+    # Firm profile -- the firm's own standing facts (ABN, insurances, logo,
+    # signatory, rates, standing text). Same full-page-and-stop pattern as the
+    # blog editor above (modules/pages/17_firm_profile.py runs before this
+    # file), but deliberately NOT admin-gated: every account has one, and it
+    # is what stops the same details being re-typed, or left red, on every
+    # bid this firm writes.
+    st.divider()
+    if st.button("🏢 Firm profile", key="_firm_profile_btn", use_container_width=True):
+        st.session_state._firm_profile_mode = True
+        st.rerun()
+    if _firm_profile_is_empty():
+        st.caption(
+            "Not filled in yet -- it removes about ten red placeholders from every pack."
+        )
+
     # "My projects" / "This computer" and "Export / import a file" used to
     # live here, stacked below the steps. Moved into two popovers in the
     # fixed top-right banner instead (see _render_my_projects_popover() and

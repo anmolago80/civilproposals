@@ -89,6 +89,45 @@ def render_banner(
 BAND_W, BAND_H = 2000, 780
 
 
+def _draw_logo(draw, image, box, logo_bytes, box_line, muted_ink, font_size: int, dy: int) -> None:
+    """The firm's real logo where one exists, the red-box placeholder where
+    it doesn't.
+
+    The placeholder box was on page 1 of every pack ever exported, because
+    until the firm profile existed there was nowhere to upload a logo. It
+    stays for a firm that hasn't uploaded one -- an empty box is honest;
+    a guessed image would not be.
+
+    The logo is fitted inside the same box (aspect preserved, centred), so
+    a tall logo and a wide one both sit where the placeholder used to,
+    without pushing the date or title around.
+    """
+    x0, y0, x1, y1 = box
+    if logo_bytes:
+        try:
+            from PIL import Image as _Image
+            logo = _Image.open(io.BytesIO(logo_bytes))
+            if logo.mode not in ("RGBA", "RGB"):
+                logo = logo.convert("RGBA")
+            box_w, box_h = x1 - x0, y1 - y0
+            scale = min(box_w / logo.width, box_h / logo.height)
+            new_size = (max(1, int(logo.width * scale)), max(1, int(logo.height * scale)))
+            logo = logo.resize(new_size, _Image.LANCZOS)
+            offset = (int(x0 + (box_w - new_size[0]) / 2), int(y0 + (box_h - new_size[1]) / 2))
+            image.paste(logo, offset, logo if logo.mode == "RGBA" else None)
+            return
+        except Exception:
+            # A logo that won't decode falls through to the placeholder --
+            # a cover page must render no matter what was uploaded.
+            pass
+    draw.rectangle(box, outline=box_line, width=3 if font_size > 20 else 2)
+    logo_font = _font(bold=False, size=font_size)
+    logo_text = "[COMPANY LOGO]"
+    tw = draw.textlength(logo_text, font=logo_font)
+    draw.text((x0 + ((x1 - x0) - tw) / 2, y0 + (y1 - y0) / 2 - dy), logo_text,
+               font=logo_font, fill=muted_ink)
+
+
 def render_cover_band(
     tender_name: str,
     project_name: str,
@@ -96,6 +135,7 @@ def render_cover_band(
     submission_date: str,
     theme_name: str = _DEFAULT_THEME,
     size: tuple[int, int] = (BAND_W, BAND_H),
+    logo_bytes: bytes | None = None,
 ) -> bytes | None:
     """
     Renders the coloured title block for the cover page -- theme colour
@@ -128,12 +168,7 @@ def render_cover_band(
         # Logo placeholder, top-left -- an empty box, never a guessed image.
         logo_w, logo_h = 340, 130
         logo_box = [margin, margin, margin + logo_w, margin + logo_h]
-        draw.rectangle(logo_box, outline=box_line, width=3)
-        logo_font = _font(bold=False, size=26)
-        logo_text = "[COMPANY LOGO]"
-        tw = draw.textlength(logo_text, font=logo_font)
-        draw.text((margin + (logo_w - tw) / 2, margin + logo_h / 2 - 16), logo_text,
-                   font=logo_font, fill=muted_ink)
+        _draw_logo(draw, img, logo_box, logo_bytes, box_line, muted_ink, 26, 16)
 
         # Date, top-right.
         if submission_date:
@@ -193,6 +228,7 @@ def render_full_bleed_cover(
     theme_name: str = _DEFAULT_THEME,
     disclaimer_text: str | None = None,
     size: tuple[int, int] | None = None,
+    logo_bytes: bytes | None = None,
 ) -> bytes | None:
     """
     Renders a TRUE full-bleed cover page as a single A4 image: a themed colour
@@ -248,12 +284,7 @@ def render_full_bleed_cover(
         # Logo placeholder, top-left -- an empty box, never a guessed image.
         logo_w, logo_h = 220, 82
         logo_box = [margin, margin, margin + logo_w, margin + logo_h]
-        draw.rectangle(logo_box, outline=box_line, width=2)
-        logo_font = _font(bold=False, size=17)
-        logo_text = "[COMPANY LOGO]"
-        tw = draw.textlength(logo_text, font=logo_font)
-        draw.text((margin + (logo_w - tw) / 2, margin + logo_h / 2 - 10), logo_text,
-                   font=logo_font, fill=muted_ink)
+        _draw_logo(draw, img, logo_box, logo_bytes, box_line, muted_ink, 17, 10)
 
         # Date, top-right.
         if submission_date:

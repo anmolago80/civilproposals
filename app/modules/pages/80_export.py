@@ -48,6 +48,7 @@ with tabs[9]:
                 methodology_text = methodology_draft.draft_text if methodology_draft else ""
                 buffer = export_docx.build_letter_docx(
                     project_info=_project_info(),
+                    firm=_firm_export_context(),
                     sender=sender,
                     analysis=st.session_state.analysis,
                     understanding_text=understanding_text,
@@ -160,6 +161,7 @@ with tabs[9]:
                     # above the "paste the finished table here" note -- same
                     # pattern as the org chart. None when no grid exists, in
                     # which case the note renders alone, as before.
+                    firm=_firm_export_context(),
                     methodology_stages_png=methodology_stages.render_stages_png(
                         st.session_state.methodology_stages,
                         st.session_state.program_week_labels,
@@ -472,7 +474,12 @@ with tabs[9]:
                 st.rerun()
         with _rm_col1:
             if st.button("Fill schedules from this project's data", type="primary", key="_fill_scheds_btn"):
-                _fill_data = returnable_schedules.build_fill_data(st.session_state)
+                # Firm-level answers (ABN, insurances, certifications,
+                # registered address) come from the firm profile -- these
+                # labels were permanently placeholdered before it existed.
+                _fill_data = returnable_schedules.build_fill_data(
+                    st.session_state, firm_profile.schedule_fill_data(_firm_profile()),
+                )
                 _results = []
                 with st.spinner(f"Filling {len(_sched_names)} schedule(s)..."):
                     for _name in _sched_names:

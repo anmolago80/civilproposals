@@ -1,5 +1,5 @@
 """
-test_batch1_wiring.py -- regression tests for the Batch 1 wiring fixes.
+test_batch1_wiring.py -- regression tests for the wiring fixes (Batches 1+).
 
 Each test here pins one behaviour that used to be silently wrong: data the
 app already collected but never got into the exported document. They are
@@ -251,6 +251,94 @@ def test_fee_percentages_add_up(failures: list[str]) -> None:
         failures.append("[1i] a 70% split was silently normalised to 100%")
 
 
+def test_firm_profile(failures: list[str]) -> None:
+    """Batch 3: firm-level facts fill placeholders that nobody could fill
+    before -- and an EMPTY profile must leave every one of them exactly as
+    it is today."""
+    import json
+
+    from modules import firm_profile, returnable_schedules
+
+    class _Profile:
+        company_name = "Example Engineering Pty Ltd"
+        abn = "12 345 678 901"
+        acn = ""
+        registered_address = "Level 3, 100 Example St\nBrisbane QLD 4000"
+        logo_bytes = b"not-a-real-png"
+        signatory_name = "Jane Smith"
+        signatory_title = "Project Director"
+        signatory_phone = "07 3000 0000"
+        signatory_email = "jane@example.com"
+        insurances_json = json.dumps([
+            {"type": "Professional Indemnity", "insurer": "Example Insurance Ltd",
+             "policy_no": "PI-123456", "cover": "$10,000,000", "expiry": "30 June 2027"},
+            {"type": "Public Liability", "insurer": "", "policy_no": "", "cover": "", "expiry": ""},
+        ])
+        certifications_json = json.dumps(["ISO 9001:2015"])
+        rate_card_json = json.dumps({"Structural": 210.0})
+        offices_text = "Offices in Brisbane and Townsville since 2004."
+        community_text = "We fund two regional engineering scholarships each year."
+        leadership_text = "Jane Smith (Managing Director) oversees delivery."
+        terms_of_engagement_text = "AS 4122-2010 General Conditions."
+        qa_statement = "All deliverables issued with WVRs."
+
+    class _Empty:
+        company_name = abn = acn = registered_address = ""
+        logo_bytes = None
+        signatory_name = signatory_title = signatory_phone = signatory_email = ""
+        insurances_json = certifications_json = rate_card_json = ""
+        offices_text = community_text = leadership_text = ""
+        terms_of_engagement_text = qa_statement = ""
+
+    filled, empty = _Profile(), _Empty()
+
+    if firm_profile.is_empty(filled) or not firm_profile.is_empty(empty):
+        failures.append("[3] is_empty() doesn't distinguish a filled profile from a blank one")
+
+    # A half-filled insurance row must not export as a row of blanks.
+    rows = firm_profile.insurances(filled)
+    if len(rows) != 1 or rows[0]["insurer"] != "Example Insurance Ltd":
+        failures.append(f"[3d] blank insurance rows are not being dropped: {rows}")
+
+    # Footer: real line when complete, the original red placeholder when not.
+    text, complete = firm_profile.footer_line(filled)
+    if not complete or "ABN 12 345 678 901" not in text:
+        failures.append(f"[3d] the footer line isn't built from the profile: {text!r}")
+    text, complete = firm_profile.footer_line(empty, bidder_name="Test Pty Ltd")
+    if complete or "[REGISTERED ADDRESS]" not in text:
+        failures.append(f"[3d] an empty profile changed the footer placeholder: {text!r}")
+
+    # Schedule filler: knowable now, still never-known when blank.
+    data = returnable_schedules.build_fill_data(
+        _State(resource_plan=[], team_members=[]), firm_profile.schedule_fill_data(filled))
+    for label, expected in (("ABN:", "12 345 678 901"),
+                            ("Professional Indemnity Insurer:", "Example Insurance Ltd"),
+                            ("Certifications:", "ISO 9001:2015")):
+        key, value = returnable_schedules.match_label(label, data)
+        if value != expected:
+            failures.append(f"[3d] '{label}' resolved to {value!r}, expected {expected!r}")
+    # A signature can never come from a saved setting.
+    if returnable_schedules.match_label("Signature:", data)[1] is not None:
+        failures.append("[3d] a signature was filled from the firm profile")
+    # An insurance the profile does NOT hold stays placeholdered.
+    if returnable_schedules.match_label("Public Liability Insurer:", data)[1] is not None:
+        failures.append("[3d] an unheld insurance was answered anyway")
+
+    empty_data = returnable_schedules.build_fill_data(
+        _State(resource_plan=[], team_members=[]), firm_profile.schedule_fill_data(empty))
+    for label in ("ABN:", "Professional Indemnity Insurer:"):
+        key, value = returnable_schedules.match_label(label, empty_data)
+        if key != "never_known" or value is not None:
+            failures.append(f"[3e] with a blank profile '{label}' no longer placeholders: {key!r}")
+
+    # Seeding fills blanks only.
+    seed = firm_profile.project_seed(filled)
+    if seed.get("bidder_name") != "Example Engineering Pty Ltd":
+        failures.append("[3c] the project seed doesn't carry the company name")
+    if firm_profile.project_seed(empty):
+        failures.append("[3c] an empty profile still produced a seed")
+
+
 def main() -> int:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     failures: list[str] = []
@@ -262,6 +350,7 @@ def main() -> int:
     test_graphics_recommendations_are_current(failures)
     test_excel_fee_exports(failures)
     test_fee_percentages_add_up(failures)
+    test_firm_profile(failures)
 
     if failures:
         print("BATCH 1 WIRING TESTS FAILED:")
