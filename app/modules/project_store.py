@@ -69,6 +69,7 @@ PLAIN_KEYS = [
     "company_uploaded_flags",
     "quotes", "section_divider_config", "proposal_format",
     "letter_sender_name", "letter_sender_title", "letter_sender_phone", "letter_sender_email",
+    "letter_sender_address",
     "terms_of_engagement_text", "team_bio_warnings",
     "fee_seed_total", "program_num_weeks", "program_schedule", "program_week_labels",
     "resource_extra_names", "cv_library_filenames", "cv_extracted_names", "dismissed_disciplines",

@@ -84,12 +84,42 @@ def test_blank_person_still_placeholders(failures: list[str]) -> None:
         failures.append(f"[1a] blank credentials were not left blank: {person!r}")
 
 
+def test_sender_address_is_wired_and_saved(failures: list[str]) -> None:
+    """1(b): the schedule filler read letter_sender_address, but no widget
+    ever set it and it wasn't in the saved-project key list, so the address
+    labels on client forms could never be filled by anyone."""
+    from modules import project_store, returnable_schedules
+
+    if "letter_sender_address" not in project_store.PLAIN_KEYS:
+        failures.append("[1b] letter_sender_address is not saved with the project")
+
+    state = _State(
+        letter_sender_address="Level 3, 100 Example St, Brisbane QLD 4000",
+        resource_plan=[], team_members=[],
+    )
+    data = returnable_schedules.build_fill_data(state)
+    if data.get("contact_address") != "Level 3, 100 Example St, Brisbane QLD 4000":
+        failures.append(f"[1b] contact_address not built: {data.get('contact_address')!r}")
+
+    # Round-trip it through a real save/load so a registration that exists but
+    # doesn't survive the zip still fails here.
+    saved = project_store.save_project(_State(letter_sender_address="12 Test Rd"))
+    if project_store.load_project(saved).get("letter_sender_address") != "12 Test Rd":
+        failures.append("[1b] letter_sender_address did not survive save/load")
+
+    # And it must actually match an address label on a form.
+    field_key, value = returnable_schedules.match_label("Registered Office:", data)
+    if field_key != "contact_address" or not value:
+        failures.append(f"[1b] a 'Registered Office' label didn't resolve: {field_key!r} {value!r}")
+
+
 def main() -> int:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     failures: list[str] = []
 
     test_schedule_filler_reads_real_quals(failures)
     test_blank_person_still_placeholders(failures)
+    test_sender_address_is_wired_and_saved(failures)
 
     if failures:
         print("BATCH 1 WIRING TESTS FAILED:")

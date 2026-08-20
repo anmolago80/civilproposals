@@ -57,14 +57,9 @@ with tabs[0]:
         if submitted:
             st.success("Project details saved.")
 
-    if _is_letter():
-        st.divider()
-        st.markdown("#### Sign-off details")
-        st.caption(
-            "Who signs this pack off -- shown in the closing \"Regards\" block at the end of "
-            "the document. The cover page and footer already carry the project/client/bidder "
-            "details entered above, so nothing else is needed here."
-        )
+    def _render_signatory_fields() -> None:
+        """The contact/signatory block. Shared by both proposal formats --
+        see the two call sites below for why each renders it differently."""
         scol1, scol2 = st.columns(2)
         with scol1:
             st.text_input("Sender name", key="letter_sender_name", placeholder="e.g. Jane Smith")
@@ -72,6 +67,42 @@ with tabs[0]:
         with scol2:
             st.text_input("Sender phone", key="letter_sender_phone")
             st.text_input("Sender email", key="letter_sender_email")
+        st.text_input(
+            "Registered / business address", key="letter_sender_address",
+            placeholder="e.g. Level 3, 100 Example St, Brisbane QLD 4000",
+            help="Used to fill the address labels on the client's returnable schedules. "
+                 "It is deliberately NOT added to the letter sign-off block, which stays "
+                 "name/title/phone/email by design.",
+        )
+
+    if _is_letter():
+        st.divider()
+        st.markdown("#### Sign-off details")
+        st.caption(
+            "Who signs this pack off -- shown in the closing \"Regards\" block at the end of "
+            "the document. The cover page and footer already carry the project/client/bidder "
+            "details entered above, so nothing else is needed here. The address is used only "
+            "when filling the client's returnable schedules."
+        )
+        _render_signatory_fields()
+    else:
+        # Large Scope packs have no sign-off letter, which is why this block
+        # used to be hidden entirely for them. But the returnable-schedule
+        # filler reads exactly these fields to answer "Contact Person",
+        # "Telephone", "Email" and "Registered Office" on the client's own
+        # forms -- so a Large Scope user had no way to fill labels the filler
+        # was fully capable of filling. Collapsed by default: it is optional
+        # here, unlike in a letter pack.
+        st.divider()
+        with st.expander("Contact / signatory details (optional)"):
+            st.caption(
+                "Not used in the Large Scope document itself. These are the values the "
+                "returnable-schedule filler puts into the client's own forms against "
+                "labels like \"Contact Person\", \"Telephone\", \"Email\" and "
+                "\"Registered Office\" -- leave them blank and those labels get a "
+                "[TO BE COMPLETED] placeholder instead."
+            )
+            _render_signatory_fields()
 
 
 # ---------------------------------------------------------------------------

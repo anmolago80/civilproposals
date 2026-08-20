@@ -80,6 +80,11 @@ def _init_state():
         # and bidder details, so no separate recipient/ref/date/subject fields are needed.
         "letter_sender_name": "", "letter_sender_title": "",
         "letter_sender_phone": "", "letter_sender_email": "",
+        # Read by returnable_schedules.build_fill_data for the "Registered
+        # Office"/"Business Address" labels on the client's own forms.
+        # Deliberately NOT part of the letter sign-off block -- see the note
+        # in export_docx._build_letter_signoff.
+        "letter_sender_address": "",
         "terms_of_engagement_text": "",
         "team_members": [],
         "team_photos": {},
