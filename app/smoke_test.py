@@ -57,6 +57,45 @@ def main() -> int:
             if at.session_state["project_name"] != "Smoke Test Project":
                 failures.append("[interaction] project_name did not round-trip")
 
+    # The program style picker and its live preview only exist once a program
+    # has been built, so the two passes above never reach them -- which is
+    # exactly the shape of gap that lets a broken preview ship.
+    if not failures:
+        from modules import program_render
+        from modules.tender_analyser import ScopeItem, TenderAnalysis
+
+        at = AppTest.from_file("app.py", default_timeout=180)
+        at.session_state["proposal_format"] = "letter"
+        # The Fees & Program tab only builds its fee/program section once a
+        # brief has been analysed, so the picker is unreachable without one.
+        at.session_state["analysis"] = TenderAnalysis(
+            project_scope="Example scope",
+            scope_items=[ScopeItem(title="Concept design", tasks=["Sketch options"]),
+                         ScopeItem(title="Detailed design", tasks=["Drawings"])],
+        )
+        at.session_state["program_num_weeks"] = 6
+        at.session_state["program_week_labels"] = [f"Wk {i + 1}" for i in range(6)]
+        at.session_state["program_schedule"] = {
+            "Concept design": [True, True, True, False, False, False],
+            "Detailed design": [False, False, True, True, True, True],
+        }
+        at.run()
+        for exc in at.exception:
+            failures.append(f"[program style] exception: {exc.value}")
+        style_radios = [r for r in at.radio if r.key == "program_style"]
+        if not style_radios:
+            failures.append("[program style] the style picker never rendered")
+        elif at.session_state["program_style"] not in program_render.STYLES:
+            failures.append(
+                f"[program style] default is not a real style: "
+                f"{at.session_state['program_style']!r}")
+        else:
+            style_radios[0].set_value("timeline").run()
+            for exc in at.exception:
+                failures.append(f"[program style] exception after picking: {exc.value}")
+            if at.session_state["program_style"] != "timeline":
+                failures.append("[program style] the chosen style did not round-trip")
+
     if failures:
         print("SMOKE TEST FAILED:")
         for f in failures:

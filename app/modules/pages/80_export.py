@@ -89,6 +89,9 @@ with tabs[9]:
                     differentiator_text=st.session_state.project_differentiator,
                     sales_pitch_text=st.session_state.project_sales_pitch,
                     ocr_note=_ocr_export_note(),
+                    program_style=st.session_state.program_style,
+                    methodology_stages=st.session_state.methodology_stages,
+                    program_start_date=st.session_state.program_start_date,
                 )
                 st.session_state.docx_buffer = buffer
                 _mark_export_generated()
@@ -387,19 +390,17 @@ with tabs[9]:
                 try:
                     program_bytes = _cached_pptx(
                         "program",
-                        (
-                            tuple((title, tuple(bool(w) for w in weeks))
-                                  for title, weeks in (st.session_state.program_schedule or {}).items()),
-                            tuple(st.session_state.program_week_labels or []),
-                            st.session_state.client_name, st.session_state.project_name,
-                            st.session_state.proposal_theme,
-                        ),
+                        _program_signature(st.session_state.program_style),
                         lambda: program_pptx.populate_program(
                             st.session_state.program_schedule or {},
                             st.session_state.program_week_labels or [],
                             client_name=st.session_state.client_name,
                             project_name=st.session_state.project_name,
                             theme_name=st.session_state.proposal_theme,
+                            style=st.session_state.program_style,
+                            methodology_stages=st.session_state.methodology_stages,
+                            start_date=st.session_state.program_start_date,
+                            analysis=st.session_state.analysis,
                         ),
                     )
                     st.download_button(

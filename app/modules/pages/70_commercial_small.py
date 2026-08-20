@@ -411,6 +411,8 @@ with tabs[8]:
                 st.session_state.program_schedule = {
                     r["Scope item"]: [bool(r[lbl]) for lbl in labels] for r in edited_program
                 }
+                st.divider()
+                _program_style_control("small")
             else:
                 st.info("Click 'Generate default program' for an editable starting grid, sized by how many tasks each scope item lists -- adjust the weeks freely afterwards.")
 

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import io
 import re
+import sys
 from datetime import datetime
 
 from docx import Document
@@ -257,6 +258,9 @@ def build_letter_docx(
     risk_register=None,
     fee_sections_included: dict | None = None,
     scope_item_fees: list | None = None,
+    program_style: str | None = None,
+    methodology_stages: list | None = None,
+    program_start_date=None,
 ) -> io.BytesIO:
     """
     Builds the Small Scope Proposal Response Pack -- the leaner, content-agnostic
@@ -349,7 +353,13 @@ def build_letter_docx(
         )
 
     doc.add_heading("6. Program", level=1)
-    _build_letter_program(doc, program_schedule, program_week_labels, theme)
+    _build_letter_program(
+        doc, program_schedule, program_week_labels, theme,
+        style=program_style, methodology_stages=methodology_stages,
+        start_date=program_start_date, analysis=analysis,
+        project_name=project_info.get("project_name", ""),
+        client_name=project_info.get("client_name", ""),
+    )
 
     doc.add_heading("7. Assumptions and Clarifications", level=1)
     if analysis.assumptions:
@@ -632,10 +642,12 @@ def _build_letter_fee_split(doc: Document, fee_estimates: list, theme: dict):
         run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
 
 
-def _build_letter_program(doc: Document, program_schedule: dict, week_labels: list, theme: dict):
-    if not program_schedule or not week_labels:
-        _add_placeholder_paragraph(doc, "[NO PROGRAM ENTERED -- set the delivery weeks in the Program step]")
-        return
+def _letter_program_week_grid(doc: Document, program_schedule: dict, week_labels: list,
+                              theme: dict):
+    """The original week-by-scope-item shaded grid. Still here as the fallback
+    for when image generation fails: a program the reader can follow beats a
+    missing section, and the grid is the one form of it that needs nothing
+    but python-docx."""
     headers = ["Scope Item"] + list(week_labels)
     rows = [[title] + ["" for _ in week_labels] for title in program_schedule]
     table = _add_table(doc, headers, rows, theme=theme)
@@ -643,6 +655,72 @@ def _build_letter_program(doc: Document, program_schedule: dict, week_labels: li
         for col_index, active in enumerate(active_weeks, start=1):
             if active:
                 _shade_cell(table.rows[row_index].cells[col_index], str(theme["accent"]))
+
+
+def _letter_program_native_table(doc: Document, model, theme: dict):
+    """The formal-table style as a REAL Word table rather than a picture.
+
+    The whole appeal of the formal-table option is that it is conservative
+    and plain -- which also means it is the one style a client's document
+    controller might want to re-type a row of. A picture would take that
+    away for nothing."""
+    def _week_text(week: int) -> str:
+        label = (model.week_labels[week - 1] if week - 1 < len(model.week_labels)
+                 else f"Wk {week}")
+        date_text = model.week_dates[week - 1] if week - 1 < len(model.week_dates) else ""
+        return f"{label} - {date_text}" if date_text else label
+
+    rows = [
+        [item.label or "[UNTITLED SCOPE ITEM]", _week_text(item.start_week),
+         _week_text(item.end_week), f"{item.weeks} week{'s' if item.weeks != 1 else ''}"]
+        for item in model.items
+    ]
+    _add_table(doc, ["Scope Item", "Commence", "Complete", "Duration"], rows, theme=theme)
+    if model.start_date_text:
+        note = doc.add_paragraph()
+        run = note.add_run(
+            f"Program anchored to an anticipated commencement of {model.start_date_text} "
+            f"-- dates shift with the actual award date."
+        )
+        run.italic = True
+        run.font.size = Pt(8.5)
+
+
+def _build_letter_program(doc: Document, program_schedule: dict, week_labels: list, theme: dict,
+                          style: str | None = None, methodology_stages: list | None = None,
+                          start_date=None, analysis=None, project_name: str = "",
+                          client_name: str = ""):
+    """The Program section, in the presentation style the user chose.
+
+    Three of the four styles render as a full-width themed image of exactly
+    what the preview showed. The formal table renders as a native Word
+    table, for the reason in _letter_program_native_table(). Anything that
+    goes wrong falls back to the original shaded week grid rather than
+    leaving the section empty."""
+    if not program_schedule or not week_labels:
+        _add_placeholder_paragraph(doc, "[NO PROGRAM ENTERED -- set the delivery weeks in the Program step]")
+        return
+
+    try:
+        from modules import program_render
+
+        model = program_render.build_model(
+            program_schedule, week_labels, methodology_stages or [], start_date, analysis,
+            project_name, client_name,
+        )
+        resolved = program_render.effective_style(
+            model, style or program_render.DEFAULT_STYLE)
+        if resolved == "table":
+            _letter_program_native_table(doc, model, theme)
+            return
+        png = program_render.render_png(model, resolved, f"#{theme['accent']}")
+        if png:
+            _add_full_width_image(doc, png)
+            return
+    except Exception as exc:  # noqa: BLE001 -- never lose the section over a picture
+        print(f"[export_docx] program image: {exc}", file=sys.stderr)
+
+    _letter_program_week_grid(doc, program_schedule, week_labels, theme)
 
 
 def _build_risk_table(doc: Document, register, theme: dict | None):

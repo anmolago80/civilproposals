@@ -212,6 +212,11 @@ def _init_state():
         # Never derived from the brief -- a guessed start date in a program
         # table would be an invented fact.
         "program_start_date": None,
+        # Which of the four presentation styles the delivery program is drawn
+        # in (program_render.STYLES). A presentation preference, not
+        # brief-derived data -- so it is deliberately NOT reset when the
+        # brief changes, the same reasoning as fee_sections_included.
+        "program_style": program_render.DEFAULT_STYLE,
         # Save/Load Project bookkeeping (sidebar) -- not project content itself.
         "_project_save_bytes": None,
         "_last_loaded_project_name": "",
@@ -698,6 +703,109 @@ def _fee_inclusion_summary() -> None:
         )
 
 
+def _program_model_from_state():
+    """The one program model every output renders from -- preview, letter
+    pack, and companion deck. Built here rather than three times over so a
+    preview and an export cannot disagree."""
+    return program_render.build_model(
+        st.session_state.get("program_schedule") or {},
+        st.session_state.get("program_week_labels") or [],
+        st.session_state.get("methodology_stages") or [],
+        st.session_state.get("program_start_date"),
+        st.session_state.get("analysis"),
+        st.session_state.get("project_name") or "",
+        st.session_state.get("client_name") or "",
+    )
+
+
+def _program_signature(style: str) -> tuple:
+    """Everything the drawn program depends on. Anything not in here is
+    something a change to could leave a stale picture on screen."""
+    stages = st.session_state.get("methodology_stages") or []
+    start = st.session_state.get("program_start_date")
+    analysis = st.session_state.get("analysis")
+    return (
+        style,
+        tuple((title, tuple(bool(w) for w in (weeks or [])))
+              for title, weeks in (st.session_state.get("program_schedule") or {}).items()),
+        tuple(st.session_state.get("program_week_labels") or []),
+        tuple((getattr(s, "name", ""), getattr(s, "week_start", None), getattr(s, "week_end", None),
+               tuple(getattr(s, "engagement_activities", None) or [])) for s in stages),
+        start.isoformat() if hasattr(start, "isoformat") else None,
+        (getattr(analysis, "submission_date", "") or "") if analysis is not None else "",
+        st.session_state.get("project_name") or "",
+        st.session_state.get("client_name") or "",
+        st.session_state.get("proposal_theme") or "",
+    )
+
+
+# Rendering a program PNG is ~0.4s of matplotlib. The preview redraws on
+# every Streamlit rerun -- which is every keystroke in the fee tables on the
+# same tab -- so it is cached on the content it was drawn from, not on time.
+_PROGRAM_PNG_CACHE_SIZE = 8
+
+
+def _program_png(style: str | None = None) -> bytes | None:
+    """The current program drawn in `style`, cached on its content signature.
+    None when it could not be drawn; every caller has a fallback."""
+    style = style or st.session_state.get("program_style") or program_render.DEFAULT_STYLE
+    signature = _program_signature(style)
+    cache = st.session_state.setdefault("_program_png_cache", {})
+    if signature in cache:
+        return cache[signature]
+    try:
+        accent = f"#{export_docx._theme_colours(st.session_state.get('proposal_theme'))['accent']}"
+        png = program_render.render_png(_program_model_from_state(), style, accent)
+    except Exception as exc:  # noqa: BLE001 -- a preview is never worth a traceback
+        print(f"[program preview] {exc}", file=sys.stderr)
+        png = None
+    if len(cache) >= _PROGRAM_PNG_CACHE_SIZE:
+        cache.pop(next(iter(cache)))
+    cache[signature] = png
+    return png
+
+
+def _program_style_control(key_suffix: str) -> None:
+    """The four-way program presentation style picker, plus a live preview
+    drawn from this project's own data.
+
+    A preview rather than four stock thumbnails: the styles differ most in
+    how they cope with THIS program's activity names and week count, which a
+    generic sample cannot show."""
+    st.markdown("**Program presentation style**")
+    st.caption(
+        "How the program is drawn in the proposal and the companion PowerPoint. "
+        "Purely presentational -- it never changes a single week you ticked."
+    )
+    st.radio(
+        "Program presentation style", program_render.STYLES,
+        key="program_style", horizontal=True, label_visibility="collapsed",
+        format_func=lambda s: program_render.STYLE_LABELS.get(s, s),
+    )
+    chosen = st.session_state.program_style
+    st.caption(program_render.STYLE_DESCRIPTIONS.get(chosen, ""))
+
+    model = _program_model_from_state()
+    if model.is_empty:
+        st.info("Build the delivery program above and the preview appears here.")
+        return
+    effective = program_render.effective_style(model, chosen)
+    if effective != chosen:
+        st.info(
+            "**Stage grouping needs methodology stages** -- generate them in the Drafting "
+            "step and this becomes swimlanes. Showing the Gantt style for now."
+        )
+    png = _program_png(chosen)
+    if png:
+        st.image(png, use_container_width=True)
+        st.caption("This is exactly what the exported pack and the PowerPoint will show.")
+    else:
+        st.caption(
+            "Couldn't draw the preview just now -- the program itself is unaffected, and the "
+            "export falls back to a plain week-by-week table."
+        )
+
+
 def _fee_apply_control(state_prefix: str, pending: bool, indent_note: str = "totals") -> bool:
     """The explicit "Apply changes" control under a deferred-apply fee table.
 
@@ -804,7 +912,7 @@ def _export_input_signature() -> str:
         "experience_intro", "methodology_stages", "methodology_wvr_confirmed", "risk_register",
         "program_schedule", "program_week_labels", "terms_of_engagement_text",
         "project_differentiator", "project_sales_pitch", "fee_estimate_manual_total",
-        "cover_photo_index", "fee_sections_included",
+        "cover_photo_index", "fee_sections_included", "program_style", "program_start_date",
         "letter_sender_name", "letter_sender_title",
         "letter_sender_phone", "letter_sender_email", "letter_sender_address",
     ]

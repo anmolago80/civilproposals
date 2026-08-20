@@ -421,6 +421,145 @@ def test_fee_presentation_ticks(failures: list[str]) -> None:
             failures.append(f"[7A] '{name}' placeholder handling is wrong")
 
 
+def test_program_styles(failures: list[str]) -> None:
+    """Batch 7B: the delivery program is drawn in the style the user picked,
+    the same style in every output, and every style survives the awkward
+    cases -- no stages, no program at all, and a program far bigger than a
+    slide."""
+    import datetime
+    import io as _io
+
+    from docx import Document
+    from pptx import Presentation
+
+    from modules import export_docx, program_pptx, program_render, program_schedule, project_store
+
+    if "program_style" not in project_store.PLAIN_KEYS:
+        failures.append("[7B] the chosen program style isn't saved with the project")
+    loaded = project_store.load_project(
+        project_store.save_project(_State(program_style="timeline"))).get("program_style")
+    if loaded != "timeline":
+        failures.append(f"[7B] the style didn't survive save/load: {loaded}")
+
+    weeks = 14
+    start = datetime.date(2026, 9, 7)
+    span = lambda a, b: [a <= i + 1 <= b for i in range(weeks)]  # noqa: E731
+    schedule = {
+        "Project initiation & site establishment": span(1, 3),
+        "Topographic & utility survey": span(2, 5),
+        "Concept design development": span(5, 8),
+        "Detailed design (civil, drainage, pavement)": span(8, 12),
+        "Issue for construction documentation": span(13, 14),
+    }
+    labels = program_schedule.week_labels(weeks, start)
+    stages = [
+        methodology_stage("Stage 1 - Investigation", 1, 6),
+        methodology_stage("Stage 2 - Concept design", 5, 10),
+        methodology_stage("Stage 3 - Detailed design", 8, 12),
+        methodology_stage("Stage 4 - Documentation", 11, 14),
+    ]
+
+    model = program_render.build_model(schedule, labels, stages, start, None, "P", "C")
+
+    # Stage assignment must take the containing stage that begins LATEST --
+    # first-match filed everything under whichever stage merely began first.
+    by_label = {item.label: model.stages[item.stage_index] for item in model.items}
+    if by_label.get("Detailed design (civil, drainage, pavement)") != "Stage 3 - Detailed design":
+        failures.append(f"[7B] stage assignment picked the wrong lane: {by_label}")
+
+    for style in program_render.STYLES:
+        if not program_render.render_png(model, style, "#1D4ED8"):
+            failures.append(f"[7B] the {style} style didn't render")
+
+    # Swimlanes has nothing to group by without stages, and must SAY so by
+    # resolving to a style the caller can name -- not quietly draw one lane.
+    no_stages = program_render.build_model(schedule, labels, [], start, None, "P", "C")
+    if program_render.effective_style(no_stages, "swimlanes") != "gantt":
+        failures.append("[7B] swimlanes without stages doesn't fall back to the Gantt")
+    if program_render.effective_style(model, "swimlanes") != "swimlanes":
+        failures.append("[7B] swimlanes falls back even when stages exist")
+
+    # An empty program keeps its red placeholder in every style, rather than
+    # exporting a plausible-looking empty grid.
+    empty = program_render.build_model({}, labels, stages, start, None, "P", "C")
+    for style in program_render.STYLES:
+        if not program_render.render_png(empty, style, "#1D4ED8"):
+            failures.append(f"[7B] the {style} style lost its empty-program placeholder")
+    empty_deck = Presentation(_io.BytesIO(program_pptx.populate_program({}, [], style="table")))
+    deck_text = " ".join(
+        shape.text_frame.text for shape in empty_deck.slides[0].shapes
+        if shape.has_text_frame)
+    if "NO PROGRAM ENTERED" not in deck_text:
+        failures.append("[7B] an empty program exports a deck with no placeholder")
+
+    # 1(i)'s overflow fix has to hold in all four styles, not just the one it
+    # was written for: PowerPoint stores shapes outside the slide and simply
+    # doesn't show them.
+    big = {f"Scope item {i}": [True] * weeks for i in range(24)}
+    for style in program_render.STYLES:
+        blob = program_pptx.populate_program(
+            big, labels, project_name="P", style=style, methodology_stages=stages,
+            start_date=start)
+        prs = Presentation(_io.BytesIO(blob))
+        lowest = max(shape.top + shape.height for shape in prs.slides[0].shapes)
+        if lowest > prs.slide_height:
+            failures.append(
+                f"[7B] 24 scope items overflow the {style} slide by "
+                f"{(lowest - prs.slide_height) / 914400:.2f} in")
+
+    # The formal table must arrive as a real, editable PowerPoint table --
+    # the whole reason that style exists.
+    table_deck = Presentation(_io.BytesIO(program_pptx.populate_program(
+        schedule, labels, project_name="P", style="table", start_date=start)))
+    if not any(shape.has_table for shape in table_deck.slides[0].shapes):
+        failures.append("[7B] the formal-table deck isn't a real PowerPoint table")
+
+    # ... and as a real Word table in the letter pack, while the other three
+    # arrive as a picture of exactly what the preview drew.
+    import test_exports
+    project = test_exports.build_sample_project()
+
+    def letter(style):
+        return export_docx.build_letter_docx(
+            project_info=project["project_info"], sender=project["sender"],
+            analysis=project["analysis"], understanding_text="", methodology_text="",
+            resource_plan=[], personnel_photos={},
+            program_schedule=schedule, program_week_labels=labels,
+            terms_of_engagement_text="", fee_estimates=project["fee_estimates"],
+            discipline_fee_lines=project["discipline_fee_lines"],
+            program_style=style, methodology_stages=stages, program_start_date=start,
+        ).getvalue()
+
+    table_doc = Document(_io.BytesIO(letter("table")))
+    if not any("Commence" in cell.text for table in table_doc.tables for row in table.rows
+               for cell in row.cells):
+        failures.append("[7B] the letter pack's formal table isn't a native Word table")
+    for style in ("gantt", "swimlanes", "timeline"):
+        doc = Document(_io.BytesIO(letter(style)))
+        if not doc.inline_shapes:
+            failures.append(f"[7B] the letter pack's {style} program has no image")
+
+    # A program that can't be drawn must still export a program the reader
+    # can follow, not an empty section.
+    broken = _State()
+    original = program_render.render_png
+    try:
+        program_render.render_png = lambda *a, **k: None
+        fallback = Document(_io.BytesIO(letter("timeline")))
+    finally:
+        program_render.render_png = original
+    grid_headers = [cell.text for table in fallback.tables for cell in table.rows[0].cells]
+    if not any(str(labels[0]) == header for header in grid_headers):
+        failures.append("[7B] a failed program image doesn't fall back to the week grid")
+    del broken
+
+
+def methodology_stage(name: str, week_start: int, week_end: int):
+    from modules.methodology_stages import MethodologyStage
+
+    return MethodologyStage(name=name, week_start=week_start, week_end=week_end)
+
+
 def main() -> int:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     failures: list[str] = []
@@ -435,6 +574,7 @@ def main() -> int:
     test_firm_profile(failures)
     test_failure_honesty(failures)
     test_fee_presentation_ticks(failures)
+    test_program_styles(failures)
 
     if failures:
         print("BATCH 1 WIRING TESTS FAILED:")

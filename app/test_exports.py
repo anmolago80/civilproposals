@@ -253,6 +253,8 @@ def build_sample_project() -> dict:
         "fee_estimates": fee_estimates,
         "program_schedule": program_schedule,
         "program_week_labels": week_labels,
+        "program_start_date": __import__("datetime").date(2026, 9, 7),
+        "program_style": "swimlanes",
         "reference_projects": refs,
         "sender": {
             "name": "Jane Smith", "title": "Project Director",
@@ -328,6 +330,9 @@ def generate_all(project: dict) -> dict:
         terms_of_engagement_text=project["terms_of_engagement_text"],
         fee_estimates=project["fee_estimates"],
         discipline_fee_lines=project["discipline_fee_lines"],
+        program_style=project["program_style"],
+        methodology_stages=project["methodology_stages"],
+        program_start_date=project["program_start_date"],
     ).getvalue()
 
     out["Org_Chart.pptx"] = org_chart_pptx.populate_org_chart(
@@ -352,12 +357,22 @@ def generate_all(project: dict) -> dict:
         project_name=info["project_name"],
         theme_name=info["proposal_theme"],
     )
-    out["Delivery_Program.pptx"] = program_pptx.populate_program(
-        project["program_schedule"], project["program_week_labels"],
-        client_name=info["client_name"],
-        project_name=info["project_name"],
-        theme_name=info["proposal_theme"],
-    )
+    # One deck per presentation style: they share a model but not a single
+    # line of layout, so a regression in one is invisible in the others.
+    from modules import program_render
+
+    for style in program_render.STYLES:
+        out[f"Delivery_Program_{style}.pptx"] = program_pptx.populate_program(
+            project["program_schedule"], project["program_week_labels"],
+            client_name=info["client_name"],
+            project_name=info["project_name"],
+            theme_name=info["proposal_theme"],
+            style=style,
+            methodology_stages=project["methodology_stages"],
+            start_date=project.get("program_start_date"),
+            analysis=project["analysis"],
+        )
+    out["Delivery_Program.pptx"] = out["Delivery_Program_swimlanes.pptx"]
     if org_png:
         out["_org_chart_preview.png"] = org_png
     return out

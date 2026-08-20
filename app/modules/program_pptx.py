@@ -333,12 +333,28 @@ def _milestones(slide, model, grid_left, grid_top, grid_bottom, week_col_w) -> i
     return int(grid_bottom + size * 1.25 + Inches(0.22))
 
 
+def _activity_legend(model, accent: RGBColor) -> list[tuple[RGBColor, str]]:
+    """See program_render._activity_legend(): no key for a mark that isn't on
+    the chart."""
+    entries = [(accent, "Scheduled activity")]
+    if model.milestones:
+        entries.append((_MILESTONE_ORANGE, "Milestone / hold point"))
+    return entries
+
+
 def _legend(slide, entries: list[tuple[RGBColor, str]], y: int) -> None:
     cursor = int(_M)
     swatch = Inches(0.14)
     for colour, label in entries:
-        _rect(slide, Emu(cursor), Emu(int(y + Inches(0.03))), Emu(int(swatch)), Emu(int(swatch)),
-              colour)
+        # A diamond for the milestone key, so it matches the marks on the
+        # chart -- it shares its orange with the third stage colour, and
+        # shape is the only thing telling the two apart.
+        if label.lower().startswith("milestone"):
+            _diamond(slide, cursor + swatch / 2, y + Inches(0.03) + swatch / 2, swatch,
+                     _MILESTONE_ORANGE)
+        else:
+            _rect(slide, Emu(cursor), Emu(int(y + Inches(0.03))), Emu(int(swatch)),
+                  Emu(int(swatch)), colour)
         width = Inches(0.09) * max(6, len(label))
         _text(slide, Emu(int(cursor + swatch * 1.5)), Emu(int(y)), Emu(int(width)), Inches(0.2),
               label, 8.5, _INK, bold=True)
@@ -395,8 +411,7 @@ def _slide_gantt(model, accent: RGBColor) -> bytes:
               x1 - x0 - Inches(0.04), Emu(bar_h), accent, f"{item.weeks} wk", 9.0)
 
     below = _milestones(slide, model, grid_left, grid_top, grid_bottom, week_col_w)
-    _legend(slide, [(accent, "Scheduled activity"), (_MILESTONE_ORANGE, "Milestone / hold point")],
-            below + int(Inches(0.12)))
+    _legend(slide, _activity_legend(model, accent), below + int(Inches(0.12)))
     _grow(prs, below + Inches(0.5))
     return _save(prs)
 
@@ -467,7 +482,8 @@ def _slide_swimlanes(model, accent: RGBColor) -> bytes:
     below = _milestones(slide, model, grid_left, grid_top, y, week_col_w)
     legend = [(_hex(program_render.STAGE_COLOURS[i % len(program_render.STAGE_COLOURS)]), name)
               for i, name in enumerate(model.stages)]
-    legend.append((_MILESTONE_ORANGE, "Milestone"))
+    if model.milestones:
+        legend.append((_MILESTONE_ORANGE, "Milestone"))
     _legend(slide, legend, below + int(Inches(0.12)))
     _grow(prs, below + Inches(0.5))
     return _save(prs)
@@ -584,8 +600,7 @@ def _slide_timeline(model, accent: RGBColor) -> bytes:
               accent, item.label or "[UNTITLED SCOPE ITEM]", 9.5, align=PP_ALIGN.LEFT)
 
     below = _milestones(slide, model, grid_left, grid_top, grid_bottom, week_col_w)
-    _legend(slide, [(accent, "Scheduled activity"), (_MILESTONE_ORANGE, "Milestone / hold point")],
-            below + int(Inches(0.12)))
+    _legend(slide, _activity_legend(model, accent), below + int(Inches(0.12)))
     _grow(prs, below + Inches(0.5))
     return _save(prs)
 

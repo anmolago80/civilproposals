@@ -109,6 +109,7 @@ from modules import (
     firm_profile,
     risk_register,
     program_pptx,
+    program_render,
     proposal_library,
     reference_library,
     reference_projects as reference_projects_module,

@@ -495,6 +495,16 @@ def _draw_title(ax, model: ProgramModel, subtitle: str = ""):
                 ha="right", va="top")
 
 
+def _activity_legend(model: ProgramModel, accent: str) -> list[tuple[str, str]]:
+    """A legend key for a mark that isn't on the chart is noise -- and the
+    milestone key is the same orange as the third stage colour, so an unused
+    one actively misleads."""
+    entries = [(accent, "Scheduled activity")]
+    if model.milestones:
+        entries.append((MILESTONE_ORANGE, "Milestone / hold point"))
+    return entries
+
+
 def _draw_legend(ax, entries: list[tuple[str, str]], y: float, x: float = 0.0):
     """entries: [(colour, label)] -- a swatch row. The milestone entry draws
     a diamond rather than a square so it matches the marks on the chart."""
@@ -560,8 +570,7 @@ def _render_gantt(model: ProgramModel, accent: str):
 
     _draw_milestones(ax, model, left, right, top, bottom, bottom - 0.022)
     legend_y = bottom - (0.10 if model.milestones else 0.05)
-    _draw_legend(ax, [(accent, "Scheduled activity"), (MILESTONE_ORANGE, "Milestone / hold point")],
-                 legend_y)
+    _draw_legend(ax, _activity_legend(model, accent), legend_y)
     figure = _finalise(fig, ax, legend_y - 0.03)
     for artist, max_frac in labels:
         _fit_label(figure, artist, max_frac, artist.get_fontsize())
@@ -632,7 +641,8 @@ def _render_swimlanes(model: ProgramModel, accent: str):
     _draw_milestones(ax, model, left, right, top, y, y - 0.022)
     legend = [(STAGE_COLOURS[i % len(STAGE_COLOURS)], name)
               for i, name in enumerate(model.stages)]
-    legend.append((MILESTONE_ORANGE, "Milestone"))
+    if model.milestones:
+        legend.append((MILESTONE_ORANGE, "Milestone"))
     legend_y = y - (0.10 if model.milestones else 0.05)
     _draw_legend(ax, legend, legend_y)
     figure = _finalise(fig, ax, legend_y - 0.03)
@@ -749,8 +759,7 @@ def _render_timeline(model: ProgramModel, accent: str):
 
     _draw_milestones(ax, model, left, right, top, bottom, bottom - 0.022)
     legend_y = bottom - (0.10 if model.milestones else 0.05)
-    _draw_legend(ax, [(accent, "Scheduled activity"), (MILESTONE_ORANGE, "Milestone / hold point")],
-                 legend_y)
+    _draw_legend(ax, _activity_legend(model, accent), legend_y)
     figure = _finalise(fig, ax, legend_y - 0.03)
     for artist, max_frac in labels:
         _fit_label(figure, artist, max_frac, 6.6)
