@@ -78,7 +78,7 @@ PLAIN_KEYS = [
     "resource_extra_names", "cv_library_filenames", "cv_extracted_names", "dismissed_disciplines",
     "body_font", "reference_project_warnings", "dismissed_fee_disciplines",
     "fee_estimate_manual_total", "project_differentiator", "project_sales_pitch",
-    "methodology_wvr_confirmed", "cover_photo_index",
+    "methodology_wvr_confirmed", "cover_photo_index", "fee_sections_included",
     # Bookkeeping app.py uses to detect a stale Proposal Structure (see
     # _structure_format_stale() there) -- MUST travel with "sections" and
     # "proposal_format" or a reopened project falsely looks stale: without

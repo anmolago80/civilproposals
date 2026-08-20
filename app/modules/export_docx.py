@@ -90,6 +90,8 @@ def build_docx(
     program_week_labels: list[str] | None = None,
     methodology_stages_png: bytes | None = None,
     firm: dict | None = None,
+    fee_sections_included: dict | None = None,
+    scope_item_fees: list | None = None,
 ) -> io.BytesIO:
     theme = _theme_colours(project_info.get("proposal_theme"))
     firm = firm or {}
@@ -113,7 +115,10 @@ def build_docx(
     _build_page_allocation_plan(doc, sections, theme)
     doc.add_page_break()
 
-    if fee_estimates:
+    # Which fee presentations reach the proposal is the user's choice now
+    # (Fee Estimate tab) rather than hardcoded per pack format.
+    _fee_included = fee_sections(fee_sections_included)
+    if fee_estimates and _fee_included["pct_split"]:
         _build_fee_estimate(doc, fee_estimates, analysis.fee_cap, theme, fee_estimate_indicative_amounts)
         doc.add_page_break()
 
@@ -130,7 +135,9 @@ def build_docx(
                              program_schedule=program_schedule,
                              program_week_labels=program_week_labels,
                              methodology_stages_png=methodology_stages_png,
-                             firm=firm)
+                             firm=firm,
+                             fee_sections_included=_fee_included,
+                             scope_item_fees=scope_item_fees)
 
     buffer = io.BytesIO()
     doc.save(buffer)
@@ -248,6 +255,8 @@ def build_letter_docx(
     ocr_note: str | None = None,
     firm: dict | None = None,
     risk_register=None,
+    fee_sections_included: dict | None = None,
+    scope_item_fees: list | None = None,
 ) -> io.BytesIO:
     """
     Builds the Small Scope Proposal Response Pack -- the leaner, content-agnostic
@@ -315,11 +324,19 @@ def build_letter_docx(
     _build_letter_team(doc, resource_plan, personnel_photos, theme)
 
     doc.add_heading("5. Fees", level=1)
-    if discipline_fee_lines:
-        _build_letter_fee_buildup(doc, discipline_fee_lines, theme)
-    if fee_estimates:
+    # Stable order, and only the presentations the user ticked on the Fee
+    # Estimate tab. The defaults reproduce what this pack always exported.
+    _letter_fee = fee_sections(fee_sections_included)
+    if not any(_letter_fee.values()):
+        _add_placeholder_paragraph(doc, FEE_NOTHING_SELECTED)
+    if _letter_fee["pct_split"] and fee_estimates:
         _build_letter_fee_split(doc, fee_estimates, theme)
-    if not discipline_fee_lines and not fee_estimates:
+    if _letter_fee["discipline_buildup"] and discipline_fee_lines:
+        _build_letter_fee_buildup(doc, discipline_fee_lines, theme)
+    if _letter_fee["scope_buildup"]:
+        _build_scope_item_fees(doc, scope_item_fees, theme)
+    if any(_letter_fee.values()) and not discipline_fee_lines and not fee_estimates and not (
+            _letter_fee["scope_buildup"] and scope_item_fees):
         # Both tables are optional, and with neither of them this heading
         # rendered with literally nothing underneath it -- a numbered "5.
         # Fees" section followed by "6. Program". A fee proposal that appears
@@ -951,6 +968,62 @@ def _build_page_allocation_plan(doc: Document, sections: list, theme: dict):
     _add_table(doc, headers, rows, theme=theme)
 
 
+# The three fee presentations the app can build, in the fixed order they
+# render when more than one is ticked. Stable order matters: a proposal that
+# put the same tables in a different sequence on each regeneration would be
+# a nuisance to review against a previous version.
+FEE_PRESENTATIONS = ("pct_split", "discipline_buildup", "scope_buildup")
+
+FEE_NOTHING_SELECTED = "[SELECT WHICH FEE PRESENTATION TO INCLUDE -- Fee Estimate tab]"
+
+
+def fee_sections(included: dict | None) -> dict:
+    """Normalise the fee-presentation ticks, defaulting to what both packs
+    exported before the choice existed."""
+    included = included or {}
+    return {
+        "pct_split": bool(included.get("pct_split", True)),
+        "discipline_buildup": bool(included.get("discipline_buildup", True)),
+        "scope_buildup": bool(included.get("scope_buildup", False)),
+    }
+
+
+def _build_scope_item_fees(doc: Document, scope_item_fees: list | None, theme: dict | None,
+                           heading_level: int = 2):
+    """The scope-item fee build-up.
+
+    Never exported by either pack until the user could tick it: its own
+    on-screen caption calls it internal tracking. Ticked, it renders like the
+    other two -- real figures where priced, an explicit red [ENTER FEE] where
+    not, never a $0 that reads as free."""
+    theme = theme or _theme_colours(None)
+    doc.add_heading("Fee by scope item", level=heading_level)
+    rows_in = scope_item_fees or []
+    if not rows_in:
+        _add_placeholder_paragraph(
+            doc, "[NO SCOPE ITEM FEES ENTERED -- price the scope item table in the Fee Estimate tab]",
+        )
+        return
+    total = 0.0
+    rows = []
+    for item in rows_in:
+        amount = getattr(item, "fee_amount", 0.0) or 0.0
+        total += amount
+        rows.append([
+            getattr(item, "item_title", "") or "[UNTITLED SCOPE ITEM]",
+            f"${amount:,.0f}" if amount else "[ENTER FEE]",
+            getattr(item, "notes", "") or "",
+        ])
+    rows.append(["Total", f"${total:,.0f}", ""])
+    table = _add_table(doc, ["Scope item", "Fee (excl. GST)", "Notes"], rows, theme=theme)
+    for cell in table.rows[-1].cells:
+        _shade_cell(cell, str(theme["accent"]))
+        if cell.paragraphs[0].runs:
+            run = cell.paragraphs[0].runs[0]
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+
+
 def _build_fee_estimate(
     doc: Document, fee_estimates: list, fee_cap_text: str | None, theme: dict,
     indicative_amounts: dict | None = None,
@@ -1050,8 +1123,11 @@ def _build_proposal_response(
     program_week_labels: list[str] | None = None,
     methodology_stages_png: bytes | None = None,
     firm: dict | None = None,
+    fee_sections_included: dict | None = None,
+    scope_item_fees: list | None = None,
 ):
     firm = firm or {}
+    fee_included = fee_sections(fee_sections_included)
     divider_images = divider_images or {}
     resource_plan = resource_plan or []
     reference_projects = reference_projects or []
@@ -1146,7 +1222,9 @@ def _build_proposal_response(
         if _is_commercial_section(section.title):
             _build_commercial_section(doc, discipline_fee_lines, theme,
                                       program_schedule=program_schedule,
-                                      program_week_labels=program_week_labels)
+                                      program_week_labels=program_week_labels,
+                                      fee_included=fee_included,
+                                      scope_item_fees=scope_item_fees)
             if local_benefit_needed:
                 _build_local_benefits(doc, project_info, theme, firm)
         elif _is_local_benefit_section(section.title):
@@ -2020,13 +2098,36 @@ def _build_relationship_management(doc: Document, project_info: dict | None, the
 
 def _build_commercial_section(doc: Document, discipline_fee_lines: list | None, theme: dict | None,
                               program_schedule: dict[str, list[bool]] | None = None,
-                              program_week_labels: list[str] | None = None):
+                              program_week_labels: list[str] | None = None,
+                              fee_included: dict | None = None,
+                              scope_item_fees: list | None = None):
     """A punchier, structured commercial section -- a fee table by discipline/
     stage with a highlighted total, then short Cash flow / Contractual
     arrangements sub-sections -- instead of a single generic AI-drafted
     paragraph. Real figures only where the user has actually priced a
     discipline in the Fee Estimate tab; everything else stays a placeholder."""
     theme = theme or _theme_colours(None)
+    fee_included = fee_sections(fee_included)
+
+    # Nothing ticked must never produce a silently fee-less proposal.
+    if not any(fee_included.values()):
+        doc.add_heading("Fee summary", level=2)
+        _add_placeholder_paragraph(doc, FEE_NOTHING_SELECTED)
+        doc.add_paragraph()
+        _build_cash_flow(doc, discipline_fee_lines, program_schedule, program_week_labels, theme)
+        _build_contractual_arrangements(doc)
+        return
+
+    if fee_included["scope_buildup"]:
+        _build_scope_item_fees(doc, scope_item_fees, theme)
+
+    if not fee_included["discipline_buildup"]:
+        # The other ticked presentation(s) have rendered; the cash flow below
+        # still derives from the priced build-up whether or not it is shown.
+        _build_cash_flow(doc, discipline_fee_lines, program_schedule, program_week_labels, theme)
+        _build_contractual_arrangements(doc)
+        return
+
     doc.add_heading("Fee summary", level=2)
     lines = discipline_fee_lines or []
     if not lines:
@@ -2053,6 +2154,10 @@ def _build_commercial_section(doc: Document, discipline_fee_lines: list | None, 
     doc.add_heading("Cash flow", level=3)
     _build_cash_flow(doc, discipline_fee_lines, program_schedule, program_week_labels, theme)
 
+    _build_contractual_arrangements(doc)
+
+
+def _build_contractual_arrangements(doc: Document) -> None:
     doc.add_heading("Contractual arrangements", level=3)
     p = doc.add_paragraph()
     r = p.add_run(

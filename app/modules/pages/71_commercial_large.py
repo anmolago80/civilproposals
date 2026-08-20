@@ -31,6 +31,8 @@ with tabs[8]:
         # Team & Resourcing already uses.
         st.info("Run the Tender Analysis first -- the fee tables are built from the brief's own disciplines and scope items.")
     elif not _is_letter():
+        _fee_inclusion_summary()
+
         @st.fragment
         def _render_large_discipline_fee_table():
             # Wrapped in a fragment so editing a cell only reruns this table
@@ -45,6 +47,7 @@ with tabs[8]:
             # script -- they'll pick up the latest values on their own next full
             # rerun (e.g. switching tabs).
             st.markdown("#### First-pass discipline fee build-up")
+            _fee_include_checkbox("discipline_buildup", "_inc_large_disc")
             st.caption(
                 "Your own first-pass fee per discipline, built from hours x rate. The table is "
                 "seeded from the disciplines the brief calls for, plus Project Management (always "
@@ -242,6 +245,7 @@ with tabs[8]:
             # Same fragment-wrap rationale as the discipline table above -- see
             # _render_large_discipline_fee_table().
             st.markdown("#### Scope item / deliverable fee build-up")
+            _fee_include_checkbox("scope_buildup", "_inc_large_scope")
             _large_scope_items = st.session_state.analysis.scope_items if st.session_state.analysis else []
             if not _large_scope_items:
                 st.info("Run Tender Analysis to extract scope items and deliverables first.")
@@ -409,6 +413,7 @@ with tabs[8]:
             # the Excel/chart regen below. See _render_large_discipline_fee_table()
             # for the general rationale.
             st.markdown("#### Indicative fee split by discipline")
+            _fee_include_checkbox("pct_split", "_inc_large_pct")
             st.caption(
                 "Its discipline list always matches the discipline fee build-up table above -- add "
                 "or remove disciplines up there, not here. Fee % is directly editable below; reset "

@@ -31,6 +31,7 @@ with tabs[8]:
             "two tables that actually go into the pack, along with the delivery program. The "
             "scope-item table is internal tracking only and is never exported."
         )
+        _fee_inclusion_summary()
         analysis = st.session_state.analysis
         scope_items = analysis.scope_items if analysis else []
         if analysis is None:
@@ -47,6 +48,7 @@ with tabs[8]:
                 analysis = st.session_state.analysis
                 scope_items = analysis.scope_items if analysis else []
                 st.markdown("#### Scope item fees")
+                _fee_include_checkbox("scope_buildup", "_inc_letter_scope")
                 st.caption(fee_estimation_engine.SCOPE_FEE_SEED_NOTE)
                 st.caption(
                     "How the starting figures are seeded: each scope item gets a weight of "
@@ -187,6 +189,7 @@ with tabs[8]:
                 # Same fragment-wrap rationale as the Large Scope discipline
                 # table -- see _render_large_discipline_fee_table().
                 st.markdown("#### First-pass discipline fee build-up")
+                _fee_include_checkbox("discipline_buildup", "_inc_letter_disc")
                 st.caption(
                     "Your own first-pass fee per discipline, built from hours x rate -- the same "
                     "build-up as the Large Scope pack's Fee Estimate tab, and the same figures if "
@@ -419,12 +422,11 @@ with tabs[8]:
             # regen below -- the worst case of the edit-commit race across all the
             # fee tables). See _render_large_discipline_fee_table() for the general
             # rationale.
-            with st.expander("Discipline fee split (%) -- this is what's exported", expanded=False):
+            with st.expander("Discipline fee split (%)", expanded=False):
+                _fee_include_checkbox("pct_split", "_inc_letter_pct")
                 st.caption(
-                    "This Fee % table is what actually goes into the exported pack's Fees section "
-                    "(the old scope-item fee table above no longer is). Its discipline list always "
-                    "matches the discipline fee build-up table above -- add or remove disciplines "
-                    "up there, not here."
+                    "Its discipline list always matches the discipline fee build-up table above "
+                    "-- add or remove disciplines up there, not here."
                 )
                 st.warning(fee_estimation_engine.INDICATIVE_NOTE)
 

@@ -366,6 +366,61 @@ def test_failure_honesty(failures: list[str]) -> None:
         failures.append("[6c] reference-material truncation is still silent")
 
 
+def test_fee_presentation_ticks(failures: list[str]) -> None:
+    """Batch 7A: which fee presentations reach the proposal is the user's
+    choice, the defaults reproduce today's packs, and nothing ticked gives a
+    visible placeholder rather than a silently fee-less proposal."""
+    from modules import export_docx, project_store
+
+    if "fee_sections_included" not in project_store.PLAIN_KEYS:
+        failures.append("[7A] the fee ticks aren't saved with the project")
+    saved = project_store.save_project(_State(fee_sections_included={
+        "pct_split": False, "discipline_buildup": True, "scope_buildup": True}))
+    loaded = project_store.load_project(saved).get("fee_sections_included")
+    if loaded != {"pct_split": False, "discipline_buildup": True, "scope_buildup": True}:
+        failures.append(f"[7A] the ticks didn't survive save/load: {loaded}")
+
+    # Defaults must reproduce what both packs exported before the choice
+    # existed: % split + discipline build-up in, scope-item build-up out.
+    defaults = export_docx.fee_sections(None)
+    if defaults != {"pct_split": True, "discipline_buildup": True, "scope_buildup": False}:
+        failures.append(f"[7A] the defaults changed today's packs: {defaults}")
+
+    import test_exports
+    project = test_exports.build_sample_project()
+
+    def letter_text(included):
+        return test_exports.docx_text(export_docx.build_letter_docx(
+            project_info=project["project_info"], sender=project["sender"],
+            analysis=project["analysis"], understanding_text="", methodology_text="",
+            resource_plan=[], personnel_photos={},
+            program_schedule=project["program_schedule"],
+            program_week_labels=project["program_week_labels"],
+            terms_of_engagement_text="", fee_estimates=project["fee_estimates"],
+            discipline_fee_lines=project["discipline_fee_lines"],
+            fee_sections_included=included,
+        ).getvalue())
+
+    combos = {
+        "default": (None, True, True),
+        "pct only": ({"pct_split": True, "discipline_buildup": False, "scope_buildup": False}, True, False),
+        "buildup only": ({"pct_split": False, "discipline_buildup": True, "scope_buildup": False}, False, True),
+        "none": ({"pct_split": False, "discipline_buildup": False, "scope_buildup": False}, False, False),
+    }
+    for name, (included, want_split, want_buildup) in combos.items():
+        text = letter_text(included)
+        has_split = "Indicative fee split" in text
+        has_buildup = "Discipline fee build-up" in text
+        if has_split != want_split or has_buildup != want_buildup:
+            failures.append(
+                f"[7A] '{name}' exported split={has_split} buildup={has_buildup}, "
+                f"expected {want_split}/{want_buildup}")
+        # Nothing ticked must say so rather than silently omitting fees.
+        wants_placeholder = not (want_split or want_buildup)
+        if (export_docx.FEE_NOTHING_SELECTED in text) != wants_placeholder:
+            failures.append(f"[7A] '{name}' placeholder handling is wrong")
+
+
 def main() -> int:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     failures: list[str] = []
@@ -379,6 +434,7 @@ def main() -> int:
     test_fee_percentages_add_up(failures)
     test_firm_profile(failures)
     test_failure_honesty(failures)
+    test_fee_presentation_ticks(failures)
 
     if failures:
         print("BATCH 1 WIRING TESTS FAILED:")

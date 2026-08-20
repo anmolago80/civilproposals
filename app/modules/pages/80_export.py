@@ -70,6 +70,8 @@ with tabs[9]:
                     project_info=_project_info(),
                     firm=_firm_export_context(),
                     risk_register=st.session_state.risk_register,
+                    fee_sections_included=st.session_state.fee_sections_included,
+                    scope_item_fees=st.session_state.scope_item_fees,
                     sender=sender,
                     analysis=st.session_state.analysis,
                     understanding_text=understanding_text,
@@ -189,6 +191,10 @@ with tabs[9]:
                     # pattern as the org chart. None when no grid exists, in
                     # which case the note renders alone, as before.
                     firm=_firm_export_context(),
+                    # Which fee presentations reach the proposal is the
+                    # user's choice (Fee Estimate tab), not the pack format's.
+                    fee_sections_included=st.session_state.fee_sections_included,
+                    scope_item_fees=st.session_state.scope_item_fees,
                     methodology_stages_png=methodology_stages.render_stages_png(
                         st.session_state.methodology_stages,
                         st.session_state.program_week_labels,

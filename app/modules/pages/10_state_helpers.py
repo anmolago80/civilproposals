@@ -167,6 +167,20 @@ def _init_state():
         "_pct_fee_last_applied_editor_sig": None,
         "_letter_pct_fee_last_applied_editor_sig": None,
         "scope_item_fees": [],
+        # Which of the three fee presentations go into the proposal body.
+        # The app builds up to three in parallel -- the indicative % split by
+        # discipline, the hours x rate discipline build-up, and the scope-item
+        # build-up -- and which of them appeared was hardcoded per pack format
+        # with no way to choose. These defaults reproduce exactly what both
+        # packs exported before the choice existed: % split + discipline
+        # build-up in, scope-item build-up out (it was never exported by
+        # either pack, and its own on-screen caption calls it internal
+        # tracking).
+        "fee_sections_included": {
+            "pct_split": True,
+            "discipline_buildup": True,
+            "scope_buildup": False,
+        },
         "fee_seed_total": 0.0,
         # Manually-entered total project fee for the indicative benchmark split
         # below -- overrides the brief's stated fee cap (if any) so the user can
@@ -630,6 +644,60 @@ def _seed_project_from_firm_profile() -> None:
         st.session_state.methodology_wvr_confirmed = True
 
 
+FEE_PRESENTATION_LABELS = {
+    "pct_split": "% split by discipline",
+    "discipline_buildup": "discipline build-up",
+    "scope_buildup": "scope-item build-up",
+}
+
+
+def _fee_presentation_has_data(key: str) -> bool:
+    if key == "pct_split":
+        return bool(st.session_state.get("fee_estimates"))
+    if key == "discipline_buildup":
+        return any(
+            (l.total_hours or l.rate_per_hour)
+            for l in (st.session_state.get("discipline_fee_lines") or [])
+        )
+    return any(
+        (getattr(f, "fee_amount", 0) or 0)
+        for f in (st.session_state.get("scope_item_fees") or [])
+    )
+
+
+def _fee_include_checkbox(key: str, widget_key: str) -> None:
+    """The "include this fee presentation in the proposal" tick.
+
+    The app builds up to three parallel fee presentations and which of them
+    reached the proposal used to be hardcoded per pack format -- so a user
+    who priced a discipline build-up for an audience that wanted a
+    percentage split had no way to say so."""
+    included = st.session_state.fee_sections_included
+    has_data = _fee_presentation_has_data(key)
+    ticked = st.checkbox(
+        "Include this fee presentation in the proposal",
+        value=bool(included.get(key)), key=widget_key, disabled=not has_data,
+    )
+    if has_data:
+        included[key] = ticked
+    else:
+        st.caption("Enter figures first -- an empty table can't be included.")
+
+
+def _fee_inclusion_summary() -> None:
+    """Standing line under the Fee tab header naming what will be exported."""
+    included = st.session_state.fee_sections_included
+    chosen = [FEE_PRESENTATION_LABELS[k] for k in ("pct_split", "discipline_buildup", "scope_buildup")
+              if included.get(k)]
+    if chosen:
+        st.caption("**Included in the proposal:** " + " + ".join(chosen))
+    else:
+        st.warning(
+            "**No fee presentation is ticked**, so the proposal's fee section will export as a "
+            "red placeholder. Tick at least one of the tables below."
+        )
+
+
 def _fee_apply_control(state_prefix: str, pending: bool, indent_note: str = "totals") -> bool:
     """The explicit "Apply changes" control under a deferred-apply fee table.
 
@@ -736,7 +804,8 @@ def _export_input_signature() -> str:
         "experience_intro", "methodology_stages", "methodology_wvr_confirmed", "risk_register",
         "program_schedule", "program_week_labels", "terms_of_engagement_text",
         "project_differentiator", "project_sales_pitch", "fee_estimate_manual_total",
-        "cover_photo_index", "letter_sender_name", "letter_sender_title",
+        "cover_photo_index", "fee_sections_included",
+        "letter_sender_name", "letter_sender_title",
         "letter_sender_phone", "letter_sender_email", "letter_sender_address",
     ]
     payload = {key: _dump(st.session_state.get(key)) for key in keys}
@@ -808,6 +877,23 @@ def _export_readiness() -> list[dict]:
             ", ".join(unpriced[:4]) + (", ..." if len(unpriced) > 4 else ""))
     if not fee_lines:
         add("No fee build-up entered", "Fees & Program", "The fee table exports as a placeholder.")
+
+    included = st.session_state.get("fee_sections_included") or {}
+    if not any(included.values()):
+        add("No fee presentation ticked", "Fees & Program",
+            "The proposal's fee section will export as a red placeholder.")
+    else:
+        zero_rows = []
+        if included.get("discipline_buildup"):
+            zero_rows += [l.discipline for l in (st.session_state.discipline_fee_lines or [])
+                          if not (l.total_hours or l.rate_per_hour)]
+        if included.get("scope_buildup"):
+            zero_rows += [f.item_title for f in (st.session_state.scope_item_fees or [])
+                          if not (getattr(f, "fee_amount", 0) or 0)]
+        if zero_rows:
+            add(f"{len(zero_rows)} zero-value row(s) in a fee table you're exporting",
+                "Fees & Program",
+                ", ".join(zero_rows[:4]) + (", ..." if len(zero_rows) > 4 else ""))
 
     if not st.session_state.program_schedule:
         add("No delivery program", "Fees & Program",
