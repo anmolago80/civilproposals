@@ -473,6 +473,8 @@ with tabs[8]:
                             reconciled.append(fee_estimation_engine.DisciplineFeeEstimate(
                                 discipline=disc, fee_percentage=existing.fee_percentage,
                                 source=existing.source, confidence=existing.confidence,
+                                # See the same note on the Large Scope tab.
+                                pct_low=existing.pct_low, pct_high=existing.pct_high,
                             ))
                         else:
                             reconciled.append(fee_estimation_engine.DisciplineFeeEstimate(
@@ -527,6 +529,7 @@ with tabs[8]:
                         "fee_percentage": e.fee_percentage,
                         "indicative_amount": (f"${letter_fee_total * e.fee_percentage / 100:,.0f}"
                                                if letter_fee_total else "-"),
+                        "typical_range": (e.range_text if e.pct_low is not None else ""),
                         "confidence": e.confidence,
                         "source": e.source,
                     }
@@ -540,6 +543,12 @@ with tabs[8]:
                         "indicative_amount": st.column_config.TextColumn(
                             "Indicative $", disabled=True,
                             help="Fee % x the total project fee entered above -- recalculated automatically.",
+                        ),
+                        "typical_range": st.column_config.TextColumn(
+                            "Typical range", disabled=True,
+                            help="The band the source actually supports -- the single Fee % is its "
+                                 "mid-point. Blank where the source gave a point estimate "
+                                 "rather than a range.",
                         ),
                         "confidence": st.column_config.TextColumn("Confidence"),
                         "source": st.column_config.TextColumn("Source"),
@@ -564,10 +573,17 @@ with tabs[8]:
                 letter_pct_apply_now = _fee_apply_control("_letter_pct_fee_", letter_pct_pending, "totals & chart")
 
                 if letter_pct_first_load or (letter_pct_apply_now and letter_pct_pending):
+                    # See the same note on the Large Scope tab: the range
+                    # belongs to the benchmark, not to a number the user typed.
+                    _letter_prior_pct = {e.discipline: e for e in st.session_state.fee_estimates}
                     st.session_state.fee_estimates = [
-                        fee_estimation_engine.DisciplineFeeEstimate(
-                            discipline=r["discipline"], fee_percentage=float(r["fee_percentage"] or 0),
-                            confidence=r["confidence"] or "", source=r["source"] or "",
+                        fee_estimation_engine.keep_range_if_unedited(
+                            fee_estimation_engine.DisciplineFeeEstimate(
+                                discipline=r["discipline"],
+                                fee_percentage=float(r["fee_percentage"] or 0),
+                                confidence=r["confidence"] or "", source=r["source"] or "",
+                            ),
+                            _letter_prior_pct.get(r["discipline"]),
                         )
                         for r in letter_edited_pct
                     ]

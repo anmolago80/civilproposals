@@ -212,6 +212,28 @@ def refresh_estimate_from_ai(
         )
 
 
+def keep_range_if_unedited(estimate: DisciplineFeeEstimate,
+                           prior: DisciplineFeeEstimate | None) -> DisciplineFeeEstimate:
+    """Carry a benchmark's typical range onto a rebuilt row, but only while
+    the percentage is still the benchmark's.
+
+    The fee tables rebuild every DisciplineFeeEstimate from their editor's
+    rows on each apply, which drops anything the editor doesn't hold -- and
+    the range is deliberately not editable, so it was being lost. Carrying it
+    unconditionally would be worse: a range is a statement about where the
+    SOURCE puts this discipline, and once the user types their own percentage
+    it no longer describes the number beside it. Leaving it there would dress
+    a pricing decision up as a benchmarked one.
+    """
+    if prior is None or prior.pct_low is None:
+        return estimate
+    if abs((prior.fee_percentage or 0) - (estimate.fee_percentage or 0)) > 0.001:
+        return estimate
+    estimate.pct_low = prior.pct_low
+    estimate.pct_high = prior.pct_high
+    return estimate
+
+
 def _as_float(value) -> float | None:
     try:
         result = float(value)

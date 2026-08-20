@@ -1276,8 +1276,12 @@ def _fee_history_panel(apply_key: str) -> None:
     """The firm's own median split, shown ABOVE the bundled table because it
     is the better source -- and only once there are enough past bids for a
     median to mean anything (see fee_history.MIN_BIDS_FOR_BENCHMARK)."""
-    history = fee_history.fee_history_benchmarks(
-        _fee_history_user_id(), st.session_state.get("project_type") or "")
+    try:
+        history = fee_history.fee_history_benchmarks(
+            _fee_history_user_id(), st.session_state.get("project_type") or "")
+    except Exception as exc:  # noqa: BLE001 -- an extra benchmark is never worth a traceback
+        print(f"[fee history] {exc}", file=sys.stderr)
+        return
     if not history["disciplines"]:
         return
     st.markdown(f"**Your firm's history** (median of {history['bids']} bids)")

@@ -798,6 +798,18 @@ def test_fee_prepopulation(failures: list[str]) -> None:
     if fee_history.record_snapshot(user_b, "proj-5", "Road", [line("Structural", 0, 0)]):
         failures.append("[10] an unpriced project was recorded as a bid")
 
+    # Snapshots live in the database, keyed by user and project -- saving and
+    # loading a project file must not disturb them. (They are deliberately NOT
+    # in the project file: a project .zip can be emailed around, and a firm's
+    # pricing history is not something to ship inside one.)
+    from modules import project_store
+
+    project_store.load_project(project_store.save_project(_State(project_name="Whatever")))
+    if fee_history.fee_history_benchmarks(user_a, "Bridge")["bids"] != 2:
+        failures.append("[10] a project save/load disturbed the firm's fee history")
+    if "fee_snapshots" in " ".join(project_store.PLAIN_KEYS):
+        failures.append("[10] fee history is being written into the shareable project file")
+
     # Tier ranking: history wins where it covers the disciplines, bundled
     # otherwise, and both say which they are.
     split, source = fee_history.best_available_split(
@@ -858,6 +870,23 @@ def test_fee_prepopulation(failures: list[str]) -> None:
         discipline="Structural", fee_percentage=15.0, source="x", confidence="Low")
     if point.range_text != "15.0%":
         failures.append(f"[10] a point estimate invented a range: {point.range_text}")
+
+    # A range describes the SOURCE's percentage. It survives a rebuild of the
+    # row while the percentage is unchanged, and is dropped the moment the
+    # user types their own -- otherwise a pricing decision arrives wearing a
+    # benchmark's error bars.
+    keep = fee_estimation_engine.keep_range_if_unedited
+    source_row = fee_estimation_engine.DisciplineFeeEstimate(
+        discipline="Structural", fee_percentage=15.0, pct_low=12.0, pct_high=18.0,
+        source="x", confidence="Low")
+    unedited = keep(fee_estimation_engine.DisciplineFeeEstimate(
+        discipline="Structural", fee_percentage=15.0, source="x", confidence="Low"), source_row)
+    if unedited.pct_low != 12.0:
+        failures.append("[10] an unedited row lost its benchmark range")
+    edited = keep(fee_estimation_engine.DisciplineFeeEstimate(
+        discipline="Structural", fee_percentage=22.0, source="x", confidence="Low"), source_row)
+    if edited.pct_low is not None:
+        failures.append("[10] a user-edited percentage kept the benchmark's range")
 
     try:
         with db.get_session() as session:

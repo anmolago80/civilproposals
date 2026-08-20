@@ -471,6 +471,11 @@ with tabs[8]:
                         reconciled.append(fee_estimation_engine.DisciplineFeeEstimate(
                             discipline=disc, fee_percentage=existing.fee_percentage,
                             source=existing.source, confidence=existing.confidence,
+                            # Carried through, not dropped: a range is the
+                            # honest form of these figures, and rebuilding the
+                            # row without it silently restored the false
+                            # precision of a single number.
+                            pct_low=existing.pct_low, pct_high=existing.pct_high,
                         ))
                     else:
                         reconciled.append(fee_estimation_engine.DisciplineFeeEstimate(
@@ -535,6 +540,7 @@ with tabs[8]:
                     "fee_percentage": e.fee_percentage,
                     "indicative_amount": (f"${_indicative_amount(e.fee_percentage):,.0f}"
                                            if _indicative_amount(e.fee_percentage) else "-"),
+                    "typical_range": (e.range_text if e.pct_low is not None else ""),
                     "confidence": e.confidence,
                     "source": e.source,
                 }
@@ -548,6 +554,12 @@ with tabs[8]:
                     "indicative_amount": st.column_config.TextColumn(
                         "Indicative $", disabled=True,
                         help="Fee % x the manual total above (if entered), else x the discipline fee build-up total.",
+                    ),
+                    "typical_range": st.column_config.TextColumn(
+                        "Typical range", disabled=True,
+                        help="The band the source actually supports -- the single Fee % is its "
+                             "mid-point. Blank where the source gave a point estimate "
+                             "rather than a range.",
                     ),
                     "confidence": st.column_config.TextColumn("Confidence"),
                     "source": st.column_config.TextColumn("Source"),
@@ -572,10 +584,19 @@ with tabs[8]:
             pct_apply_now = _fee_apply_control("_pct_fee_", pct_pending, "totals & chart")
 
             if pct_first_load or (pct_apply_now and pct_pending):
+                # The typical range describes the BENCHMARK's percentage. Keep
+                # it on rows the user left alone; drop it on any row whose
+                # percentage they changed, because their own number is a
+                # pricing decision, not a point inside somebody's band.
+                _prior_pct = {e.discipline: e for e in st.session_state.fee_estimates}
                 st.session_state.fee_estimates = [
-                    fee_estimation_engine.DisciplineFeeEstimate(
-                        discipline=r["discipline"], fee_percentage=float(r["fee_percentage"] or 0),
-                        confidence=r["confidence"] or "", source=r["source"] or "",
+                    fee_estimation_engine.keep_range_if_unedited(
+                        fee_estimation_engine.DisciplineFeeEstimate(
+                            discipline=r["discipline"],
+                            fee_percentage=float(r["fee_percentage"] or 0),
+                            confidence=r["confidence"] or "", source=r["source"] or "",
+                        ),
+                        _prior_pct.get(r["discipline"]),
                     )
                     for r in edited_pct
                 ]
