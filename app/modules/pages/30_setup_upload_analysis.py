@@ -624,6 +624,11 @@ with tabs[2]:
             analysis = _run_job_or_inline(
                 "tender_analysis", tender_analyser.analyse_tender,
                 args=(extracted.text, extracted.annotations, st.session_state.ai_config),
+                # The brief's own tables. pdfplumber has always pulled these
+                # out (the upload panel even counts them) and the analysis
+                # never saw them -- which is where the evaluation criteria and
+                # their weightings usually live.
+                kwargs={"tables": getattr(extracted, "tables", None)},
                 progress=progress,
                 queued_text="Queued for analysis...", running_text="Analysing...",
                 inline_extra_kwargs={"progress_callback": _progress_cb},

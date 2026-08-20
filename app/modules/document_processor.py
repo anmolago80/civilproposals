@@ -186,12 +186,23 @@ def extract_text_from_pdf(file_bytes: bytes, filename: str = "document.pdf",
     )
     doc.close()
 
-    tables = _extract_tables_with_pdfplumber(file_bytes) if do_structure else []
+    if do_structure:
+        tables = _extract_tables_with_pdfplumber(file_bytes)
+    elif include_structure:
+        # A long PDF used to skip table extraction entirely -- which is where
+        # the evaluation criteria and their weightings usually live, so the
+        # single most valuable table in the document was the one reliably
+        # missed. Scan only the pages whose text looks like it carries them:
+        # a handful of pages is fast even on a 300-page brief.
+        tables = _extract_tables_with_pdfplumber(file_bytes, only_pages=_criteria_pages(page_texts))
+    else:
+        tables = []
     warnings: list[str] = []
     if include_structure and not do_structure:
         warnings.append(
-            f"Large PDF ({page_count} pages): skipped the slower heading/table scan to keep "
-            f"things responsive. The full text was still extracted and is used for analysis."
+            f"Large PDF ({page_count} pages): skipped the full heading/table scan to keep things "
+            f"responsive. The full text was still extracted and is used for analysis, and pages "
+            f"mentioning criteria/weightings were still scanned for tables."
         )
 
     if ocr_needed and not ocr_available():
@@ -291,14 +302,38 @@ def _guess_headings_from_page(page) -> list[str]:
     return found
 
 
-def _extract_tables_with_pdfplumber(file_bytes: bytes) -> list[dict]:
-    """Best-effort table extraction. Returns [] rather than raising on failure."""
+# Pages worth a table scan when the whole document is too long for one.
+# Deliberately narrow: these are the words that appear on the page carrying
+# an evaluation-criteria table.
+_CRITERIA_PAGE_RE = re.compile(r"criteri|weight|\bscoring\b|%", re.IGNORECASE)
+_MAX_TARGETED_TABLE_PAGES = 25
+
+
+def _criteria_pages(page_texts: list[str]) -> set[int]:
+    """1-based page numbers that mention criteria/weightings/percentages."""
+    pages = set()
+    for index, text in enumerate(page_texts, start=1):
+        if _CRITERIA_PAGE_RE.search(text or ""):
+            pages.add(index)
+            if len(pages) >= _MAX_TARGETED_TABLE_PAGES:
+                break
+    return pages
+
+
+def _extract_tables_with_pdfplumber(file_bytes: bytes, only_pages: set | None = None) -> list[dict]:
+    """Best-effort table extraction. Returns [] rather than raising on failure.
+
+    `only_pages`: 1-based page numbers to scan. None means every page."""
     tables_out = []
+    if only_pages is not None and not only_pages:
+        return tables_out
     try:
         import pdfplumber
 
         with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
             for page_number, page in enumerate(pdf.pages, start=1):
+                if only_pages is not None and page_number not in only_pages:
+                    continue
                 try:
                     page_tables = page.extract_tables()
                 except Exception:

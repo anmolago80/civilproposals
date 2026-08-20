@@ -15,6 +15,8 @@ user hasn't supplied is marked Missing, not silently assumed covered.
 
 from __future__ import annotations
 
+import re
+
 from pydantic import BaseModel
 
 from modules.tender_analyser import TenderAnalysis
@@ -54,10 +56,12 @@ def build_compliance_matrix(
     section_titles = [s.title for s in sections]
 
     for i, req in enumerate(analysis.mandatory_requirements, start=1):
-        mapped = _best_section_match(req, section_titles)
-        status, action = _status_for_text(req, mapped, company_materials)
+        text, page = _split_page_reference(req)
+        mapped = _best_section_match(text, section_titles)
+        status, action = _status_for_text(text, mapped, company_materials)
         items.append(ComplianceItem(
-            requirement_id=f"M-{i:02d}", description=req, requirement_type="Mandatory",
+            requirement_id=f"M-{i:02d}", description=text, requirement_type="Mandatory",
+            source_location=page,
             mapped_section=mapped, priority="High", status=status, user_action_required=action,
         ))
 
@@ -137,6 +141,25 @@ def build_compliance_matrix(
         ))
 
     return items
+
+
+_PAGE_REFERENCE_RE = re.compile(r"\s*\((?:p\.?|page)\s*(\d{1,4})\)\s*$", re.IGNORECASE)
+
+
+def _split_page_reference(text: str) -> tuple[str, str | None]:
+    """Peels a trailing "(p.12)" off an extracted requirement.
+
+    The analysis chunk notes now carry the page each note came from (see
+    tender_analyser's map prompt), which is what finally lets
+    source_location point at somewhere in the client's own document. It has
+    been an always-empty column since the matrix was written -- a compliance
+    matrix that can't tell you where a requirement came from makes the bid
+    team re-find every one of them by hand."""
+    text = (text or "").strip()
+    match = _PAGE_REFERENCE_RE.search(text)
+    if not match:
+        return text, None
+    return text[:match.start()].strip(), f"Brief, p.{match.group(1)}"
 
 
 def _status_for_text(text: str, mapped_section: str | None, company_materials: dict[str, bool]) -> tuple[str, str | None]:

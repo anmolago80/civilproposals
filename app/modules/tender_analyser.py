@@ -96,6 +96,12 @@ estimating, project management, etc). Skip boilerplate legal clauses (privacy, I
 law) unless they impose a concrete formatting or submission requirement. Be concise -- this \
 is an intermediate note, not a final answer.
 
+The excerpt carries "[Page N]" markers from the original document. END EVERY NOTE with the \
+page it came from, in the form "(p.12)". If a note spans pages, cite the first. These are \
+carried through to the compliance matrix so a bid team can find each requirement in the \
+client's own document -- a note with no page reference is far less useful than one with it, \
+but NEVER guess a page number you did not see a marker for.
+
 --- EXCERPT ---
 {chunk}
 --- END EXCERPT ---"""
@@ -160,7 +166,54 @@ appropriate, and referenced in relevant descriptions.
 {source_material}
 --- END BRIEF MATERIAL ---
 
-{annotation_block}"""
+{tables_block}
+{annotation_block}
+
+BEFORE YOU ANSWER, DEDUPLICATE. The material above may be notes from several parts of one \
+document, so the same requirement, deliverable, scope item or criterion can appear more than \
+once in slightly different words. Merge those into ONE entry each, keeping the fullest \
+wording and its page reference. Do not pad a list by keeping near-duplicates apart -- a \
+compliance matrix with the same requirement listed three times is worse than one with it \
+listed once.
+
+Where a note carries a "(p.N)" page reference, keep it in that item's "source_location" \
+field. Never invent one."""
+
+
+def _format_tables(tables: list | None, limit: int = 12, max_rows: int = 25) -> str:
+    """The brief's own tables, pipe-delimited.
+
+    pdfplumber has always extracted these -- the upload UI even counts them --
+    and then they were thrown away, which is remarkable given that the
+    evaluation criteria and their weightings almost always live in one. A
+    table's structure is where the meaning is, so they go in as rows rather
+    than being flattened into the surrounding prose."""
+    tables = tables or []
+    if not tables:
+        return ""
+    blocks = []
+    for table in tables[:limit]:
+        rows = table.get("rows") or []
+        if not rows:
+            continue
+        lines = [
+            " | ".join(str(cell or "").strip() for cell in row)
+            for row in rows[:max_rows]
+            if any(str(cell or "").strip() for cell in row)
+        ]
+        if not lines:
+            continue
+        page = table.get("page")
+        blocks.append(f"--- Table{f' (p.{page})' if page else ''} ---\n" + "\n".join(lines))
+    if not blocks:
+        return ""
+    return (
+        "--- TABLES EXTRACTED FROM THE BRIEF ---\n"
+        "These are the document's own tables, one row per line, cells separated by |. "
+        "Evaluation criteria and their weightings are usually here rather than in the prose.\n\n"
+        + "\n\n".join(blocks)
+        + "\n--- END TABLES ---\n"
+    )
 
 
 def analyse_tender(
@@ -168,6 +221,7 @@ def analyse_tender(
     annotations: list[dict] | None = None,
     config: dict | None = None,
     progress_callback=None,
+    tables: list | None = None,
 ) -> TenderAnalysis:
     """
     Run the full extraction pipeline on tender brief text and return a
@@ -196,7 +250,9 @@ def analyse_tender(
 
     annotation_block = _format_annotations(annotations)
     prompt = REDUCE_PROMPT_TEMPLATE.format(
-        source_material=source_material, annotation_block=annotation_block
+        source_material=source_material,
+        tables_block=_format_tables(tables),
+        annotation_block=annotation_block,
     )
     raw = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=4000)
 
