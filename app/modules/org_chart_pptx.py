@@ -2,44 +2,39 @@
 org_chart_pptx.py
 
 Builds the org chart PowerPoint FROM SCRATCH, straight from a project's
-resourcing plan -- no template file to edit or keep in sync.
+resourcing plan -- no template file to edit or keep in sync -- in whichever
+of the four approved presentation styles the user picked.
 
-An earlier version of this module worked by surgically editing a fixed
-template (assets/org_chart_template.pptx): filling in [Name] placeholders,
-deleting boxes for disciplines not on this project, adding ad hoc boxes for
-disciplines the template had no box for. That approach kept breaking in new
-ways as real projects were tried against it -- deleting a box could leave
-its connector line behind, dangling with nothing below it; a discipline
-outside the template's fixed ~11-box allowlist got exiled to an ugly
-disconnected strip; removing boxes left the remaining ones asymmetrically
-spaced. Every fix was another special case bolted onto a fundamentally
-static layout.
+An earlier version worked by surgically editing a fixed template: filling in
+[Name] placeholders, deleting boxes for disciplines not on this project,
+adding ad hoc boxes for disciplines the template had no box for. That kept
+breaking in new ways as real projects were tried against it -- a deleted box
+left its connector dangling, a discipline outside the template's fixed
+allowlist got exiled to a disconnected strip, removing boxes left the rest
+asymmetrically spaced. Every fix was another special case bolted onto a
+fundamentally static layout.
 
-This version has no static layout at all. Every discipline in the
-project's resourcing plan becomes one card, evenly spaced and centered
-across the slide -- 2 disciplines or 9, doesn't matter, the spacing is
-recomputed every time from however many are actually present. There is
-nothing to delete and nothing to leave dangling, because nothing is ever
-there that shouldn't be. Cards never shrink past a legible minimum width;
-once a single row can't fit them all at that width, the remaining
-disciplines wrap onto additional card rows (still centered, still
-data-driven) instead of squeezing text into unreadable slivers.
+The version after that had no static layout, but it did have one hardcoded
+look, and one hardcoded four-box management chain. This one has neither. It
+builds from the shared model in modules/org_chart_render.py -- the SAME
+object the on-screen preview and the pack's embedded chart render from, so
+they cannot show different teams -- and dispatches to one of four style
+renderers. Every row comes from the plan: 2 disciplines or 9, with or
+without a Design Manager, with or without a reviewer. Columns wrap to
+further rows rather than shrinking past legibility, and the slide grows
+rather than storing its last row off the bottom edge (which PowerPoint
+renders as simply not there).
 
-Matches what the resourcing plan actually tracks: one lead name per
-discipline/management role, PLUS any support members added under a
-discipline lead (resourcing.ResourceAssignment.custom_title -- e.g. "Ryan
-Swagemakers, Bridge Engineer" added under the "Structural" lead) -- each
-gets its own extra row on that lead's card, titled with whatever the user
-typed, never invented. The client's own PM counterpart and subconsultant
-firms still have no equivalent in the app's data, so this module doesn't
-invent placeholder rows for those. An unassigned role still gets its card
-(so the chart's shape reflects the project's actual structure), just with
-red "TBC" instead of a name.
+Everything is native PowerPoint shapes, not a pasted picture: the point of
+the companion deck is that it can be tidied up further in PowerPoint.
 
-A "Peer Review" box in the top-right lists every discipline with a red
-"TBC" next to it (e.g. "Structural - TBC") -- the app has no reviewer data
-anywhere, so this is never an invented name, just a checklist the user
-fills in by hand once reviewers are confirmed.
+Nothing here is invented. An unassigned slot is a dashed red TBC. A role the
+user removed is absent, with no TBC -- deliberate absence is not a gap. A
+missing qualification line is omitted rather than guessed. An assurance
+element appears only where the plan actually holds a reviewer slot; there is
+no longer a "Peer Review" checklist box listing every discipline against a
+red TBC, because a project that has confirmed no reviewers should not export
+a page of them.
 """
 
 from __future__ import annotations
@@ -74,31 +69,6 @@ _FONT = "Calibri"
 
 _SLIDE_W = Inches(13.333)
 _SLIDE_H = Inches(7.5)
-
-_MGMT_W = Inches(2.3)
-_MGMT_H = Inches(0.62)
-_MGMT_ROW_GAP = Inches(0.35)
-
-_DISC_W_DEFAULT = Inches(2.05)
-_DISC_W_MIN = Inches(1.55)  # never shrink narrower than this -- wrap to another row instead
-_DISC_HEADER_H = Inches(0.32)
-_DISC_ROLE_H = Inches(0.42)  # the Lead sub-row
-_COL_MARGIN = Inches(0.4)
-_MIN_GAP = Inches(0.22)
-_ROW_GAP = Inches(0.45)  # vertical gap between wrapped rows of discipline cards
-
-# ---- Peer Review box (top-right) -----------------------------------------
-_PEER_COL_W = Inches(1.95)
-_PEER_COL_GAP = Inches(0.2)
-_PEER_LINE_H = Inches(0.23)
-_PEER_RIGHT_MARGIN = Inches(0.35)
-_PEER_MAX_ROWS_PER_COL = 14
-
-# Fixed management chain, always shown top to bottom in this order (see
-# resourcing.CLIENT_ROLE / FIRM_MANAGEMENT_ROLES) -- every other slot in the
-# plan is a discipline and gets its own column below it.
-_MANAGEMENT_CHAIN = ["Client Project Manager", "Project Director", "Project Manager", "Design Manager"]
-
 
 def _tint(rgb: RGBColor, amount: float) -> RGBColor:
     """Blend towards white. amount=0 -> unchanged, 1 -> white."""
@@ -178,267 +148,542 @@ def _connector(slide, conn_type, x1, y1, x2, y2):
     return c
 
 
-def _name_or_tbc(name: str, on_dark: bool = False):
-    name = (name or "").strip()
-    if name:
-        return (name, 11, False, _WHITE if on_dark else _DARK_TEXT)
-    return ("TBC", 11, False, _RED_TBC_ON_DARK if on_dark else _RED_TBC)
+# ---------------------------------------------------------------------------
+# Four presentation styles -- see modules/org_chart_render.py, which holds the
+# shared model and draws the same four styles as PNGs for the preview and the
+# pack. The shapes below are built from that SAME model object, so the deck
+# cannot show a different team from the one the user approved on screen.
+#
+# Everything is native PowerPoint shapes, not a pasted picture: the point of
+# the companion deck is that it can be tidied up further in PowerPoint.
+# ---------------------------------------------------------------------------
+
+_STYLE_MARGIN = Inches(0.35)
+_CARD_EDGE = RGBColor(0xE4, 0xE8, 0xEF)
+_CLIENT_DARK = RGBColor(0x13, 0x1A, 0x2A)
+_INK = RGBColor(0x11, 0x18, 0x27)
+_MUTED = RGBColor(0x7A, 0x85, 0x98)
+_TBC_FILL = RGBColor(0xFE, 0xF2, 0xF2)
+_ASSURANCE_AMBER = RGBColor(0xB4, 0x53, 0x09)
+_ASSURANCE_FILL = RGBColor(0xFF, 0xF7, 0xED)
+_LANE_FILL = RGBColor(0xF7, 0xF9, 0xFC)
 
 
-def _title_or_confirm(title: str):
-    """A support member's own job title on this project.
-
-    Blank used to render the literal words "Team member", which reads in the
-    finished chart as a real, deliberate title -- the one place in this module
-    where a missing value was filled in rather than marked. It is now the
-    standard red placeholder, like every other unknown in this tool."""
-    title = (title or "").strip()
-    if title:
-        return (title, 8, True, _GREY_TEXT)
-    return ("[CONFIRM TITLE]", 8, True, _RED_TBC)
+def _hex(value: str) -> RGBColor:
+    return RGBColor.from_string(str(value).lstrip("#").upper())
 
 
-def _project_line(tender_name: str, project_name: str) -> str:
-    """The chart's third title line. The tender/RFT number was never passed
-    in, so this line read "[Project Number] <name>" on every chart even for
-    a project whose number had been entered on the Project Setup tab.
-    Either part missing keeps its bracket placeholder, same convention as
-    the client line above it."""
-    number = (tender_name or "").strip() or "[Project Number]"
-    name = (project_name or "").strip() or "[Project Name]"
-    return f"{number} {name}"
+def _round(slide, x, y, w, h, fill, line=None, dashed=False, radius=0.14):
+    from pptx.enum.dml import MSO_LINE_DASH_STYLE
+
+    shape = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE,
+                                   Emu(int(x)), Emu(int(y)), Emu(int(w)), Emu(int(h)))
+    try:
+        shape.adjustments[0] = radius
+    except (IndexError, KeyError):
+        pass
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = fill
+    if line is None:
+        shape.line.fill.background()
+    else:
+        shape.line.color.rgb = line
+        shape.line.width = Pt(1.0)
+        if dashed:
+            shape.line.dash_style = MSO_LINE_DASH_STYLE.DASH
+    shape.shadow.inherit = False
+    return shape
 
 
-def _management_box(slide, x, y, label, name, fill, text_colour=_WHITE):
-    box = _rect(slide, x, y, _MGMT_W, _MGMT_H, fill)
-    on_dark = text_colour == _WHITE
-    _set_text(box.text_frame, [(label, 11, True, text_colour), _name_or_tbc(name, on_dark=on_dark)])
+def _bar(slide, x, y, w, h, fill):
+    return _rect(slide, Emu(int(x)), Emu(int(y)), Emu(int(w)), Emu(int(h)), fill)
+
+
+def _circle(slide, cx, cy, d, fill, text, text_colour):
+    shape = slide.shapes.add_shape(MSO_SHAPE.OVAL, Emu(int(cx - d / 2)), Emu(int(cy - d / 2)),
+                                   Emu(int(d)), Emu(int(d)))
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = fill
+    shape.line.fill.background()
+    shape.shadow.inherit = False
+    _set_text(shape.text_frame, [(text, 9, True, text_colour)], align=PP_ALIGN.CENTER)
+    # An oval's text frame insets are wide enough that two initials wrapped
+    # onto two lines -- "AD" came out as "A" over "D".
+    frame = shape.text_frame
+    frame.word_wrap = False
+    frame.margin_left = Pt(0)
+    frame.margin_right = Pt(0)
+    frame.margin_top = Pt(0)
+    frame.margin_bottom = Pt(0)
+    return shape
+
+
+def _stack(slide, x, y, w, h, lines, align=PP_ALIGN.LEFT):
+    """A textbox holding a person's stacked lines, vertically centred."""
+    box = slide.shapes.add_textbox(Emu(int(x)), Emu(int(y)), Emu(int(w)), Emu(int(h)))
+    _set_text(box.text_frame, lines, align=align)
     return box
 
 
-def _add_peer_review_box(slide, discipline_names, top, bottom_limit, palette=None):
-    """One consolidated list, top-right: every discipline followed by a red
-    "TBC" (e.g. "Structural - TBC") for the user to fill in once reviewers
-    are confirmed. The app has no peer-reviewer data anywhere, so this is a
-    checklist, never an invented name. Wraps into as many side-by-side
-    columns as needed to stay within the vertical space above the
-    discipline card rows (the same band the management chain occupies) --
-    growing sideways rather than colliding with the chart below it."""
-    if not discipline_names:
-        return
-    palette = palette or _resolve_palette(None)
-    n = len(discipline_names)
-    available_h = max(Emu(bottom_limit - top), _PEER_LINE_H)
-    max_rows_by_space = max(1, int(available_h // _PEER_LINE_H))
-    max_rows_per_col = min(_PEER_MAX_ROWS_PER_COL, max_rows_by_space)
-    columns = max(1, -(-n // max_rows_per_col))  # ceil
-
-    # Never let the box's columns run wide enough to reach the management
-    # chain in the middle of the slide -- past a handful of columns, grow
-    # taller (more rows per column) instead of wider.
-    mgmt_right_edge = Emu(_SLIDE_W // 2 + _MGMT_W // 2 + Inches(0.3))
-    available_w = Emu(_SLIDE_W - _PEER_RIGHT_MARGIN - mgmt_right_edge)
-    max_columns_by_width = max(1, int((available_w + _PEER_COL_GAP) // (_PEER_COL_W + _PEER_COL_GAP)))
-    columns = min(columns, max_columns_by_width)
-
-    rows_per_col = -(-n // columns)  # ceil, balanced across columns
-
-    total_w = columns * _PEER_COL_W + (columns - 1) * _PEER_COL_GAP
-    start_x = Emu(_SLIDE_W - _PEER_RIGHT_MARGIN - total_w)
-
-    # Same header-bar-plus-body styling as every discipline card, so this
-    # box reads as part of the same chart rather than a bolted-on list.
-    header_h = _DISC_HEADER_H
-    header = _rect(slide, start_x, top, total_w, header_h, palette["header"])
-    _set_text(header.text_frame, [("Peer Review", 11, True, palette["header_text"])])
-
-    list_top = Emu(top + header_h)
-    list_h = Emu(rows_per_col * _PEER_LINE_H + Inches(0.1))
-    _rect(slide, start_x, list_top, total_w, list_h, palette["body"], line_color=_BORDER_COLOR)
-
-    for c in range(columns):
-        chunk = discipline_names[c * rows_per_col:(c + 1) * rows_per_col]
-        col_x = Emu(start_x + c * (_PEER_COL_W + _PEER_COL_GAP) + Inches(0.08))
-        col_box = slide.shapes.add_textbox(col_x, Emu(list_top + Inches(0.05)),
-                                            Emu(_PEER_COL_W - Inches(0.1)), list_h)
-        tf = col_box.text_frame
-        tf.word_wrap = True
-        tf.margin_left = Pt(2)
-        tf.margin_right = Pt(2)
-        tf.margin_top = Pt(1)
-        tf.margin_bottom = Pt(1)
-        for i, slot in enumerate(chunk):
-            p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
-            p.alignment = PP_ALIGN.LEFT
-            label_run = p.add_run()
-            label_run.text = f"{slot} - "
-            label_run.font.size = Pt(9)
-            label_run.font.name = _FONT
-            label_run.font.color.rgb = _DARK_TEXT
-            tbc_run = p.add_run()
-            tbc_run.text = "TBC"
-            tbc_run.font.size = Pt(9)
-            tbc_run.font.bold = True
-            tbc_run.font.name = _FONT
-            tbc_run.font.color.rgb = _RED_TBC
+def _person_lines(person, role_colour: RGBColor):
+    """The (text, size, bold, colour) rows for one person. A missing quals
+    line is omitted, never guessed; an unfilled slot is red TBC throughout."""
+    if person.is_tbc:
+        return [("TBC", 11, True, _RED_TBC),
+                (person.role or "", 8.5, True, _RED_TBC),
+                ("to be confirmed", 8, False, _GREY_TEXT)]
+    lines = [(person.name, 11, True, _INK)]
+    if person.role:
+        if person.role_is_placeholder:
+            colour = _RED_TBC
+        else:
+            colour = role_colour if person.is_lead else _GREY_TEXT
+        lines.append((person.role, 8.5, True, colour))
+    if person.quals:
+        lines.append((person.quals, 8, False, _GREY_TEXT))
+    return lines
 
 
-def populate_org_chart(resource_plan: list, client_name: str = "", project_name: str = "",
-                       tender_name: str = "", theme_name: str | None = None) -> bytes:
-    """
-    Builds a fresh .pptx (returned as bytes) from `resource_plan` (a list of
-    resourcing.ResourceAssignment): the fixed Client Project Manager ->
-    Project Director -> Project Manager -> Design Manager chain down the
-    middle, then one evenly-spaced card per discipline in the plan (wrapping
-    to further rows once there are too many to stay legible in one), each
-    showing that discipline's Lead name and a Peer Review row (always red
-    "TBC" -- the app has no reviewer data to show). `client_name`/
-    `project_name` fill the title block when given; left as bracket
-    placeholders otherwise, same as every other not-yet-known field in this
-    tool.
-    """
-    palette = _resolve_palette(theme_name)
+def _title_block(slide, model, style_note: str = ""):
+    box = slide.shapes.add_textbox(_STYLE_MARGIN, Inches(0.22),
+                                   Emu(int(_SLIDE_W - 2 * _STYLE_MARGIN)), Inches(0.7))
+    box.text_frame.word_wrap = True
+    _set_text(box.text_frame, [("Project organisation", 20, True, _DARK_TEXT)],
+              align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP)
+    if model.heading:
+        right = slide.shapes.add_textbox(Emu(int(_SLIDE_W / 2)), Inches(0.24),
+                                         Emu(int(_SLIDE_W / 2 - _STYLE_MARGIN)), Inches(0.32))
+        _set_text(right.text_frame, [(model.heading, 11, True, _GREY_TEXT)],
+                  align=PP_ALIGN.RIGHT, anchor=MSO_ANCHOR.TOP)
+    return int(Inches(0.95))
 
+
+def _grow(prs, needed: float) -> None:
+    """A taller slide is a normal thing to paste from; a chart whose last row
+    is stored off the bottom edge -- which PowerPoint renders as simply not
+    there -- is not."""
+    if int(needed) > int(prs.slide_height):
+        prs.slide_height = Emu(int(needed))
+
+
+def _new_deck():
     prs = Presentation()
     prs.slide_width = _SLIDE_W
     prs.slide_height = _SLIDE_H
-    slide = prs.slides.add_slide(prs.slide_layouts[6])  # blank layout
+    return prs, prs.slides.add_slide(prs.slide_layouts[6])
 
-    # ---- title -----------------------------------------------------------
-    title_box = slide.shapes.add_textbox(Inches(0.35), Inches(0.2), Inches(6.5), Inches(1.0))
-    tf = title_box.text_frame
-    tf.word_wrap = True
-    _set_text(tf, [
-        ("Design Phase Organisation Chart", 20, True, _DARK_TEXT),
-        ((client_name or "").strip() or "[Client / Department]", 12, False, _GREY_TEXT),
-        (_project_line(tender_name, project_name), 12, False, _GREY_TEXT),
-    ], align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP)
 
-    # ---- resourcing lookups -----------------------------------------------
-    mgmt_by_slot = {}
-    # Which management roles this project actually carries. A role absent from
-    # the plan was removed on purpose (see resourcing.OPTIONAL_MANAGEMENT_ROLES)
-    # and must not be drawn at all.
-    present_mgmt_slots: set[str] = set()
-    # [slot, lead_name, [(support_name, support_title), ...]] in first-seen
-    # order, one entry per slot. A support member (see
-    # resourcing.ResourceAssignment.custom_title) is anyone added under a
-    # discipline lead -- shown as an extra row on that lead's own card.
-    disciplines = []
-    slot_index = {}
-    for a in resource_plan or []:
-        slot = (getattr(a, "slot", "") or "").strip()
-        name = (getattr(a, "person_name", "") or "").strip()
-        if not slot:
-            continue
-        if slot in _MANAGEMENT_CHAIN:
-            present_mgmt_slots.add(slot)
-            if name and not mgmt_by_slot.get(slot):
-                mgmt_by_slot[slot] = name
-            continue
-        is_lead = getattr(a, "is_lead", True)
-        if slot not in slot_index:
-            slot_index[slot] = len(disciplines)
-            disciplines.append([slot, name if is_lead else "", []])
-        entry = disciplines[slot_index[slot]]
-        if is_lead:
-            if name and not entry[1]:
-                entry[1] = name
-        else:
-            title = (getattr(a, "custom_title", "") or "").strip()
-            entry[2].append((name, title))
-
-    # ---- management chain -- single vertical stack ------------------------
-    # Built from the roles the plan ACTUALLY carries, in _MANAGEMENT_CHAIN
-    # order, rather than four hardcoded boxes. Design Manager is optional
-    # (resourcing.OPTIONAL_MANAGEMENT_ROLES) and a project that removed it must
-    # get a three-box chain -- not a fourth box with a TBC in it, which is what
-    # the hardcoded version drew and which reads as an unfilled gap rather than
-    # a deliberate absence.
-    cx = _SLIDE_W // 2
-    mgmt_x = cx - _MGMT_W // 2
-
-    chain = [role for role in _MANAGEMENT_CHAIN if role in present_mgmt_slots]
-    chain_y = Inches(0.25)
-    previous_bottom = None
-    for role in chain:
-        fill = _BLACK if role == "Client Project Manager" else palette["mgmt"]
-        colour = _WHITE if role == "Client Project Manager" else palette["mgmt_text"]
-        _management_box(slide, mgmt_x, chain_y, role, mgmt_by_slot.get(role, ""), fill, colour)
-        if previous_bottom is not None:
-            _connector(slide, MSO_CONNECTOR.STRAIGHT, cx, previous_bottom, cx, chain_y)
-        previous_bottom = Emu(chain_y + _MGMT_H)
-        chain_y = Emu(chain_y + _MGMT_H + _MGMT_ROW_GAP)
-    chain_bottom = previous_bottom if previous_bottom is not None else Inches(0.25)
-
-    # ---- Peer Review box, top-right: one line per discipline ---------------
-    _add_peer_review_box(slide, [slot for slot, _name, _supports in disciplines],
-                          top=Inches(0.25), bottom_limit=chain_bottom, palette=palette)
-
-    # ---- discipline cards -- symmetric, fully data-driven, wraps to more
-    # rows rather than shrinking past legibility -------------------------
-    n = len(disciplines)
-    bottom_y = chain_bottom
-    if n:
-        available = _SLIDE_W - 2 * _COL_MARGIN
-        max_cols_per_row = max(1, int((available + _MIN_GAP) // (_DISC_W_MIN + _MIN_GAP)))
-        num_rows = -(-n // max_cols_per_row)  # ceil
-        cols_per_row = -(-n // num_rows)  # ceil, balanced across rows
-
-        rows = [disciplines[i:i + cols_per_row] for i in range(0, n, cols_per_row)]
-
-        prev_bottom_y = chain_bottom
-        for row in rows:
-            row_n = len(row)
-            disc_w = _DISC_W_DEFAULT
-            if row_n * disc_w + (row_n - 1) * _MIN_GAP > available:
-                disc_w = Emu(int((available - (row_n - 1) * _MIN_GAP) / row_n))
-            total_w = row_n * disc_w + (row_n - 1) * _MIN_GAP if row_n > 1 else disc_w
-            start_x = Emu(int((_SLIDE_W - total_w) / 2))
-            spine_y = Emu(prev_bottom_y + _ROW_GAP // 2)
-            disc_y = Emu(spine_y + Inches(0.22))
-
-            col_centers = []
-            row_bottom_y = Emu(disc_y + _DISC_HEADER_H + _DISC_ROLE_H)
-            x = start_x
-            for slot, name, supports in row:
-                header = _rect(slide, x, disc_y, disc_w, _DISC_HEADER_H, palette["header"])
-                _set_text(header.text_frame, [(slot, 10, True, palette["header_text"])])
-                lead_y = Emu(disc_y + _DISC_HEADER_H)
-                lead_box = _rect(slide, x, lead_y, disc_w, _DISC_ROLE_H, palette["body"], line_color=_BORDER_COLOR)
-                _set_text(lead_box.text_frame, [("Lead", 8, True, _GREY_TEXT), _name_or_tbc(name)])
-                card_bottom = Emu(lead_y + _DISC_ROLE_H)
-                # Support rows: one extra thin row per team member added under
-                # this lead, name + their own title (never invented -- "Team
-                # member" only if the user hasn't typed a title yet).
-                for support_name, support_title in supports:
-                    support_box = _rect(slide, x, card_bottom, disc_w, _DISC_ROLE_H,
-                                         palette["body"], line_color=_BORDER_COLOR)
-                    _set_text(support_box.text_frame, [
-                        _title_or_confirm(support_title), _name_or_tbc(support_name),
-                    ])
-                    card_bottom = Emu(card_bottom + _DISC_ROLE_H)
-                row_bottom_y = Emu(max(row_bottom_y, card_bottom))
-                col_centers.append(Emu(x + disc_w // 2))
-                x = Emu(x + disc_w + _MIN_GAP)
-
-            _connector(slide, MSO_CONNECTOR.STRAIGHT, cx, prev_bottom_y, cx, spine_y)
-            if len(col_centers) > 1:
-                _connector(slide, MSO_CONNECTOR.STRAIGHT, col_centers[0], spine_y, col_centers[-1], spine_y)
-            for ccx in col_centers:
-                _connector(slide, MSO_CONNECTOR.STRAIGHT, ccx, spine_y, ccx, disc_y)
-
-            prev_bottom_y = row_bottom_y
-
-        bottom_y = prev_bottom_y
-
-    # Grow the slide to fit everything rather than cramming it -- a taller
-    # slide is a normal, expected thing in PowerPoint; illegible text isn't.
-    needed_height = Emu(bottom_y + Inches(0.3))
-    if needed_height > prs.slide_height:
-        prs.slide_height = needed_height
-
+def _save(prs) -> bytes:
     buffer = io.BytesIO()
     prs.save(buffer)
     buffer.seek(0)
     return buffer.read()
+
+
+def _wrap_columns(count: int, available: float, min_w: float, gap: float, max_w: float):
+    """How many columns fit per row, and how wide they are, without squeezing
+    any of them below a legible width. Past a handful of disciplines a single
+    row makes every card too narrow to hold a name, so wrap instead."""
+    count = max(1, count)
+    per_row = max(1, int((available + gap) // (min_w + gap)))
+    rows = -(-count // per_row)
+    per_row = -(-count // rows)
+    width = min(max_w, (available - (per_row - 1) * gap) / per_row)
+    return per_row, width
+
+
+def _client_label(model) -> tuple[str, RGBColor]:
+    name = (model.client_name or "").strip()
+    return (name or "[CLIENT NAME]", _WHITE if name else _RED_TBC_ON_DARK)
+
+
+# --- A. Executive cards ----------------------------------------------------
+
+def _slide_cards(model, accent: RGBColor) -> bytes:
+    prs, slide = _new_deck()
+    y = _title_block(slide, model)
+
+    centre = int(_SLIDE_W / 2)
+    card_w, card_h = Inches(2.5), Inches(0.72)
+    gap = Inches(0.22)
+
+    client_w, client_h = Inches(2.9), Inches(0.5)
+    _round(slide, centre - client_w / 2, y, client_w, client_h, _CLIENT_DARK)
+    label, colour = _client_label(model)
+    _stack(slide, centre - client_w / 2, y, client_w, client_h,
+           [(label, 12, True, colour), (model.client_role, 8, True, _GREY_TEXT)],
+           align=PP_ALIGN.CENTER)
+    y += int(client_h)
+
+    def card(x, top, w, person, badge=""):
+        tbc = person.is_tbc
+        _round(slide, x, top, w, card_h,
+               _TBC_FILL if tbc else _WHITE,
+               line=_RED_TBC if tbc else _CARD_EDGE, dashed=tbc)
+        bar_colour = _ASSURANCE_AMBER if badge else accent
+        if not tbc and person.is_lead:
+            _bar(slide, x + Inches(0.06), top + Inches(0.02), w - Inches(0.12),
+                 Inches(0.05), bar_colour)
+        if badge and not tbc:
+            _round(slide, x + w * 0.5, top - Inches(0.06), w * 0.5, Inches(0.19),
+                   _ASSURANCE_FILL, line=_ASSURANCE_AMBER, radius=0.3)
+            _stack(slide, x + w * 0.5, top - Inches(0.06), w * 0.5, Inches(0.19),
+                   [(badge.upper(), 7, True, _ASSURANCE_AMBER)], align=PP_ALIGN.CENTER)
+        avatar = Inches(0.34)
+        _circle(slide, x + Inches(0.30), top + card_h / 2, avatar,
+                _TBC_FILL if tbc else _tint(bar_colour, 0.86),
+                person.initials, _RED_TBC if tbc else bar_colour)
+        _stack(slide, x + Inches(0.52), top, w - Inches(0.6), card_h,
+               _person_lines(person, bar_colour))
+
+    leadership = list(model.leadership)
+    top_person = leadership.pop(0) if leadership else None
+    if top_person is not None:
+        y += int(Inches(0.22))
+        _connector(slide, MSO_CONNECTOR.STRAIGHT, centre, y - Inches(0.22), centre, y)
+        card(centre - card_w / 2, y, card_w, top_person)
+        y += int(card_h)
+
+    rank = [(person, "") for person in leadership]
+    rank += [(person, "QA / Review") for person in model.assurance]
+    if rank:
+        y += int(Inches(0.28))
+        _connector(slide, MSO_CONNECTOR.STRAIGHT, centre, y - Inches(0.28), centre, y)
+        total = len(rank) * card_w + (len(rank) - 1) * gap
+        x = centre - total / 2
+        for person, badge in rank:
+            card(x, y, card_w, person, badge=badge)
+            x += card_w + gap
+        y += int(card_h)
+
+    if model.disciplines:
+        available = int(_SLIDE_W - 2 * _STYLE_MARGIN)
+        per_row, col_w = _wrap_columns(len(model.disciplines), available,
+                                       int(Inches(2.15)), int(gap), int(card_w))
+        chunks = [model.disciplines[i:i + per_row]
+                  for i in range(0, len(model.disciplines), per_row)]
+        for chunk_index, chunk in enumerate(chunks):
+            bus_y = y + int(Inches(0.26))
+            if chunk_index == 0:
+                _connector(slide, MSO_CONNECTOR.STRAIGHT, centre, y, centre, bus_y)
+            total = len(chunk) * col_w + (len(chunk) - 1) * int(gap)
+            x = int(_SLIDE_W / 2 - total / 2)
+            centres = []
+            row_bottom = bus_y
+            for group in chunk:
+                centres.append(int(x + col_w / 2))
+                _stack(slide, x, bus_y + Inches(0.04), col_w, Inches(0.22),
+                       [(group.name.upper(), 9, True, _MUTED)], align=PP_ALIGN.CENTER)
+                card_y = bus_y + int(Inches(0.28))
+                for person in group.people:
+                    card(x, card_y, col_w, person)
+                    card_y += int(card_h + Inches(0.12))
+                row_bottom = max(row_bottom, card_y)
+                x += col_w + int(gap)
+            if len(centres) > 1:
+                _connector(slide, MSO_CONNECTOR.STRAIGHT, min(centres), bus_y,
+                           max(centres), bus_y)
+            for column_centre in centres:
+                _connector(slide, MSO_CONNECTOR.STRAIGHT, column_centre, bus_y,
+                           column_centre, bus_y + Inches(0.04))
+            y = row_bottom + int(Inches(0.10))
+
+    _grow(prs, y + Inches(0.3))
+    return _save(prs)
+
+
+# --- B. Discipline columns -------------------------------------------------
+
+def _slide_columns(model, accent: RGBColor) -> bytes:
+    prs, slide = _new_deck()
+    y = _title_block(slide, model)
+
+    centre = int(_SLIDE_W / 2)
+    pill_h = Inches(0.46)
+    client_w = Inches(3.6)
+    _round(slide, centre - client_w / 2, y, client_w, pill_h, _CLIENT_DARK, radius=0.2)
+    label, colour = _client_label(model)
+    _stack(slide, centre - client_w / 2, y, client_w, pill_h,
+           [(f"{label} — Client", 12, True, colour)], align=PP_ALIGN.CENTER)
+    y += int(pill_h)
+
+    for index, person in enumerate(model.leadership):
+        y += int(Inches(0.2))
+        _connector(slide, MSO_CONNECTOR.STRAIGHT, centre, y - Inches(0.2), centre, y)
+        width = Inches(3.2) if index == 0 else Inches(2.6)
+        fill = accent if index == 0 else _tint(accent, 0.18)
+        tbc = person.is_tbc
+        _round(slide, centre - width / 2, y, width, pill_h,
+               _TBC_FILL if tbc else fill,
+               line=_RED_TBC if tbc else None, dashed=tbc, radius=0.2)
+        sub = person.role + (f" · {person.quals}" if person.quals else "")
+        _stack(slide, centre - width / 2, y, width, pill_h,
+               [(person.name or "TBC", 12, True, _RED_TBC if tbc else _text_on(fill)),
+                (sub, 9, True, _RED_TBC if tbc else _text_on(fill))],
+               align=PP_ALIGN.CENTER)
+        y += int(pill_h)
+
+    if model.disciplines:
+        y += int(Inches(0.3))
+        gap = int(Inches(0.16))
+        available = int(_SLIDE_W - 2 * _STYLE_MARGIN)
+        per_row, lane_w = _wrap_columns(len(model.disciplines), available,
+                                        int(Inches(2.3)), gap, int(Inches(3.0)))
+        chunks = [model.disciplines[i:i + per_row]
+                  for i in range(0, len(model.disciplines), per_row)]
+        row_h = Inches(0.62)
+        for chunk in chunks:
+            total = len(chunk) * lane_w + (len(chunk) - 1) * gap
+            x = int(_SLIDE_W / 2 - total / 2)
+            tallest = max(len(g.people) for g in chunk)
+            lane_h = int(Inches(0.36) + tallest * (row_h + Inches(0.1)) + Inches(0.1))
+            for group in chunk:
+                colour = _hex(_discipline_colour_for(model, group))
+                _round(slide, x, y, lane_w, lane_h, _LANE_FILL, radius=0.06)
+                _bar(slide, x, y, lane_w, Inches(0.06), colour)
+                _stack(slide, x, y + Inches(0.06), lane_w, Inches(0.28),
+                       [(group.name.upper(), 10, True, colour)], align=PP_ALIGN.CENTER)
+                card_y = y + int(Inches(0.38))
+                for person in group.people:
+                    tbc = person.is_tbc
+                    _round(slide, x + Inches(0.1), card_y, lane_w - Inches(0.2), row_h,
+                           _TBC_FILL if tbc else _WHITE,
+                           line=_RED_TBC if tbc else _CARD_EDGE, dashed=tbc, radius=0.1)
+                    _stack(slide, x + Inches(0.1), card_y, lane_w - Inches(0.2), row_h,
+                           _person_lines(person, colour), align=PP_ALIGN.CENTER)
+                    card_y += int(row_h + Inches(0.1))
+                x += lane_w + gap
+            y += lane_h + int(Inches(0.16))
+
+    # The amber independent-review strip, ONLY when the plan holds such a slot.
+    if model.assurance:
+        y += int(Inches(0.2))
+        strip_w, strip_h = Inches(6.4), Inches(0.44)
+        _round(slide, centre - strip_w / 2, y, strip_w, strip_h, _ASSURANCE_FILL,
+               line=RGBColor(0xFB, 0xBF, 0x24), radius=0.2)
+        text = " · ".join(
+            f"{p.name or 'TBC'} — {p.role}" + (f" ({p.quals})" if p.quals else "")
+            for p in model.assurance)
+        _stack(slide, centre - strip_w / 2, y, strip_w, strip_h,
+               [(f"★ Independent review: {text}", 10, True, _ASSURANCE_AMBER)],
+               align=PP_ALIGN.CENTER)
+        y += int(strip_h)
+
+    _grow(prs, y + Inches(0.3))
+    return _save(prs)
+
+
+def _discipline_colour_for(model, group) -> str:
+    from modules.org_chart_render import DISCIPLINE_COLOURS
+
+    index = group.people[0].group_index if group.people else model.disciplines.index(group)
+    return DISCIPLINE_COLOURS[index % len(DISCIPLINE_COLOURS)]
+
+
+# --- C. Governance bands ---------------------------------------------------
+
+def _slide_bands(model, accent: RGBColor) -> bytes:
+    prs, slide = _new_deck()
+    y = _title_block(slide, model)
+
+    label_w = Inches(1.5)
+    band_x = int(_STYLE_MARGIN + label_w)
+    band_w = int(_SLIDE_W - _STYLE_MARGIN - band_x)
+    chip_h = Inches(0.62)
+    chip_gap = int(Inches(0.12))
+    pad = int(Inches(0.12))
+
+    def band(title, chips, fill, chip_edge=_CARD_EDGE):
+        nonlocal y
+        if not chips:
+            return
+        widths = [min(int(Inches(2.7)),
+                      max(int(Inches(1.5)), int(Inches(0.35) + Inches(0.085) * max(
+                          len(name), len(role)))))
+                  for name, role, *_rest in chips]
+        rows, used = [[]], 0
+        for index, width in enumerate(widths):
+            if rows[-1] and used + width + chip_gap > band_w - 2 * pad:
+                rows.append([])
+                used = 0
+            rows[-1].append(index)
+            used += width + chip_gap
+        band_h = int(2 * pad + len(rows) * chip_h + (len(rows) - 1) * chip_gap)
+        _round(slide, band_x, y, band_w, band_h, fill, radius=0.06)
+        _stack(slide, _STYLE_MARGIN, y, label_w - Inches(0.12), band_h,
+               [(title.upper(), 9, True, _MUTED)], align=PP_ALIGN.RIGHT)
+        chip_y = y + pad
+        for row in rows:
+            x = band_x + pad
+            for index in row:
+                name, role, quals, tbc, role_colour = chips[index]
+                width = widths[index]
+                _round(slide, x, chip_y, width, chip_h,
+                       _TBC_FILL if tbc else _WHITE,
+                       line=_RED_TBC if tbc else chip_edge, dashed=tbc, radius=0.1)
+                lines = [(name, 10.5, True, _RED_TBC if tbc else _INK),
+                         (role, 8.5, True, _RED_TBC if tbc else role_colour)]
+                if quals:
+                    lines.append((quals, 8, False, _GREY_TEXT))
+                _stack(slide, x, chip_y, width, chip_h, [l for l in lines if l[0]])
+                x += width + chip_gap
+            chip_y += int(chip_h + chip_gap)
+        y += band_h + int(Inches(0.16))
+
+    band("Client", [(_client_label(model)[0], model.client_role, "", False, _MUTED)],
+         _CLIENT_DARK, chip_edge=_CLIENT_DARK)
+    band("Leadership",
+         [(p.name or "TBC", p.role, p.quals, p.is_tbc, accent) for p in model.leadership],
+         _tint(accent, 0.94))
+    delivery = []
+    for group in model.disciplines:
+        colour = _hex(_discipline_colour_for(model, group))
+        for person in group.people:
+            role = (person.role if person.role.startswith(group.name)
+                    else f"{person.role} · {group.name}")
+            delivery.append((person.name or "TBC", role, person.quals, person.is_tbc,
+                             colour if person.is_lead else _GREY_TEXT))
+    from modules.org_chart_render import DISCIPLINE_COLOURS
+
+    band("Delivery team", delivery, _tint(_hex(DISCIPLINE_COLOURS[1]), 0.95))
+    # No assurance band at all when the plan holds no reviewer -- an empty
+    # band labelled ASSURANCE reads as a missing answer rather than an absent
+    # role.
+    band("Assurance",
+         [(p.name or "TBC", p.role, p.quals, p.is_tbc, _ASSURANCE_AMBER)
+          for p in model.assurance],
+         _tint(_ASSURANCE_AMBER, 0.93))
+
+    _stack(slide, _STYLE_MARGIN, y, Emu(int(_SLIDE_W - 2 * _STYLE_MARGIN)), Inches(0.3),
+           [(("Solid reporting lines run top-down; the assurance band reviews independently "
+              "of the delivery team.") if model.has_assurance else
+             "Solid reporting lines run top-down.", 9, True, _MUTED)])
+    _grow(prs, y + Inches(0.5))
+    return _save(prs)
+
+
+# --- D. Classic tree -------------------------------------------------------
+
+def _slide_tree(model, accent: RGBColor) -> bytes:
+    prs, slide = _new_deck()
+    y = _title_block(slide, model)
+
+    centre = int(_SLIDE_W / 2)
+    box_w, box_h = Inches(2.6), Inches(0.72)
+    gap = int(Inches(0.3))
+
+    def box(x, top, w, lines, outline=_INK, tbc=False, width_pt=1.0):
+        _round(slide, x, top, w, box_h, _WHITE,
+               line=_RED_TBC if tbc else outline, dashed=tbc, radius=0.08)
+        _stack(slide, x, top, w, box_h, lines, align=PP_ALIGN.CENTER)
+
+    label, colour = _client_label(model)
+    box(centre - box_w / 2, y, box_w,
+        [(label, 12, True, _INK if model.client_name else _RED_TBC),
+         (model.client_role, 9, True, _GREY_TEXT)])
+    y += int(box_h)
+
+    leadership = list(model.leadership)
+    top_person = leadership.pop(0) if leadership else None
+    if top_person is not None:
+        y += int(Inches(0.26))
+        _connector(slide, MSO_CONNECTOR.STRAIGHT, centre, y - Inches(0.26), centre, y)
+        box(centre - box_w / 2, y, box_w, _person_lines(top_person, _INK),
+            outline=accent, tbc=top_person.is_tbc)
+        y += int(box_h)
+
+    rank = leadership + model.assurance
+    if rank:
+        y += int(Inches(0.28))
+        _connector(slide, MSO_CONNECTOR.STRAIGHT, centre, y - Inches(0.28), centre, y)
+        total = len(rank) * box_w + (len(rank) - 1) * gap
+        x = int(centre - total / 2)
+        for person in rank:
+            box(x, y, box_w, _person_lines(person, _INK), tbc=person.is_tbc)
+            x += int(box_w) + gap
+        y += int(box_h)
+
+    if model.disciplines:
+        available = int(_SLIDE_W - 2 * _STYLE_MARGIN)
+        per_row, col_w = _wrap_columns(len(model.disciplines), available,
+                                       int(Inches(2.2)), gap, int(box_w))
+        chunks = [model.disciplines[i:i + per_row]
+                  for i in range(0, len(model.disciplines), per_row)]
+        for chunk_index, chunk in enumerate(chunks):
+            bus_y = y + int(Inches(0.28))
+            if chunk_index == 0:
+                _connector(slide, MSO_CONNECTOR.STRAIGHT, centre, y, centre, bus_y)
+            total = len(chunk) * col_w + (len(chunk) - 1) * gap
+            x = int(_SLIDE_W / 2 - total / 2)
+            centres = []
+            row_bottom = bus_y
+            for group in chunk:
+                centres.append(int(x + col_w / 2))
+                box_y = bus_y + int(Inches(0.26))
+                for person in group.people:
+                    box(x, box_y, col_w, _person_lines(person, _INK), tbc=person.is_tbc)
+                    box_y += int(box_h + Inches(0.14))
+                row_bottom = max(row_bottom, box_y)
+                x += col_w + gap
+            if len(centres) > 1:
+                _connector(slide, MSO_CONNECTOR.STRAIGHT, min(centres), bus_y,
+                           max(centres), bus_y)
+            for column_centre in centres:
+                _connector(slide, MSO_CONNECTOR.STRAIGHT, column_centre, bus_y,
+                           column_centre, bus_y + Inches(0.26))
+            y = row_bottom + int(Inches(0.10))
+
+    _grow(prs, y + Inches(0.3))
+    return _save(prs)
+
+
+_STYLE_RENDERERS = {
+    "cards": _slide_cards,
+    "columns": _slide_columns,
+    "bands": _slide_bands,
+    "tree": _slide_tree,
+}
+
+
+def _empty_slide(model) -> bytes:
+    prs, slide = _new_deck()
+    y = _title_block(slide, model)
+    _stack(slide, _STYLE_MARGIN, y + Inches(0.4),
+           Emu(int(_SLIDE_W - 2 * _STYLE_MARGIN)), Inches(0.6),
+           [(_ORG_EMPTY_NOTE, 14, False, _RED_TBC)], align=PP_ALIGN.CENTER)
+    return _save(prs)
+
+
+_ORG_EMPTY_NOTE = ("[NO TEAM ASSIGNED -- add the management roles and discipline leads in "
+                   "the Team & Resourcing tab, then re-download this PowerPoint]")
+
+
+def populate_org_chart(resource_plan: list, client_name: str = "", project_name: str = "",
+                       tender_name: str = "", theme_name: str | None = None,
+                       style: str | None = None) -> bytes:
+    """
+    Builds a fresh .pptx (returned as bytes) of the project organisation
+    chart, in the user's chosen presentation style.
+
+    `style` is one of org_chart_render.STYLES; anything else (including None)
+    falls back to org_chart_render.DEFAULT_STYLE, so the deck always matches
+    the style the preview drew.
+
+    Everything comes from `resource_plan` (a list of
+    resourcing.ResourceAssignment). An unassigned slot is drawn as a dashed
+    red TBC; a role the user REMOVED (see resourcing.OPTIONAL_MANAGEMENT_ROLES)
+    is absent from the plan and so absent from the chart, with no TBC --
+    deliberate absence is not a gap. An assurance/reviewer element appears
+    only where the plan actually holds such a slot; this module never adds
+    one. An empty plan renders a placeholder slide rather than a bare chart.
+    """
+    from modules import org_chart_render
+
+    model = org_chart_render.build_model(resource_plan, client_name, project_name,
+                                         tender_name)
+    if model.is_empty:
+        return _empty_slide(model)
+    resolved = org_chart_render.effective_style(
+        model, style or org_chart_render.DEFAULT_STYLE)
+    accent = _resolve_palette(theme_name)["header"]
+    return _STYLE_RENDERERS[resolved](model, accent)

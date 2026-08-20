@@ -634,6 +634,103 @@ def test_optional_design_manager(failures: list[str]) -> None:
         failures.append("[11] a Key Personnel profile is still reserved for the removed role")
 
 
+def test_org_chart_styles(failures: list[str]) -> None:
+    """Batch 9: the org chart is drawn in the style the user picked, the same
+    style in the preview and the deck, and every style survives the awkward
+    cases -- an unfilled lead, no reviewer, and far more disciplines than fit
+    across one row."""
+    import io as _io
+
+    from pptx import Presentation
+
+    from modules import org_chart_pptx, org_chart_render, project_store, resourcing
+
+    if "org_chart_style" not in project_store.PLAIN_KEYS:
+        failures.append("[9] the chosen org chart style isn't saved with the project")
+    loaded = project_store.load_project(project_store.save_project(
+        _State(org_chart_style="bands"))).get("org_chart_style")
+    if loaded != "bands":
+        failures.append(f"[9] the style didn't survive save/load: {loaded}")
+
+    def slot(name, kind, person="", lead=True, title="", qual=""):
+        return resourcing.ResourceAssignment(
+            slot=name, slot_kind=kind, person_name=person, is_lead=lead,
+            custom_title=title, qualification=qual)
+
+    plan = [
+        slot("Client Project Manager", "management", "Dana Client"),
+        slot("Project Director", "management", "Jane Citizen", qual="BE(Civil)"),
+        slot("Project Manager", "management", "Alex Demo"),
+        slot("Independent Review", "discipline", "Chris Invented"),
+        slot("Structural", "discipline", "Tom Sample"),
+        slot("Structural", "discipline", "Ryan Example", lead=False, title="Bridge Engineer"),
+        slot("Hydraulics", "discipline"),                      # unfilled lead -> TBC
+        slot("Survey", "discipline", "Pat Mockup"),
+        slot("Survey", "discipline", "Lee Fictional", lead=False),   # no title -> placeholder
+    ]
+    model = org_chart_render.build_model(plan, "Coastal Council", "Bridge Duplication", "RFT-1")
+
+    if [p.role for p in model.leadership] != ["Project Director", "Project Manager"]:
+        failures.append(f"[9] leadership came out wrong: {[p.role for p in model.leadership]}")
+    if [p.name for p in model.assurance] != ["Chris Invented"]:
+        failures.append(f"[9] the reviewer wasn't picked up: {model.assurance}")
+    # The client's own PM names the client box; it is not one of OUR leaders.
+    if any(p.role == resourcing.CLIENT_ROLE for p in model.leadership):
+        failures.append("[9] the client's PM was filed as firm leadership")
+    hydraulics = [g for g in model.disciplines if g.name == "Hydraulics"][0]
+    if not hydraulics.lead.is_tbc:
+        failures.append("[9] an unfilled lead isn't marked TBC")
+    untitled = [g for g in model.disciplines if g.name == "Survey"][0].supports[0]
+    if untitled.role != org_chart_render.CONFIRM_TITLE or not untitled.role_is_placeholder:
+        failures.append(f"[9] an untitled support member isn't flagged: {untitled.role!r}")
+
+    for style in org_chart_render.STYLES:
+        if not org_chart_render.render_png(model, style, "#1D4ED8"):
+            failures.append(f"[9] the {style} style didn't render")
+
+    # A project with no reviewer must render with no assurance element at all
+    # -- an empty ASSURANCE band reads as a missing answer, not an absent role.
+    lean_plan = [a for a in plan if a.slot != "Independent Review"]
+    if org_chart_render.build_model(lean_plan, "C", "P", "T").has_assurance:
+        failures.append("[9] a reviewer was invented for a project that has none")
+    bands = Presentation(_io.BytesIO(org_chart_pptx.populate_org_chart(
+        lean_plan, style="bands")))
+    band_text = " ".join(sh.text_frame.text for sh in bands.slides[0].shapes if sh.has_text_frame)
+    if "ASSURANCE" in band_text:
+        failures.append("[9] the bands deck shows an assurance band with nobody in it")
+
+    # An empty plan keeps its placeholder rather than exporting a bare chart.
+    empty_model = org_chart_render.build_model([], "", "", "")
+    for style in org_chart_render.STYLES:
+        if not org_chart_render.render_png(empty_model, style, "#1D4ED8"):
+            failures.append(f"[9] the {style} style lost its empty-plan placeholder")
+    empty_deck = Presentation(_io.BytesIO(org_chart_pptx.populate_org_chart([], style="cards")))
+    if "NO TEAM ASSIGNED" not in " ".join(
+            sh.text_frame.text for sh in empty_deck.slides[0].shapes if sh.has_text_frame):
+        failures.append("[9] an empty plan exports a deck with no placeholder")
+
+    # Eight disciplines must not run off the bottom of the slide in any style:
+    # PowerPoint stores shapes outside the slide and simply doesn't show them.
+    big = [slot("Client Project Manager", "management", "Dana Client"),
+           slot("Project Director", "management", "Jane Citizen"),
+           slot("Project Manager", "management", "Alex Demo")]
+    for index in range(8):
+        big.append(slot(f"Discipline {index + 1}", "discipline", f"Person {index + 1}"))
+        big.append(slot(f"Discipline {index + 1}", "discipline", f"Support {index + 1}",
+                        lead=False, title="Design Engineer"))
+    big_model = org_chart_render.build_model(big, "C", "P", "T")
+    for style in org_chart_render.STYLES:
+        deck = Presentation(_io.BytesIO(org_chart_pptx.populate_org_chart(
+            big, client_name="C", project_name="P", style=style)))
+        lowest = max(shape.top + shape.height for shape in deck.slides[0].shapes)
+        if lowest > deck.slide_height:
+            failures.append(
+                f"[9] 8 disciplines overflow the {style} slide by "
+                f"{(lowest - deck.slide_height) / 914400:.2f} in")
+        if not org_chart_render.render_png(big_model, style, "#1D4ED8"):
+            failures.append(f"[9] the {style} preview failed with 8 disciplines")
+
+
 def main() -> int:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     failures: list[str] = []
@@ -650,6 +747,7 @@ def main() -> int:
     test_fee_presentation_ticks(failures)
     test_program_styles(failures)
     test_optional_design_manager(failures)
+    test_org_chart_styles(failures)
 
     if failures:
         print("BATCH 1 WIRING TESTS FAILED:")

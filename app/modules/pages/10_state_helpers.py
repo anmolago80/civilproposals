@@ -107,6 +107,13 @@ def _init_state():
         "cv_library_filenames": [],
         "cv_extracted_names": [],
         "org_chart_png": None,
+        # Which of the four presentation styles the org chart is drawn in
+        # (org_chart_render.STYLES), and which style the stored PNG above was
+        # actually generated in. The second key is what lets the tab say "the
+        # exported pack still has the previous style" instead of silently
+        # exporting something other than what is on screen.
+        "org_chart_style": org_chart_render.DEFAULT_STYLE,
+        "org_chart_png_style": "",
         # Optional management roles (resourcing.OPTIONAL_MANAGEMENT_ROLES) the
         # user has removed from this project's chart. Kept as an explicit
         # record rather than inferred from the plan's absence, for the same
@@ -919,6 +926,7 @@ def _export_input_signature() -> str:
         "program_schedule", "program_week_labels", "terms_of_engagement_text",
         "project_differentiator", "project_sales_pitch", "fee_estimate_manual_total",
         "cover_photo_index", "fee_sections_included", "program_style", "program_start_date",
+        "org_chart_style",
         "letter_sender_name", "letter_sender_title",
         "letter_sender_phone", "letter_sender_email", "letter_sender_address",
     ]
@@ -1181,6 +1189,89 @@ def _files_signature(files) -> tuple:
     on every Streamlit rerun (reruns fire on nearly every interaction, and
     re-parsing large PDFs each time is what makes the app feel frozen)."""
     return tuple((getattr(f, "name", ""), getattr(f, "size", None)) for f in (files or []))
+
+
+def _org_model_from_state():
+    """The one org-chart model every output renders from -- preview, pack and
+    companion deck -- so an export cannot show a different team from the one
+    the user approved on screen."""
+    return org_chart_render.build_model(
+        st.session_state.get("resource_plan") or [],
+        st.session_state.get("client_name") or "",
+        st.session_state.get("project_name") or "",
+        st.session_state.get("tender_name") or "",
+    )
+
+
+def _org_signature(style: str) -> tuple:
+    """Everything the drawn chart depends on. Anything missing here is
+    something a change to could leave a stale picture on screen."""
+    plan = st.session_state.get("resource_plan") or []
+    return (
+        style,
+        tuple((a.slot, a.slot_kind, a.person_name, a.is_lead, a.custom_title,
+               a.qualification, a.rpeq_status) for a in plan),
+        st.session_state.get("client_name") or "",
+        st.session_state.get("project_name") or "",
+        st.session_state.get("tender_name") or "",
+        st.session_state.get("proposal_theme") or "",
+    )
+
+
+_ORG_PNG_CACHE_SIZE = 8
+
+
+def _org_png(style: str | None = None) -> bytes | None:
+    """The current org chart drawn in `style`, cached on its content
+    signature. Falls back to the original PIL renderer (modules/org_chart.py)
+    if the styled renderer fails -- a chart the reader can follow beats no
+    chart at all. None only when both fail; every caller handles that."""
+    style = style or st.session_state.get("org_chart_style") or org_chart_render.DEFAULT_STYLE
+    signature = _org_signature(style)
+    cache = st.session_state.setdefault("_org_png_cache", {})
+    if signature in cache:
+        return cache[signature]
+    png = None
+    try:
+        accent = f"#{export_docx._theme_colours(st.session_state.get('proposal_theme'))['accent']}"
+        png = org_chart_render.render_png(_org_model_from_state(), style, accent)
+    except Exception as exc:  # noqa: BLE001 -- a preview is never worth a traceback
+        print(f"[org chart preview] {exc}", file=sys.stderr)
+    if png is None:
+        try:
+            png = org_chart.render_org_chart(
+                st.session_state.get("resource_plan") or [],
+                theme_name=st.session_state.get("proposal_theme"),
+                project_title=(st.session_state.get("tender_name")
+                               or st.session_state.get("project_name") or None),
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[org chart fallback] {exc}", file=sys.stderr)
+    if len(cache) >= _ORG_PNG_CACHE_SIZE:
+        cache.pop(next(iter(cache)))
+    cache[signature] = png
+    return png
+
+
+def _org_chart_style_control() -> None:
+    """The four-way org-chart style picker, with a live preview drawn from
+    this project's own team.
+
+    A preview rather than four stock thumbnails, for the same reason the
+    program styles get one: the styles differ most in how they cope with THIS
+    project's role names and discipline count, which a generic sample cannot
+    show."""
+    st.markdown("**Org chart style**")
+    st.caption(
+        "How the chart is drawn in the exported pack and the companion PowerPoint. "
+        "Purely presentational -- it never changes who is on the team."
+    )
+    st.radio(
+        "Org chart style", org_chart_render.STYLES,
+        key="org_chart_style", horizontal=True, label_visibility="collapsed",
+        format_func=lambda s: org_chart_render.STYLE_LABELS.get(s, s),
+    )
+    st.caption(org_chart_render.STYLE_DESCRIPTIONS.get(st.session_state.org_chart_style, ""))
 
 
 def _management_insert_index(plan: list, role: str) -> int:

@@ -569,20 +569,44 @@ with tabs[7]:
 
         st.divider()
         st.markdown("#### Project organisation chart")
-        assigned = sum(1 for a in st.session_state.resource_plan if (a.person_name or "").strip())
-        st.caption(f"{assigned} of {len(st.session_state.resource_plan)} slots assigned. Unassigned slots show as '[to be assigned]'.")
-        if st.button("Generate org chart", type="primary"):
-            png = org_chart.render_org_chart(
-                st.session_state.resource_plan,
-                theme_name=st.session_state.proposal_theme,
-                project_title=st.session_state.tender_name or st.session_state.project_name or None,
+        _assigned = sum(1 for a in st.session_state.resource_plan if (a.person_name or "").strip())
+        st.caption(
+            f"{_assigned} of {len(st.session_state.resource_plan)} slots assigned. An unassigned "
+            "slot shows as a red TBC on the chart -- a role you removed doesn't show at all."
+        )
+        _org_chart_style_control()
+
+        _org_preview = _org_png(st.session_state.org_chart_style)
+        if _org_preview:
+            st.image(_org_preview, use_container_width=True)
+        else:
+            st.caption(
+                "Couldn't draw the chart just now -- your team is unaffected. Try again, and if "
+                "it keeps happening email hello@civilproposals.com."
             )
-            st.session_state.org_chart_png = png
-            if png:
-                st.success("Org chart generated. It will be included in the Key Personnel area of the exported pack.")
+
+        # The preview is live; putting it INTO the pack stays an explicit act,
+        # so a stray click on a style never silently rewrites what an already
+        # generated pack contains.
+        _ocol1, _ocol2 = st.columns([2, 3])
+        with _ocol1:
+            if st.button("Use this chart in the exported pack", type="primary",
+                         disabled=_org_preview is None):
+                st.session_state.org_chart_png = _org_preview
+                st.session_state.org_chart_png_style = st.session_state.org_chart_style
+                st.success(
+                    "Saved. This chart now appears in the Key Personnel area of the exported pack."
+                )
+        with _ocol2:
+            if not st.session_state.org_chart_png:
+                st.caption("The exported pack has no org chart yet -- click to add this one.")
+            elif st.session_state.org_chart_png_style != st.session_state.org_chart_style:
+                st.warning(
+                    "**The exported pack still has the "
+                    f"{org_chart_render.STYLE_LABELS.get(st.session_state.org_chart_png_style, 'previous')} "
+                    "chart.** Click to replace it with the one above."
+                )
             else:
-                st.error("Could not render the org chart. Check that at least one role/discipline is present.")
-        if st.session_state.org_chart_png:
-            st.image(st.session_state.org_chart_png, use_container_width=True)
+                st.caption("The exported pack has this chart.")
 
 

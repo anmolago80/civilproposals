@@ -255,6 +255,7 @@ def build_sample_project() -> dict:
         "program_week_labels": week_labels,
         "program_start_date": __import__("datetime").date(2026, 9, 7),
         "program_style": "swimlanes",
+        "org_chart_style": "cards",
         "reference_projects": refs,
         "sender": {
             "name": "Jane Smith", "title": "Project Director",
@@ -276,7 +277,13 @@ def generate_all(project: dict) -> dict:
     )
 
     info = project["project_info"]
-    org_png = org_chart.render_org_chart(
+    from modules import org_chart_render
+
+    org_png = org_chart_render.render_png(
+        org_chart_render.build_model(project["resource_plan"], info["client_name"],
+                                     info["project_name"], info["tender_name"]),
+        project["org_chart_style"],
+    ) or org_chart.render_org_chart(
         project["resource_plan"], theme_name=info["proposal_theme"],
         project_title=info["project_name"],
     )
@@ -335,13 +342,18 @@ def generate_all(project: dict) -> dict:
         program_start_date=project["program_start_date"],
     ).getvalue()
 
-    out["Org_Chart.pptx"] = org_chart_pptx.populate_org_chart(
-        project["resource_plan"],
-        client_name=info["client_name"],
-        project_name=info["project_name"],
-        tender_name=info["tender_name"],
-        theme_name=info["proposal_theme"],
-    )
+    # One deck per presentation style: they share a model but not a line of
+    # layout, so a regression in one is invisible in the others.
+    for style in org_chart_render.STYLES:
+        out[f"Org_Chart_{style}.pptx"] = org_chart_pptx.populate_org_chart(
+            project["resource_plan"],
+            client_name=info["client_name"],
+            project_name=info["project_name"],
+            tender_name=info["tender_name"],
+            theme_name=info["proposal_theme"],
+            style=style,
+        )
+    out["Org_Chart.pptx"] = out[f"Org_Chart_{project['org_chart_style']}.pptx"]
     out["Methodology_Table.pptx"] = methodology_pptx.populate_methodology(
         project["analysis"],
         client_name=info["client_name"],

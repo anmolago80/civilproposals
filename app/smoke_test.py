@@ -152,6 +152,35 @@ def main() -> int:
                 if at.session_state["removed_management_roles"]:
                     failures.append("[design manager] the removal record wasn't cleared")
 
+        # The org chart style picker and its live preview live on the same
+        # tab, and are only reachable once there is a plan to draw.
+        from modules import org_chart_render
+
+        style_radios = [r for r in at.radio if r.key == "org_chart_style"]
+        if not style_radios:
+            failures.append("[org chart] the style picker never rendered")
+        elif at.session_state["org_chart_style"] not in org_chart_render.STYLES:
+            failures.append(
+                f"[org chart] default is not a real style: "
+                f"{at.session_state['org_chart_style']!r}")
+        else:
+            style_radios[0].set_value("bands").run()
+            for exc in at.exception:
+                failures.append(f"[org chart] exception after picking: {exc.value}")
+            if at.session_state["org_chart_style"] != "bands":
+                failures.append("[org chart] the chosen style did not round-trip")
+            use = [b for b in at.button if "exported pack" in (b.label or "")]
+            if not use:
+                failures.append("[org chart] no way to put the chart into the pack")
+            else:
+                use[0].click().run()
+                for exc in at.exception:
+                    failures.append(f"[org chart] exception after saving: {exc.value}")
+                if not at.session_state["org_chart_png"]:
+                    failures.append("[org chart] the chart wasn't saved into the pack")
+                if at.session_state["org_chart_png_style"] != "bands":
+                    failures.append("[org chart] the pack didn't record which style it holds")
+
         # Project Director and Project Manager must stay non-removable.
         for index, role in ((1, "Project Director"), (2, "Project Manager")):
             if [b for b in at.button if b.key == f"res_del_management_{index}"]:

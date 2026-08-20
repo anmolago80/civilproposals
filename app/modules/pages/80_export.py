@@ -289,18 +289,14 @@ with tabs[9]:
                 try:
                     chart_bytes = _cached_pptx(
                         "org_chart",
-                        (
-                            tuple((a.slot, a.person_name, a.is_lead, a.custom_title)
-                                  for a in (st.session_state.resource_plan or [])),
-                            st.session_state.client_name, st.session_state.project_name,
-                            st.session_state.tender_name, st.session_state.proposal_theme,
-                        ),
+                        _org_signature(st.session_state.org_chart_style),
                         lambda: org_chart_pptx.populate_org_chart(
                             st.session_state.resource_plan or [],
                             client_name=st.session_state.client_name,
                             project_name=st.session_state.project_name,
                             tender_name=st.session_state.tender_name,
                             theme_name=st.session_state.proposal_theme,
+                            style=st.session_state.org_chart_style,
                         ),
                     )
                     st.download_button(

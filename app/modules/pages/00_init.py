@@ -104,6 +104,7 @@ from modules import (
     resourcing,
     org_chart,
     org_chart_pptx,
+    org_chart_render,
     methodology_pptx,
     methodology_stages,
     firm_profile,
