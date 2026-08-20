@@ -131,25 +131,40 @@ def build_fill_data(state) -> dict:
         "contact_address": _s("letter_sender_address"),
     }
 
-    # Personnel: the resourcing plan is the source of truth for who's on the
-    # job (person_name + slot/custom_title); team_members adds qualifications
-    # where a bio was drafted for that person.
+    # Personnel: the resourcing plan is the source of truth for the whole
+    # person -- who they are (person_name), what they're doing here
+    # (slot/custom_title) AND their credentials.
+    #
+    # This used to read qualifications out of state["team_members"], which no
+    # code in the app has ever written to (it is initialised to [] in
+    # 10_state_helpers.py and only ever read, as a name pool). The lookup
+    # therefore always missed, and the Qualifications and Years columns of
+    # every council personnel schedule came out as placeholders even for a
+    # user who had carefully filled both in on the Team & Resourcing tab.
+    # Those fields are ResourceAssignment.qualification / .rpeq_status /
+    # .years_experience, all user-entered and never AI-guessed, so they are
+    # safe to put straight into a legal form.
     personnel = []
-    quals_by_name = {}
-    for member in (state.get("team_members") or []):
-        name = (getattr(member, "name", "") or "").strip()
-        if name:
-            quals_by_name[name.lower()] = (getattr(member, "qualified", "") or "").strip()
     for assignment in (state.get("resource_plan") or []):
         name = (getattr(assignment, "person_name", "") or "").strip()
         if not name:
             continue
         role = (getattr(assignment, "custom_title", "") or "").strip() or (getattr(assignment, "slot", "") or "").strip()
+        # Schedules give one "Qualifications" column and firms expect the
+        # registration in it alongside the degree, so the two entered values
+        # are joined -- but only the parts that actually exist, so a person
+        # with a degree and no RPEQ doesn't get a trailing comma.
+        quals = ", ".join(
+            part for part in (
+                (getattr(assignment, "qualification", "") or "").strip(),
+                (getattr(assignment, "rpeq_status", "") or "").strip(),
+            ) if part
+        )
         personnel.append({
             "name": name,
             "role": role,
-            "quals": quals_by_name.get(name.lower(), ""),
-            "years": "",  # not structured anywhere -- stays placeholder
+            "quals": quals,
+            "years": (getattr(assignment, "years_experience", "") or "").strip(),
         })
     data["personnel"] = personnel
 
