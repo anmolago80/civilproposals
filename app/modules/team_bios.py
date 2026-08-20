@@ -31,7 +31,12 @@ text. If a CV doesn't clearly state something (e.g. no membership found), leave 
 an empty string rather than guessing. If you cannot confidently identify where one person's \
 CV ends and another begins, say so in a warning rather than merging two people into one bio."""
 
-PROMPT_TEMPLATE = """Below is CV / company profile material the user uploaded, which may \
+PROMPT_TEMPLATE = """CURRENT TENDER (context for EMPHASIS ONLY -- decide which of this person's real, stated \
+experience to lead with. NEVER add a fact, project, skill or claim because this tender wants \
+it; if their CV does not say it, it does not go in):
+{tender_context}
+
+Below is CV / company profile material the user uploaded, which may \
 contain one or more people's CVs concatenated together. Identify each distinct person and \
 produce a bio for each in the required format.
 
@@ -59,8 +64,34 @@ class TeamMember(BaseModel):
     relevance_text: str = ""
 
 
+def format_tender_context(analysis) -> str:
+    """The current job, in a few lines, for the CV/profile prompts.
+
+    These prompts contained NO description of the project at all, so the
+    "on this project, X will..." line was written blind -- it could only ever
+    be generic. This is emphasis context: it tells the model which of a
+    person's real experience to lead with, and every prompt using it says in
+    terms that it must not add anything the CV doesn't state."""
+    if analysis is None:
+        return "(no brief analysed yet -- write neutrally from the CV alone)"
+    scope = (getattr(analysis, "project_scope", "") or "").strip()
+    disciplines = ", ".join(getattr(analysis, "disciplines_involved", None) or [])
+    items = [
+        (getattr(item, "title", "") or "").strip()
+        for item in (getattr(analysis, "scope_items", None) or [])
+    ]
+    lines = []
+    if scope:
+        lines.append(f"Scope: {scope[:800]}")
+    if disciplines:
+        lines.append(f"Disciplines required: {disciplines}")
+    if items:
+        lines.append("Work packages: " + "; ".join(i for i in items if i)[:600])
+    return "\n".join(lines) or "(no brief analysed yet -- write neutrally from the CV alone)"
+
+
 def draft_team_bios_from_cv(
-    cv_text: str, config: dict | None = None, max_chars: int = 24000
+    cv_text: str, config: dict | None = None, max_chars: int = 24000, analysis=None,
 ) -> tuple[list[TeamMember], list[str]]:
     """
     Draft candidate bios from uploaded CV/profile text. Returns (members, warnings) --
@@ -74,7 +105,8 @@ def draft_team_bios_from_cv(
     if len(material) > max_chars:
         material = material[:max_chars] + "\n\n[...truncated for length...]"
 
-    prompt = PROMPT_TEMPLATE.format(material=material)
+    prompt = PROMPT_TEMPLATE.format(material=material,
+                                    tender_context=format_tender_context(analysis))
     data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=3000)
 
     raw_members = data.get("team_members", [])
@@ -129,7 +161,12 @@ for a person if you can find text that is clearly THEIR OWN CV (matching their n
 material -- skip anyone you can't confidently match, rather than guessing which section belongs \
 to them."""
 
-PROFILE_FIELDS_PROMPT = """Below is CV / company profile material, which may contain several \
+PROFILE_FIELDS_PROMPT = """CURRENT TENDER (context for EMPHASIS ONLY -- decide which of this person's real, stated \
+experience to lead with. NEVER add a fact, project, skill or claim because this tender wants \
+it; if their CV does not say it, it does not go in):
+{tender_context}
+
+Below is CV / company profile material, which may contain several \
 people's CVs concatenated together. For each of the PEOPLE TO EXTRACT listed below, find their \
 own CV in the material (match by name) and extract five fields, using only facts stated in that \
 person's own CV text:
@@ -203,7 +240,12 @@ states a number of years of experience in words (e.g. "18 years' experience"). E
 return must describe THIS person, {name} -- never attribute another person's background to them, \
 even if other names appear in the material."""
 
-SINGLE_PROFILE_PROMPT = """Below is {name}'s own CV. Extract five fields, using only facts \
+SINGLE_PROFILE_PROMPT = """CURRENT TENDER (context for EMPHASIS ONLY -- decide which of this person's real, stated \
+experience to lead with. NEVER add a fact, project, skill or claim because this tender wants \
+it; if their CV does not say it, it does not go in):
+{tender_context}
+
+Below is {name}'s own CV. Extract five fields, using only facts \
 stated in this text:
 
 - "qualification": their ACADEMIC qualification(s) ONLY -- degrees, e.g. "Bachelor of Engineering \
@@ -343,7 +385,7 @@ def cv_filenames_for_names(names, cv_files: dict) -> set:
 def extract_personnel_profile_fields(
     cv_text: str, names: list[str], config: dict | None = None,
     chunk_chars: int = 12000, max_chunks: int = 24, cv_files: dict | None = None,
-    max_chars_per_file: int = 32000,
+    max_chars_per_file: int = 32000, analysis=None,
 ) -> tuple[dict[str, dict[str, str]], list[str]]:
     """
     For each name in `names`, find (qualification, rpeq_status,
@@ -379,12 +421,14 @@ def extract_personnel_profile_fields(
         return {}, ["No named people were supplied -- nothing to extract."]
 
     if cv_files:
-        return _extract_profile_fields_per_file(clean_names, cv_files, config, max_chars_per_file)
-    return _extract_profile_fields_from_combined_text(clean_names, cv_text, config, chunk_chars, max_chunks)
+        return _extract_profile_fields_per_file(clean_names, cv_files, config, max_chars_per_file,
+                                               analysis=analysis)
+    return _extract_profile_fields_from_combined_text(clean_names, cv_text, config, chunk_chars,
+                                                      max_chunks, analysis=analysis)
 
 
 def _call_single_profile_with_retry(
-    name: str, text: str, config: dict | None, max_attempts: int = 3,
+    name: str, text: str, config: dict | None, max_attempts: int = 3, analysis=None,
 ) -> dict:
     """
     Call the single-person profile-fields prompt with a short retry/backoff
@@ -403,7 +447,8 @@ def _call_single_profile_with_retry(
     for attempt in range(max_attempts):
         try:
             return call_ai_json(
-                SINGLE_PROFILE_PROMPT.format(name=name, material=text),
+                SINGLE_PROFILE_PROMPT.format(name=name, material=text,
+                                             tender_context=format_tender_context(analysis)),
                 system_message=SINGLE_PROFILE_SYSTEM.format(name=name), config=config, max_tokens=900,
             )
         except Exception as exc:
@@ -415,7 +460,7 @@ def _call_single_profile_with_retry(
 
 def _extract_profile_fields_per_file(
     names: list[str], cv_files: dict, config: dict | None, max_chars_per_file: int,
-    delay_between_people: float = 0.4,
+    delay_between_people: float = 0.4, analysis=None,
 ) -> tuple[dict[str, dict[str, str]], list[str]]:
     import time
 
@@ -441,7 +486,7 @@ def _extract_profile_fields_per_file(
         if i > 0 and delay_between_people:
             time.sleep(delay_between_people)
         try:
-            data = _call_single_profile_with_retry(name, text, config)
+            data = _call_single_profile_with_retry(name, text, config, analysis=analysis)
         except Exception as exc:
             failed_people.append(f"{name} ({exc})")
             continue
@@ -476,6 +521,7 @@ def _extract_profile_fields_per_file(
 
 def _extract_profile_fields_from_combined_text(
     names: list[str], cv_text: str, config: dict | None, chunk_chars: int, max_chunks: int,
+    analysis=None,
 ) -> tuple[dict[str, dict[str, str]], list[str]]:
     from modules.document_processor import split_text_into_chunks
 
@@ -495,7 +541,8 @@ def _extract_profile_fields_from_combined_text(
     for chunk in chunks:
         try:
             data = call_ai_json(
-                PROFILE_FIELDS_PROMPT.format(names=names_block, material=chunk),
+                PROFILE_FIELDS_PROMPT.format(names=names_block, material=chunk,
+                                             tender_context=format_tender_context(analysis)),
                 system_message=PROFILE_FIELDS_SYSTEM, config=config, max_tokens=2000,
             )
         except Exception:

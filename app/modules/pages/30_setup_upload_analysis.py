@@ -434,6 +434,12 @@ with tabs[1]:
                     raw_refs_text,
                     project_scope=(analysis_for_context.project_scope if analysis_for_context else ""),
                     disciplines=(analysis_for_context.disciplines_involved if analysis_for_context else []),
+                    # Relevance is what these entries are FOR, and the
+                    # strongest relevance a past project can have -- same
+                    # client, same objective -- couldn't be spotted, because
+                    # neither was ever passed in.
+                    client_name=st.session_state.client_name,
+                    client_objectives=(analysis_for_context.client_objectives if analysis_for_context else []),
                     config=st.session_state.ai_config,
                 )
                 st.session_state.reference_projects = drafted

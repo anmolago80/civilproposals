@@ -236,6 +236,10 @@ with tabs[7]:
                         cv_profiles, warns = team_bios.extract_personnel_profile_fields(
                             cv_text, _assigned_profile_names, st.session_state.ai_config,
                             cv_files=st.session_state.company_material_files.get("cv_library"),
+                            # Emphasis context only -- the "on this project, X
+                            # will..." line was written with no description of
+                            # the project at all, so it could only be generic.
+                            analysis=st.session_state.analysis,
                         )
                         filled = []
                         for entry in _profile_entries:
@@ -399,6 +403,7 @@ with tabs[7]:
                             cv_profiles, warns = team_bios.extract_personnel_profile_fields(
                                 cv_text, [name], st.session_state.ai_config,
                                 cv_files=st.session_state.company_material_files.get("cv_library"),
+                                analysis=st.session_state.analysis,
                             )
                             found = cv_profiles.get(name.lower())
                             changed = False

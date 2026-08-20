@@ -84,6 +84,11 @@ PROJECT SCOPE (from the brief, if extracted yet):
 CLIENT OBJECTIVES (from the brief, if extracted yet):
 {client_objectives}
 
+EVALUATION CRITERIA AND THEIR WEIGHTINGS (what this bid is actually scored on -- the whole \
+point of re-angling a pitch is to aim it at the heaviest-weighted criteria, so use these; \
+they do NOT license any new claim about the firm):
+{evaluation_criteria}
+
 DIFFERENTIATOR (the user's own draft -- what sets this firm apart for this bid):
 {differentiator}
 {differentiator_followup}
@@ -125,6 +130,11 @@ PROJECT SCOPE (from the brief, if extracted yet):
 
 CLIENT OBJECTIVES (from the brief, if extracted yet):
 {client_objectives}
+
+EVALUATION CRITERIA AND THEIR WEIGHTINGS (what this bid is actually scored on -- the whole \
+point of re-angling a pitch is to aim it at the heaviest-weighted criteria, so use these; \
+they do NOT license any new claim about the firm):
+{evaluation_criteria}
 
 DIFFERENTIATOR (the user's own draft -- what sets this firm apart for this bid):
 {differentiator}
@@ -200,8 +210,18 @@ def review_pitch(
     project_info = project_info or {}
     project_scope = (getattr(analysis, "project_scope", "") or "").strip() if analysis else ""
     client_objectives = (getattr(analysis, "client_objectives", None) or []) if analysis else []
+    criteria_lines = []
+    for criterion in (getattr(analysis, "evaluation_criteria", None) or []) if analysis else []:
+        name = (getattr(criterion, "name", "") or "").strip()
+        if not name:
+            continue
+        code = (getattr(criterion, "criterion_code", "") or "").strip()
+        weight = getattr(criterion, "detected_weighting", None)
+        label = f"{code}: {name}" if code else name
+        criteria_lines.append(f"- {label}" + (f" -- {weight:.0f}% of the score" if weight else ""))
 
     prompt = PROMPT_TEMPLATE.format(
+        evaluation_criteria="\n".join(criteria_lines) or "- (none extracted yet)",
         project_name=project_info.get("project_name") or "(not supplied)",
         client_name=project_info.get("client_name") or "(not supplied)",
         project_scope=project_scope or "(not extracted yet)",

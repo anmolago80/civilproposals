@@ -64,8 +64,15 @@ say so in a warning rather than inventing content to fill the gap."""
 PROMPT_TEMPLATE = """CURRENT TENDER CONTEXT (use this only to decide what to emphasise from \
 each project's real material -- never to add facts to a project that aren't already stated \
 for it):
+Client for this tender: {client_name}
 Project scope: {project_scope}
 Disciplines involved: {disciplines}
+What the client says it wants to achieve:
+{client_objectives}
+
+Relevance to THIS tender is what the "relevance_text" field is for. A past project for the \
+SAME client, or with the same objectives, is the strongest possible relevance -- say so when \
+the material shows it. Never claim a shared client or objective the material does not state.
 
 Below is the firm's project-reference material, which may contain several distinct past \
 projects concatenated together. Identify each distinct project and produce the required fields \
@@ -104,6 +111,8 @@ def draft_reference_projects(
     disciplines: list[str] | None = None,
     config: dict | None = None,
     max_chars: int = 60000,
+    client_name: str = "",
+    client_objectives: list[str] | None = None,
 ) -> tuple[list[ReferenceProject], list[str]]:
     """
     Draft candidate ReferenceProject entries from the raw uploaded material.
@@ -118,8 +127,10 @@ def draft_reference_projects(
         material = material[:max_chars] + "\n\n[...truncated for length...]"
 
     prompt = PROMPT_TEMPLATE.format(
+        client_name=(client_name or "").strip() or "(not supplied)",
         project_scope=project_scope or "(not extracted)",
         disciplines=", ".join(disciplines or []) or "(none extracted)",
+        client_objectives="\n".join(f"- {o}" for o in (client_objectives or [])) or "- (none extracted)",
         material=material,
     )
     data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=4000)

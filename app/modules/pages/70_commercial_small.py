@@ -490,9 +490,15 @@ with tabs[8]:
                                  ), key="letter_refresh_btn", type="primary"):
                         fee_cap = st.session_state.analysis.fee_cap if st.session_state.analysis else None
                         with st.spinner("Asking the AI provider for its knowledge of published benchmarks..."):
-                            estimates = fee_estimation_engine.refresh_estimate_from_web(
+                            estimates, _refresh_warning = fee_estimation_engine.refresh_estimate_from_web(
                                 st.session_state.project_type, letter_buildup_discs, fee_cap, st.session_state.ai_config,
+                                scope_summary=(st.session_state.analysis.project_scope
+                                               if st.session_state.analysis else ""),
                             )
+                        # A silent fallback returned the bundled table looking
+                        # exactly like a successful refresh.
+                        if _refresh_warning:
+                            st.warning(_refresh_warning)
                         st.session_state.fee_estimates = _letter_reconcile_estimates(estimates)
 
                 st.session_state.fee_estimates = _letter_reconcile_estimates(st.session_state.fee_estimates)

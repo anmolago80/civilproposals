@@ -73,15 +73,31 @@ def refresh_estimate_from_web(
     disciplines_involved: list[str] | None = None,
     fee_cap_text: str | None = None,
     config: dict | None = None,
-) -> list[DisciplineFeeEstimate]:
+    scope_summary: str = "",
+) -> tuple[list[DisciplineFeeEstimate], str]:
     """
     Ask the configured AI provider for a fee-split estimate drawing on its general
     knowledge of published industry fee benchmarks. Explicitly NOT a live web fetch --
-    see module docstring. Falls back to the bundled table on any failure.
+    see module docstring.
+
+    Returns (estimates, warning). A failure falls back to the bundled table
+    AND says so in the warning: this used to fall back silently, so a user
+    who pressed "refresh from web" got the same bundled numbers back with no
+    indication that the refresh hadn't happened, and would reasonably read
+    the unchanged figures as confirmation rather than as a failure.
     """
     disciplines_hint = ", ".join(disciplines_involved) if disciplines_involved else "(not specified -- infer typical disciplines for this project type)"
+    scope_block = (
+        f"\n\nTHIS PROJECT'S ACTUAL SCOPE (weight the split towards what this job really "
+        f"involves, not the average job of this type):\n{scope_summary.strip()[:1500]}"
+        if (scope_summary or "").strip() else ""
+    )
+    cap_block = (
+        f"\n\nSTATED FEE CAP / BUDGET CEILING FOR THIS JOB: {fee_cap_text}"
+        if (fee_cap_text or "").strip() else ""
+    )
     prompt = f"""You are asked for an INDICATIVE fee split by engineering discipline for a \
-"{project_type}" project, covering disciplines: {disciplines_hint}.
+"{project_type}" project, covering disciplines: {disciplines_hint}.{scope_block}{cap_block}
 
 Draw on your knowledge of published fee-scale guidance, industry association fee guides, \
 and typical market practice for this project type. Be honest that this is general knowledge, \
@@ -113,11 +129,14 @@ Percentages across all disciplines should sum to approximately 100."""
                 confidence=item.get("confidence", "Low"),
             ))
         estimates.sort(key=lambda e: -e.fee_percentage)
-        return estimates
-    except Exception:
-        # If the AI call fails for any reason, fall back to the reliable bundled table
-        # rather than surface an error for what is explicitly a "nice to have" refresh.
-        return estimate_fee_split(project_type, fee_cap_text)
+        return estimates, ""
+    except Exception as exc:
+        # Still falls back to the reliable bundled table -- but says so. A
+        # silent fallback returns numbers that look like a successful refresh.
+        return estimate_fee_split(project_type, fee_cap_text), (
+            f"Couldn't refresh the benchmark split ({str(exc)[:120]}). The figures below are "
+            f"the bundled reference table, unchanged -- not a fresh estimate."
+        )
 
 
 def fee_estimates_to_excel(

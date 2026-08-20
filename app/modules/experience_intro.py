@@ -45,6 +45,12 @@ CLIENT: {client_name}
 PROJECT SCOPE (from the brief):
 {project_scope}
 
+DISCIPLINES THIS BRIEF REQUIRES: {disciplines}
+
+WHAT THE CLIENT SAYS IT WANTS TO ACHIEVE (lead with the reference projects that speak to \
+these, where the projects' own text supports it):
+{client_objectives}
+
 REFERENCE PROJECTS (the firm's real project reference library for this bid -- only reference \
 projects listed here, only claim what's stated in their own description/relevance text):
 {projects_context}
@@ -98,6 +104,9 @@ def draft_experience_intro(
         project_name=project_info.get("project_name") or "(not supplied)",
         client_name=project_info.get("client_name") or "(not supplied)",
         project_scope=(getattr(analysis, "project_scope", "") or "").strip() or "(not extracted)",
+        disciplines=", ".join(getattr(analysis, "disciplines_involved", None) or []) or "(none extracted)",
+        client_objectives="\n".join(f"- {o}" for o in (getattr(analysis, "client_objectives", None) or []))
+                           or "- (none extracted)",
         projects_context=projects_context or "(no reference projects entered yet)",
     )
 
