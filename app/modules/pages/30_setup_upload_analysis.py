@@ -42,20 +42,38 @@ with tabs[0]:
     if st.session_state.get("project_type") not in PROJECT_TYPES:
         st.session_state.project_type = PROJECT_TYPES[0]
 
-    with st.form("project_setup_form"):
-        col1, col2 = st.columns(2)
-        with col1:
-            st.text_input("Project name", key="project_name")
-            st.text_input("Client name", key="client_name")
-            st.text_input("Tender / EOI name", key="tender_name")
-            st.text_input("Submission date", key="submission_date_input", placeholder="e.g. 14 July 2026")
-        with col2:
-            st.text_input("Bidder / company name", key="bidder_name")
-            st.selectbox("Project type", PROJECT_TYPES, key="project_type")
-            st.selectbox("Proposal theme", PROPOSAL_THEMES, key="proposal_theme")
-        submitted = st.form_submit_button("Save project details", type="primary")
-        if submitted:
-            st.success("Project details saved.")
+    # Deliberately NOT wrapped in st.form any more. A form doesn't write to
+    # session_state until its submit button is pressed, so someone who typed
+    # a project name and went straight to Tender Analysis was told "Enter a
+    # project name" -- with the name visibly still in the box behind them.
+    # That was the single most common first-run trap in the app, and it cost
+    # a bid on every occurrence, because nothing about the screen suggested
+    # the value hadn't been kept. Field keys are unchanged, so everything
+    # reading these keys is unaffected; they now commit as typed.
+    col1, col2 = st.columns(2)
+    with col1:
+        st.text_input("Project name", key="project_name")
+        st.text_input("Client name", key="client_name")
+        st.text_input("Tender / EOI name", key="tender_name")
+        st.text_input("Submission date", key="submission_date_input", placeholder="e.g. 14 July 2026")
+    with col2:
+        st.text_input("Bidder / company name", key="bidder_name")
+        st.selectbox("Project type", PROJECT_TYPES, key="project_type")
+        st.selectbox("Proposal theme", PROPOSAL_THEMES, key="proposal_theme")
+    st.caption("Saved as you type -- there's no separate save step.")
+
+    # The cover page and the brief can disagree about when this is due, and
+    # nothing used to say so. The typed date is what gets printed; the
+    # extracted one is what the client actually wrote.
+    _typed_date = (st.session_state.submission_date_input or "").strip()
+    _brief_date = ((getattr(st.session_state.analysis, "submission_date", "") or "").strip()
+                   if st.session_state.analysis else "")
+    if _typed_date and _brief_date and not _dates_look_equivalent(_typed_date, _brief_date):
+        st.warning(
+            f"**Submission date mismatch.** You've entered **{_typed_date}**, but the brief's "
+            f"own stated date reads **{_brief_date}**. The date you type here is the one "
+            f"printed on the cover -- check which is right before exporting."
+        )
 
     def _render_signatory_fields() -> None:
         """The contact/signatory block. Shared by both proposal formats --

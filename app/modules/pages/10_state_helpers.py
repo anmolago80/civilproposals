@@ -147,31 +147,20 @@ def _init_state():
         "_letter_disc_fee_cache_sig": None,
         "_letter_disc_fee_cache_xlsx": None,
         "_letter_disc_fee_cache_pie": None,
-        # Deferred-apply state for the discipline fee tables -- the rebuild
-        # (dedup/dismiss logic) and the cache above only run when the user
-        # explicitly ticks a "done entering data" box, rather than on every
-        # keystroke-commit. See the checkbox handling in the discipline fee
-        # table fragments below for why.
-        "_disc_fee_apply_tick": False,
-        "_disc_fee_apply_tick_seen": False,
+        # Deferred-apply state for the fee tables -- the rebuild (dedup/dismiss
+        # logic) and the cache above only run when the user presses this
+        # table's "Apply changes" button (see _fee_apply_control), rather than
+        # on every keystroke-commit. Only the last-applied signature is kept
+        # now: the tick/tick_seen pair existed solely to make a checkbox
+        # behave like a button, which a button does on its own.
         "_disc_fee_last_applied_editor_sig": None,
-        "_letter_disc_fee_apply_tick": False,
-        "_letter_disc_fee_apply_tick_seen": False,
         "_letter_disc_fee_last_applied_editor_sig": None,
         # Same deferred-apply pattern, extended to the other three fee-editing
         # tables (scope item / deliverable fee build-up, both pack sizes, and
         # the discipline fee % split, both pack sizes).
-        "_scope_fee_apply_tick": False,
-        "_scope_fee_apply_tick_seen": False,
         "_scope_fee_last_applied_editor_sig": None,
-        "_large_scope_fee_apply_tick": False,
-        "_large_scope_fee_apply_tick_seen": False,
         "_large_scope_fee_last_applied_editor_sig": None,
-        "_pct_fee_apply_tick": False,
-        "_pct_fee_apply_tick_seen": False,
         "_pct_fee_last_applied_editor_sig": None,
-        "_letter_pct_fee_apply_tick": False,
-        "_letter_pct_fee_apply_tick_seen": False,
         "_letter_pct_fee_last_applied_editor_sig": None,
         "scope_item_fees": [],
         "fee_seed_total": 0.0,
@@ -637,6 +626,81 @@ def _seed_project_from_firm_profile() -> None:
         st.session_state.methodology_wvr_confirmed = True
 
 
+def _fee_apply_control(state_prefix: str, pending: bool, indent_note: str = "totals") -> bool:
+    """The explicit "Apply changes" control under a deferred-apply fee table.
+
+    Replaces a checkbox labelled "Done entering data -- refresh totals". A
+    checkbox that acts as a button reads, to anyone who hasn't been told
+    otherwise, as a statement about the data -- so an unticked box next to a
+    total looked like the app saying the total was wrong, and users ticked
+    and unticked it trying to work out what it meant. A primary button says
+    what it does.
+
+    The deferred-apply behaviour itself is unchanged and deliberate: these
+    tables live in fragments so that typing in them doesn't rerun the whole
+    script, and applying on every keystroke would fight the editor's own
+    commit timing (see the race-protection notes at each call site). What
+    changes is only how the user is asked to apply, plus an explicit warning
+    while an edit is outstanding -- previously the only signal was a total
+    that quietly disagreed with the table above it.
+    """
+    if pending:
+        st.warning(
+            f"**Table edited -- {indent_note} not yet updated.** Click **Apply changes** to "
+            f"recalculate from what's in the table now."
+        )
+    return st.button(
+        "Apply changes", type="primary", key=f"{state_prefix}apply_btn",
+        disabled=not pending,
+        help=None if pending else "Nothing to apply -- the table matches the figures below.",
+    )
+
+
+def _dates_look_equivalent(a: str, b: str) -> bool:
+    """Loose comparison of two human-written dates.
+
+    Deliberately forgiving: "14 July 2026", "14/07/2026" and "14 Jul 2026"
+    are the same date written three ways, and warning about those would
+    train the user to ignore the warning. Only a genuine difference in the
+    day, month or year should fire it."""
+    import re as _re
+
+    _MONTHS = {
+        "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+        "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    }
+
+    def _parts(text: str):
+        text = (text or "").lower()
+        year = None
+        year_match = _re.search(r"\b(20\d{2})\b", text)
+        if year_match:
+            year = int(year_match.group(1))
+        month = None
+        for name, number in _MONTHS.items():
+            if name in text:
+                month = number
+                break
+        numbers = [int(n) for n in _re.findall(r"\b(\d{1,2})\b", text)]
+        day = numbers[0] if numbers else None
+        if month is None and len(numbers) >= 2:
+            # A numeric date: assume day/month, the Australian convention
+            # this app is written for.
+            day, month = numbers[0], numbers[1]
+        return day, month, year
+
+    da, ma, ya = _parts(a)
+    db, mb, yb = _parts(b)
+    if not any((da, ma, ya)) or not any((db, mb, yb)):
+        # One of them isn't recognisably a date at all -- say nothing rather
+        # than warn about free text.
+        return True
+    for left, right in ((da, db), (ma, mb), (ya, yb)):
+        if left is not None and right is not None and left != right:
+            return False
+    return True
+
+
 def _program_week_count() -> int:
     """How many week columns the delivery program actually has.
 
@@ -809,8 +873,6 @@ def _apply_loaded_project(loaded_state: dict, source_label: str) -> None:
     st.session_state.docx_buffer = None
     for prefix in _FEE_TABLE_APPLY_STATE_PREFIXES:
         st.session_state[f"{prefix}last_applied_editor_sig"] = None
-        st.session_state[f"{prefix}apply_tick"] = False
-        st.session_state[f"{prefix}apply_tick_seen"] = False
     # The "re-enter your AI provider settings" follow-up only applies in the
     # desktop/BYOK build, where ai_config lives purely in session_state and
     # loading a project doesn't touch it, but a fresh session might not have

@@ -114,23 +114,11 @@ with tabs[8]:
             )
             _disc_first_load = st.session_state.get("_disc_fee_last_applied_editor_sig") is None
             _disc_pending = _disc_raw_sig != st.session_state.get("_disc_fee_last_applied_editor_sig")
-            # Distinguish "the user just ticked the box this rerun" (must NOT
-            # be reset -- that's the click we want to act on) from "the box
-            # was already ticked from a previous apply, and a fresh edit
-            # since then has made it stale" (SHOULD be reset). Both look
-            # identical as (pending=True, tick=True) at the top of a rerun,
-            # so _disc_fee_apply_tick_seen tracks whether the tick was
-            # already True as of the end of the *previous* rerun -- only
-            # then is it safe to call it stale.
-            _disc_tick_val = st.session_state.get("_disc_fee_apply_tick", False)
-            _disc_tick_seen = st.session_state.get("_disc_fee_apply_tick_seen", False)
-            if _disc_pending and _disc_tick_val and _disc_tick_seen:
-                st.session_state["_disc_fee_apply_tick"] = False
-            disc_apply_now = st.checkbox(
-                "Done entering data -- refresh totals & chart",
-                key="_disc_fee_apply_tick",
-            )
-            st.session_state["_disc_fee_apply_tick_seen"] = disc_apply_now
+            # A button, not a checkbox-as-button -- see _fee_apply_control.
+            # The two tick_seen bookkeeping keys this used to need are gone
+            # with it: a button is only True on the run it is clicked, which
+            # is the semantic the checkbox was being made to fake.
+            disc_apply_now = _fee_apply_control("_disc_fee_", _disc_pending, "totals & chart")
 
             if _disc_first_load or (disc_apply_now and _disc_pending):
                 # Rebuild from the editor, dropping blank-discipline rows, then guarantee
@@ -314,15 +302,11 @@ with tabs[8]:
                 )
                 _large_scope_first_load = st.session_state.get("_large_scope_fee_last_applied_editor_sig") is None
                 _large_scope_pending = _large_scope_raw_sig != st.session_state.get("_large_scope_fee_last_applied_editor_sig")
-                _large_scope_tick_val = st.session_state.get("_large_scope_fee_apply_tick", False)
-                _large_scope_tick_seen = st.session_state.get("_large_scope_fee_apply_tick_seen", False)
-                if _large_scope_pending and _large_scope_tick_val and _large_scope_tick_seen:
-                    st.session_state["_large_scope_fee_apply_tick"] = False
-                large_scope_apply_now = st.checkbox(
-                    "Done entering data -- refresh total",
-                    key="_large_scope_fee_apply_tick",
-                )
-                st.session_state["_large_scope_fee_apply_tick_seen"] = large_scope_apply_now
+                # A button, not a checkbox-as-button -- see _fee_apply_control.
+                # The two tick_seen bookkeeping keys this used to need are gone
+                # with it: a button is only True on the run it is clicked, which
+                # is the semantic the checkbox was being made to fake.
+                large_scope_apply_now = _fee_apply_control("_large_scope_fee_", _large_scope_pending, "total")
 
                 if _large_scope_first_load or (large_scope_apply_now and _large_scope_pending):
                     _large_rebuilt_scope_fees = [
@@ -556,15 +540,11 @@ with tabs[8]:
             )
             pct_first_load = st.session_state.get("_pct_fee_last_applied_editor_sig") is None
             pct_pending = pct_raw_sig != st.session_state.get("_pct_fee_last_applied_editor_sig")
-            pct_tick_val = st.session_state.get("_pct_fee_apply_tick", False)
-            pct_tick_seen = st.session_state.get("_pct_fee_apply_tick_seen", False)
-            if pct_pending and pct_tick_val and pct_tick_seen:
-                st.session_state["_pct_fee_apply_tick"] = False
-            pct_apply_now = st.checkbox(
-                "Done entering data -- refresh totals & chart",
-                key="_pct_fee_apply_tick",
-            )
-            st.session_state["_pct_fee_apply_tick_seen"] = pct_apply_now
+            # A button, not a checkbox-as-button -- see _fee_apply_control.
+            # The two tick_seen bookkeeping keys this used to need are gone
+            # with it: a button is only True on the run it is clicked, which
+            # is the semantic the checkbox was being made to fake.
+            pct_apply_now = _fee_apply_control("_pct_fee_", pct_pending, "totals & chart")
 
             if pct_first_load or (pct_apply_now and pct_pending):
                 st.session_state.fee_estimates = [
