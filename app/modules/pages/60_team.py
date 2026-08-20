@@ -514,8 +514,12 @@ with tabs[7]:
                     disabled=not (entry.get("name") or "").strip(),
                 )
                 if photo is not None and (entry.get("name") or "").strip():
-                    st.session_state.personnel_photos[entry["name"]] = photo.getvalue()
-                existing_profile_photo = st.session_state.personnel_photos.get((entry.get("name") or "").strip())
+                    st.session_state.personnel_photos[
+                        photo_key_for(entry.get("assignment"), entry["name"])
+                    ] = photo.getvalue()
+                existing_profile_photo = st.session_state.personnel_photos.get(
+                    photo_key_for(entry.get("assignment"), entry.get("name") or "")
+                )
                 if existing_profile_photo:
                     st.image(existing_profile_photo, width=120)
 

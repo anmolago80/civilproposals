@@ -103,6 +103,9 @@ class ReferenceProject(BaseModel):
     description: str = ""
     relevance_text: str = ""
     personnel_involved: list[str] = Field(default_factory=list)
+    # Stable identity for this project's photo, independent of its title --
+    # see ResourceAssignment.photo_id for the same problem and reasoning.
+    photo_id: str = ""
 
 
 def draft_reference_projects(

@@ -23,7 +23,14 @@ from __future__ import annotations
 # re-entering `with tabs[8]:` (Streamlit appends to the same tab, and only
 # one branch ever renders anything, so the result is identical).
 with tabs[8]:
-    if not _is_letter():
+    if not _is_letter() and st.session_state.analysis is None:
+        # An editable fee table rendered before any project exists is a
+        # confusing first impression: it invites someone to price a job the
+        # app knows nothing about, and the disciplines it lists are the
+        # fallback defaults rather than this brief's. Same empty-state gate
+        # Team & Resourcing already uses.
+        st.info("Run the Tender Analysis first -- the fee tables are built from the brief's own disciplines and scope items.")
+    elif not _is_letter():
         @st.fragment
         def _render_large_discipline_fee_table():
             # Wrapped in a fragment so editing a cell only reruns this table

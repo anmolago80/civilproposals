@@ -27,13 +27,15 @@ with tabs[8]:
 
     if _is_letter():
         st.caption(
-            "The discipline fee build-up ($ total) and discipline fee split (%) below, plus "
-            "the delivery program, go straight into the pack (Export Pack). The scope-item fee "
-            "table just below is for your own internal tracking only -- it is not exported."
+            "The **discipline fee build-up ($)** and **discipline fee split (%)** below are the "
+            "two tables that actually go into the pack, along with the delivery program. The "
+            "scope-item table is internal tracking only and is never exported."
         )
         analysis = st.session_state.analysis
         scope_items = analysis.scope_items if analysis else []
-        if not scope_items:
+        if analysis is None:
+            st.info("Run the Tender Analysis first -- the fee tables are built from the brief's own disciplines and scope items.")
+        elif not scope_items:
             st.info("Run Tender Analysis to extract scope items first.")
         else:
             @st.fragment
@@ -172,7 +174,12 @@ with tabs[8]:
                 if any(f.fee_amount <= 0 for f in st.session_state.scope_item_fees):
                     st.warning("At least one scope item still has no fee entered -- the exported pack flags this in red until every row is priced.")
 
-            _render_letter_scope_fee_table()
+            # Deliberately rendered LAST and collapsed. This table is not
+            # exported; the two below it are. It used to sit first and open,
+            # so the biggest, most prominent fee table on the tab was the one
+            # that never reaches the client -- inverted emphasis, and a real
+            # source of "I priced it and it didn't come out" confusion.
+            _render_deferred_scope_table = True
 
             st.divider()
             @st.fragment
@@ -347,6 +354,11 @@ with tabs[8]:
                     st.image(letter_hours_pie_png, use_container_width=True)
 
             _render_letter_discipline_fee_table()
+
+            if _render_deferred_scope_table:
+                st.divider()
+                with st.expander("Scope item fees (internal tracking only -- not exported)"):
+                    _render_letter_scope_fee_table()
 
             st.divider()
             st.markdown("#### Delivery program")

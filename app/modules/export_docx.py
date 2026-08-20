@@ -148,6 +148,7 @@ def build_tender_summary_docx(
     drafts: dict,
     body_font: str | None = None,
     ocr_note: str | None = None,
+    document_placeholders: list | None = None,
 ) -> io.BytesIO:
     """Builds the companion Tender Summary document -- everything about how the
     brief was read and how this response pack was put together, kept OUT of the
@@ -183,7 +184,7 @@ def build_tender_summary_docx(
     _build_review_checklist(doc, sections)
     doc.add_page_break()
 
-    _build_user_input_list(doc, compliance_items, gap_items, drafts)
+    _build_user_input_list(doc, compliance_items, gap_items, drafts, document_placeholders)
 
     buffer = io.BytesIO()
     doc.save(buffer)
@@ -472,7 +473,7 @@ def _build_letter_team(doc: Document, resource_plan: list, personnel_photos: dic
         photo_cell.width = Cm(2.2) if indent else Cm(2.6)
         text_cell.width = Cm(12.6) if indent else Cm(13.4)
 
-        photo_bytes = personnel_photos.get(name) if name else None
+        photo_bytes = _photo_for(personnel_photos, entry.get("assignment"), name) if name else None
         if photo_bytes:
             try:
                 photo_cell.paragraphs[0].add_run().add_picture(io.BytesIO(photo_bytes), width=Cm(2.0 if indent else 2.4))
@@ -1514,7 +1515,7 @@ def _build_personnel_profiles(
         photo_cell.width = Cm(3.0)
         text_cell.width = Cm(13.0)
 
-        photo_bytes = personnel_photos.get(name) if name else None
+        photo_bytes = _photo_for(personnel_photos, entry.get("assignment"), name) if name else None
         if photo_bytes:
             try:
                 photo_cell.paragraphs[0].add_run().add_picture(io.BytesIO(photo_bytes), width=Cm(2.8))
@@ -1705,7 +1706,7 @@ def _build_sc1_project_experience_compact(
         photo_cell.width = Cm(5.2)
         text_cell.width = Cm(11.3)
 
-        photo_bytes = reference_project_photos.get(project.title)
+        photo_bytes = _photo_for(reference_project_photos, project, project.title)
         if photo_bytes:
             try:
                 photo_cell.paragraphs[0].add_run().add_picture(io.BytesIO(photo_bytes), width=Cm(5.0))
@@ -1793,6 +1794,16 @@ def _build_reference_experience(
         doc.add_paragraph()
 
 
+def _photo_for(photos: dict, obj, fallback_name: str):
+    """Look a photo up by the object's stable id, falling back to its
+    name/title for anything saved before ids existed."""
+    photos = photos or {}
+    key = (getattr(obj, "photo_id", "") or "").strip()
+    if key and key in photos:
+        return photos[key]
+    return photos.get((fallback_name or "").strip())
+
+
 def _reference_photo_width(doc: Document):
     """Half the usable text width, less the gap between the two cards."""
     sec = doc.sections[-1]
@@ -1803,7 +1814,7 @@ def _reference_photo_width(doc: Document):
 def _fill_reference_project_cell(cell, project, photos: dict[str, bytes], theme: dict,
                                  photo_width=None):
     photo_width = photo_width or Cm(7.8)
-    photo_bytes = photos.get(project.title)
+    photo_bytes = _photo_for(photos, project, project.title)
     p0 = cell.paragraphs[0]
     if photo_bytes:
         try:
@@ -2236,7 +2247,53 @@ def _build_review_checklist(doc: Document, sections: list):
     _add_bullets(doc, items)
 
 
-def _build_user_input_list(doc: Document, compliance_items: list, gap_items: list, drafts: dict):
+# Every placeholder marker the exporters actually write. Used to sweep the
+# generated document itself for anything the compliance/draft lists don't
+# already know about (see _build_user_input_list).
+PLACEHOLDER_MARKERS = ("[INSERT ", "[CONFIRM ", "[TO BE COMPLETED", "[NO ", "[DESCRIBE ",
+                       "[ENTER ", "[REFERENCE ", "[FIRST-PASS", "[STANDARD TEXT",
+                       "[LENGTH:")
+# Matched separately, on a word boundary: a bare substring test would catch
+# "TBC" inside an ordinary word.
+_TBC_RE = re.compile(r"\bTBC\b")
+
+
+def collect_placeholders(doc: Document, limit: int = 60) -> list[str]:
+    """Every red placeholder actually present in a built document.
+
+    The User Input Required list was assembled only from the compliance
+    matrix and each draft's own self-reported required_user_inputs -- which
+    between them miss most of what really ends up red on the page, because
+    the exporters write their own placeholders (org chart, cash flow, fee
+    rows, methodology, local content, footer, ...) and nothing was reading
+    them back. Sweeping the finished document is the only way to list what
+    is genuinely there."""
+    found: list[str] = []
+    seen: set[str] = set()
+
+    def consider(text: str) -> None:
+        text = " ".join((text or "").split())
+        if not text or len(text) > 300:
+            return
+        upper = text.upper()
+        if not any(marker in upper for marker in PLACEHOLDER_MARKERS) and not _TBC_RE.search(upper):
+            return
+        if text in seen:
+            return
+        seen.add(text)
+        found.append(text)
+
+    for paragraph in doc.paragraphs:
+        consider(paragraph.text)
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                consider(cell.text)
+    return found[:limit]
+
+
+def _build_user_input_list(doc: Document, compliance_items: list, gap_items: list, drafts: dict,
+                           document_placeholders: list | None = None):
     doc.add_heading("User Input Required List", level=1)
     doc.add_paragraph("Everything below still needs a human to supply real information.")
 
@@ -2254,6 +2311,10 @@ def _build_user_input_list(doc: Document, compliance_items: list, gap_items: lis
             if key not in seen:
                 seen.add(key)
                 entries.append(f"[{draft.section_title}] {req}")
+
+    if document_placeholders:
+        doc.add_heading("Placeholders found in the proposal document itself", level=2)
+        _add_bullets(doc, document_placeholders, color=RED)
 
     _add_bullets(doc, entries or ["(none identified -- verify manually)"])
 

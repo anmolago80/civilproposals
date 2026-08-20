@@ -124,6 +124,12 @@ class ResourceAssignment(BaseModel):
     # still shows in the fee build-up/org chart, they just don't get a full pen-pic
     # profile in a page-limited section.
     include_in_proposal: bool = True
+    # Stable identity for this person's headshot, independent of their name.
+    # personnel_photos used to be keyed by person_name, so correcting a
+    # spelling orphaned the photo silently -- it stayed in the dict under the
+    # old name and simply stopped appearing in the export. Minted on first
+    # sight (see _ensure_photo_ids) and never changed afterwards.
+    photo_id: str = ""
 
 
 # Keyword rules for canonicalisation, checked in order (first match wins). Each

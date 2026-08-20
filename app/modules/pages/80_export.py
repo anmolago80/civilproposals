@@ -98,6 +98,10 @@ with tabs[9]:
                 # gap analysis the user chose to run in Proposal Structure (tab 4), kept
                 # OUT of the proposal itself. Small Scope packs don't generate an
                 # evaluation weighting chart, so that section is simply omitted.
+                # Read the just-built proposal back and list every placeholder
+                # actually in it -- the compliance/draft lists between them
+                # miss most of what really ends up red on the page.
+                _doc_placeholders = _placeholders_in_generated_pack(buffer)
                 st.session_state.tender_summary_buffer = export_docx.build_tender_summary_docx(
                     project_info=_project_info(),
                     analysis=st.session_state.analysis,
@@ -108,6 +112,7 @@ with tabs[9]:
                     drafts=st.session_state.drafts or {},
                     body_font=st.session_state.body_font,
                     ocr_note=_ocr_export_note(),
+                    document_placeholders=_doc_placeholders,
                 )
             st.success("Document generated.")
     else:
@@ -199,6 +204,10 @@ with tabs[9]:
                 # compliance matrix, gap analysis, review checklist, user-input
                 # list), kept OUT of the proposal itself so that document is only
                 # the proposal. Generated alongside it, same click.
+                # Read the just-built proposal back and list every placeholder
+                # actually in it -- the compliance/draft lists between them
+                # miss most of what really ends up red on the page.
+                _doc_placeholders = _placeholders_in_generated_pack(buffer)
                 st.session_state.tender_summary_buffer = export_docx.build_tender_summary_docx(
                     project_info=_project_info(),
                     analysis=st.session_state.analysis,
@@ -209,6 +218,7 @@ with tabs[9]:
                     drafts=st.session_state.drafts or {},
                     body_font=st.session_state.body_font,
                     ocr_note=_ocr_export_note(),
+                    document_placeholders=_doc_placeholders,
                 )
             st.success("Document generated.")
 

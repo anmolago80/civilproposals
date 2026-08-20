@@ -660,6 +660,21 @@ def _fee_apply_control(state_prefix: str, pending: bool, indent_note: str = "tot
     )
 
 
+def _placeholders_in_generated_pack(buffer) -> list:
+    """Reads a just-generated proposal DOCX back and lists the placeholders
+    really in it, for the Tender Summary's User Input Required list. Never
+    raises -- a failed sweep must not block the export it is describing."""
+    try:
+        import io as _io
+
+        from docx import Document as _Document
+
+        from modules.export_docx import collect_placeholders
+        return collect_placeholders(_Document(_io.BytesIO(buffer.getvalue())))
+    except Exception:
+        return []
+
+
 def _export_input_signature() -> str:
     """A hash of everything that ends up in the exported pack.
 
@@ -807,6 +822,44 @@ def _export_readiness() -> list[dict]:
         add("No executive summary", "Draft Responses", "The pack's first page exports empty.")
 
     return items
+
+
+def photo_key_for(obj, fallback: str) -> str:
+    """The key an object's photo is stored under: its stable id, or its
+    name/title for anything minted before ids existed."""
+    return (getattr(obj, "photo_id", "") or "").strip() or (fallback or "").strip()
+
+
+def _ensure_photo_ids() -> None:
+    """Give every person and reference project a stable photo id, migrating
+    any photo currently filed under their name.
+
+    Both photo dicts were keyed by a name the user can edit, so fixing a
+    typo in "Mat Willliams" orphaned his headshot: it stayed in the dict
+    under the old spelling and just stopped appearing, with nothing to
+    explain why. Ids are minted here on first sight -- including for
+    projects loaded from a file saved before this existed -- and the photo
+    moves across at the same moment, so the migration happens once and
+    invisibly."""
+    import uuid
+
+    for assignment in (st.session_state.get("resource_plan") or []):
+        if getattr(assignment, "photo_id", ""):
+            continue
+        assignment.photo_id = uuid.uuid4().hex[:12]
+        name = (getattr(assignment, "person_name", "") or "").strip()
+        photos = st.session_state.get("personnel_photos") or {}
+        if name and name in photos:
+            photos[assignment.photo_id] = photos[name]
+
+    for project in (st.session_state.get("reference_projects") or []):
+        if getattr(project, "photo_id", ""):
+            continue
+        project.photo_id = uuid.uuid4().hex[:12]
+        title = (getattr(project, "title", "") or "").strip()
+        photos = st.session_state.get("reference_project_photos") or {}
+        if title and title in photos:
+            photos[project.photo_id] = photos[title]
 
 
 def _cover_photo_bytes():
@@ -1169,6 +1222,8 @@ _init_state()
 # cleared for this bid, which is exactly the kind of quiet wrongness a
 # proposal tool must not have. Loading a saved project overwrites these
 # fields from the file anyway, so the two paths don't fight.
+_ensure_photo_ids()
+
 if not st.session_state.get("_firm_profile_seeded"):
     try:
         _seed_project_from_firm_profile()

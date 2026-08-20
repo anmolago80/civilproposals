@@ -496,8 +496,8 @@ with tabs[1]:
             )
             photo = st.file_uploader("Project photo (optional)", type=["png", "jpg", "jpeg"], key=f"ref_photo_{i}")
             if photo is not None:
-                st.session_state.reference_project_photos[proj.title] = photo.getvalue()
-            existing_ref_photo = st.session_state.reference_project_photos.get(proj.title)
+                st.session_state.reference_project_photos[photo_key_for(proj, proj.title)] = photo.getvalue()
+            existing_ref_photo = st.session_state.reference_project_photos.get(photo_key_for(proj, proj.title))
             if existing_ref_photo:
                 st.image(existing_ref_photo, width=160)
             if st.button("Remove this reference project", key=f"ref_remove_{i}", type="primary"):
