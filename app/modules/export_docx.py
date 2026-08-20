@@ -308,6 +308,17 @@ def build_letter_docx(
         _build_letter_fee_buildup(doc, discipline_fee_lines, theme)
     if fee_estimates:
         _build_letter_fee_split(doc, fee_estimates, theme)
+    if not discipline_fee_lines and not fee_estimates:
+        # Both tables are optional, and with neither of them this heading
+        # rendered with literally nothing underneath it -- a numbered "5.
+        # Fees" section followed by "6. Program". A fee proposal that appears
+        # to have deliberately said nothing about fees is worse than one that
+        # visibly still needs them.
+        _add_placeholder_paragraph(
+            doc,
+            "[NO FEES ENTERED -- price the discipline fee build-up, or generate the "
+            "discipline fee split, in the Fees & Program step]",
+        )
 
     doc.add_heading("6. Program", level=1)
     _build_letter_program(doc, program_schedule, program_week_labels, theme)

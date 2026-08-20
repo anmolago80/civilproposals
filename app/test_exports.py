@@ -421,6 +421,28 @@ def check(files: dict, failures: list[str]) -> None:
         failures.append("[1e] an unthemed project no longer gets the original palette")
 
 
+def check_empty_letter_sections(failures: list[str]) -> None:
+    """1(i): a Small Scope pack with nothing priced rendered a numbered
+    "5. Fees" heading with nothing at all beneath it."""
+    from modules import export_docx
+
+    project = build_sample_project()
+    blob = export_docx.build_letter_docx(
+        project_info=project["project_info"], sender=project["sender"],
+        analysis=project["analysis"], understanding_text="", methodology_text="",
+        resource_plan=[], personnel_photos={}, program_schedule={}, program_week_labels=[],
+        terms_of_engagement_text="", fee_estimates=None, discipline_fee_lines=None,
+    ).getvalue()
+    text = docx_text(blob)
+    fees_index = text.find("5. Fees")
+    if fees_index < 0:
+        failures.append("[1i] the Small Scope pack lost its Fees section")
+    else:
+        between = text[fees_index + len("5. Fees"):text.find("6. Program")].strip()
+        if not between:
+            failures.append("[1i] '5. Fees' still renders with nothing beneath it")
+
+
 def check_program_overflow(failures: list[str]) -> None:
     """1(i): beyond ~15 scope items the program's rows ran off the bottom of
     the slide, and PowerPoint shows nothing rather than complaining."""
@@ -461,6 +483,7 @@ def main() -> int:
     failures: list[str] = []
     check(files, failures)
     check_program_overflow(failures)
+    check_empty_letter_sections(failures)
 
     if failures:
         print("EXPORT TESTS FAILED:")
