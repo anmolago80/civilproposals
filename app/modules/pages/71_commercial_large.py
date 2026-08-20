@@ -363,19 +363,34 @@ with tabs[8]:
             "pack, this isn't embedded in the DOCX -- download it as an editable PowerPoint "
             "table from the Export Pack tab instead, to paste into a program/methodology slide."
         )
-        pcol1, pcol2 = st.columns([2, 1])
+        pcol1, pcol2, pcol3 = st.columns([2, 2, 1])
         with pcol1:
             st.number_input("Number of weeks", min_value=1, max_value=52, step=1, key="program_num_weeks")
         with pcol2:
+            st.date_input(
+                "Anticipated start date (optional)", value=None, key="program_start_date",
+                format="DD/MM/YYYY",
+                help="Your own expected start, not something read from the brief. Set it "
+                     "and every week header becomes a real date (\"Wk 1 - 6 Oct\") in the "
+                     "program table and the program PowerPoint. Leave it blank to keep "
+                     "plain week numbers.",
+            )
+        with pcol3:
             st.write("")
             if st.button("Generate default program", type="primary"):
                 st.session_state.program_schedule = program_schedule.build_default_program(
                     st.session_state.analysis.scope_items if st.session_state.analysis else [],
                     st.session_state.program_num_weeks,
                 )
-                st.session_state.program_week_labels = [f"Wk {i + 1}" for i in range(st.session_state.program_num_weeks)]
+                st.session_state.program_week_labels = program_schedule.week_labels(
+                    st.session_state.program_num_weeks, st.session_state.program_start_date,
+                )
 
         if st.session_state.program_schedule:
+            # Relabel every rerun -- see the same note on the Small Scope tab.
+            st.session_state.program_week_labels = program_schedule.week_labels(
+                _program_week_count(), st.session_state.program_start_date,
+            )
             labels = st.session_state.program_week_labels
             program_rows = [
                 {"Scope item": title, **{lbl: bool(v) for lbl, v in zip(labels, active)}}

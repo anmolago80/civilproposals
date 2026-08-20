@@ -39,6 +39,7 @@ import io
 import json
 import zipfile
 from dataclasses import asdict
+from datetime import date
 
 from modules.tender_analyser import TenderAnalysis
 from modules.weighting_engine import WeightedCriterion
@@ -85,6 +86,13 @@ PLAIN_KEYS = [
     # a user report before adding this key.
     "_sections_built_format",
 ]
+
+# Keys holding a datetime.date (or None). Kept separate from PLAIN_KEYS
+# because a date isn't JSON-serialisable: these are written as ISO strings and
+# parsed back on load. An unparseable or missing value loads as None, which is
+# also what "the user never set one" means, so a hand-edited project file can't
+# crash the load.
+DATE_KEYS = ["program_start_date"]
 
 # key -> model class, for a single optional pydantic instance (None means "not run yet").
 MODEL_SINGLE = {
@@ -147,6 +155,10 @@ def save_project(state) -> bytes:
 
     for key in PLAIN_KEYS:
         payload[key] = state.get(key)
+
+    for key in DATE_KEYS:
+        value = state.get(key)
+        payload[key] = value.isoformat() if isinstance(value, date) else None
 
     for key, _cls in MODEL_SINGLE.items():
         obj = state.get(key)
@@ -221,6 +233,13 @@ def load_project(zip_bytes: bytes) -> dict:
     for key in PLAIN_KEYS:
         if key in payload:
             result[key] = payload[key]
+
+    for key in DATE_KEYS:
+        raw = payload.get(key)
+        try:
+            result[key] = date.fromisoformat(raw) if raw else None
+        except (TypeError, ValueError):
+            result[key] = None
 
     for key, cls in MODEL_SINGLE.items():
         data = payload.get(key)

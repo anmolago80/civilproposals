@@ -188,6 +188,12 @@ def _init_state():
         "program_num_weeks": 6,
         "program_schedule": {},
         "program_week_labels": [],
+        # The user's own anticipated start date for the delivery program
+        # (datetime.date | None). Optional: set it and every week header
+        # becomes a real calendar date via program_schedule.week_labels().
+        # Never derived from the brief -- a guessed start date in a program
+        # table would be an invented fact.
+        "program_start_date": None,
         # Save/Load Project bookkeeping (sidebar) -- not project content itself.
         "_project_save_bytes": None,
         "_last_loaded_project_name": "",
@@ -494,6 +500,19 @@ def _structure_format_stale() -> bool:
 
 def _is_letter() -> bool:
     return st.session_state.proposal_format == "letter"
+
+
+def _program_week_count() -> int:
+    """How many week columns the delivery program actually has.
+
+    Read from the schedule itself rather than from program_num_weeks: the two
+    drift apart the moment someone changes the week count without pressing
+    "Generate default program" again, and week labels that outnumber the
+    grid's columns (or fall short of them) silently mislabel the whole
+    program."""
+    rows = (st.session_state.get("program_schedule") or {}).values()
+    widths = [len(row) for row in rows]
+    return max(widths) if widths else int(st.session_state.get("program_num_weeks") or 0)
 
 
 # Small Scope pack sections that are actually free text to be AI-drafted-then-edited, same as

@@ -113,6 +113,32 @@ def test_sender_address_is_wired_and_saved(failures: list[str]) -> None:
         failures.append(f"[1b] a 'Registered Office' label didn't resolve: {field_key!r} {value!r}")
 
 
+def test_program_start_date(failures: list[str]) -> None:
+    """1(f): week headers can carry real calendar dates, and the date has to
+    survive save/load (a date is not JSON-safe, so it needs its own handling
+    rather than a PLAIN_KEYS entry)."""
+    import datetime
+
+    from modules import program_schedule, project_store
+
+    plain = program_schedule.week_labels(3, None)
+    if plain != ["Wk 1", "Wk 2", "Wk 3"]:
+        failures.append(f"[1f] unchanged behaviour without a start date broke: {plain}")
+
+    dated = program_schedule.week_labels(3, datetime.date(2026, 10, 6))
+    if dated != ["Wk 1 - 6 Oct", "Wk 2 - 13 Oct", "Wk 3 - 20 Oct"]:
+        failures.append(f"[1f] dated week labels are wrong: {dated}")
+
+    if "program_start_date" not in project_store.DATE_KEYS:
+        failures.append("[1f] program_start_date is not saved with the project")
+    saved = project_store.save_project(_State(program_start_date=datetime.date(2026, 10, 6)))
+    if project_store.load_project(saved).get("program_start_date") != datetime.date(2026, 10, 6):
+        failures.append("[1f] the start date did not survive save/load")
+    # Unset must round-trip as None, not as today's date or a crash.
+    if project_store.load_project(project_store.save_project(_State())).get("program_start_date") is not None:
+        failures.append("[1f] an unset start date did not round-trip as None")
+
+
 def main() -> int:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     failures: list[str] = []
@@ -120,6 +146,7 @@ def main() -> int:
     test_schedule_filler_reads_real_quals(failures)
     test_blank_person_still_placeholders(failures)
     test_sender_address_is_wired_and_saved(failures)
+    test_program_start_date(failures)
 
     if failures:
         print("BATCH 1 WIRING TESTS FAILED:")

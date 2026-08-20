@@ -13,6 +13,35 @@ app then lets the user tick/untick weeks per item before export.
 
 from __future__ import annotations
 
+from datetime import date, timedelta
+
+
+def week_labels(num_weeks: int, start_date: "date | None" = None) -> list[str]:
+    """Column headers for the program grid.
+
+    Without a start date these are "Wk 1", "Wk 2", ... -- which is all the app
+    could say, because nobody had ever been asked when the work starts. With
+    one, each header carries the real calendar week beginning ("Wk 1 - 6 Oct"),
+    which is what a client actually reads a program against, and it flows
+    through to the letter pack's program table and the program PowerPoint
+    without either of them needing to know a date was involved.
+
+    The date is the user's own anticipated start, never derived from the
+    brief's submission date or an award assumption: those would be guesses,
+    and a guessed date in a program table is exactly the kind of invented fact
+    this tool refuses to produce.
+    """
+    num_weeks = max(0, int(num_weeks))
+    if not start_date:
+        return [f"Wk {i + 1}" for i in range(num_weeks)]
+    labels = []
+    for i in range(num_weeks):
+        week_start = start_date + timedelta(weeks=i)
+        # Built by hand rather than with %-d/%#d, which differ between
+        # platforms -- this runs on Linux in production and Windows locally.
+        labels.append(f"Wk {i + 1} - {week_start.day} {week_start.strftime('%b')}")
+    return labels
+
 
 def build_default_program(scope_items: list, num_weeks: int) -> dict[str, list[bool]]:
     """
