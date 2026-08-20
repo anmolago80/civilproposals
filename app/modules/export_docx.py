@@ -246,6 +246,7 @@ def build_letter_docx(
     sales_pitch_text: str | None = None,
     ocr_note: str | None = None,
     firm: dict | None = None,
+    risk_register=None,
 ) -> io.BytesIO:
     """
     Builds the Small Scope Proposal Response Pack -- the leaner, content-agnostic
@@ -337,7 +338,14 @@ def build_letter_docx(
         _add_bullets(doc, analysis.assumptions)
     else:
         _add_placeholder_paragraph(doc, "[NO ASSUMPTIONS EXTRACTED -- add any that apply]")
-    if analysis.risks:
+    # The brief's risks used to go in here as raw bullets -- the client's own
+    # sentences read back to the client who wrote them, saying nothing about
+    # what they mean for delivery or what this firm would do about them. With
+    # a reviewed register they become a real risk / impact / mitigation table.
+    if getattr(risk_register, "entries", None):
+        doc.add_heading("Risks and mitigation", level=2)
+        _build_risk_table(doc, risk_register, theme)
+    elif analysis.risks:
         doc.add_heading("Risks noted in the brief", level=2)
         _add_bullets(doc, analysis.risks)
 
@@ -617,6 +625,33 @@ def _build_letter_program(doc: Document, program_schedule: dict, week_labels: li
         for col_index, active in enumerate(active_weeks, start=1):
             if active:
                 _shade_cell(table.rows[row_index].cells[col_index], str(theme["accent"]))
+
+
+def _build_risk_table(doc: Document, register, theme: dict | None):
+    """Risk / impact / mitigation, with TBC cells kept red.
+
+    A "TBC" mitigation is the correct output for a brief that doesn't
+    discuss mitigation, and it has to LOOK unfinished -- a black "TBC" in a
+    submitted table reads as a considered answer."""
+    theme = theme or _theme_colours(None)
+    entries = getattr(register, "entries", None) or []
+    rows = [[e.risk, e.impact, e.mitigation] for e in entries]
+    table = _add_table(doc, ["Risk", "Impact", "Mitigation"], rows, theme=theme)
+    for row_index, entry in enumerate(entries, start=1):
+        for col_index, value in enumerate((entry.risk, entry.impact, entry.mitigation)):
+            if str(value).strip().upper() != "TBC":
+                continue
+            cell = table.rows[row_index].cells[col_index]
+            for run in cell.paragraphs[0].runs:
+                run.font.color.rgb = RED
+                run.italic = True
+    note = doc.add_paragraph()
+    run = note.add_run(
+        "[FIRST-PASS REGISTER -- every mitigation is a commitment this firm will be held to. "
+        "Confirm each one, and replace every red TBC, before submission.]"
+    )
+    run.font.color.rgb = RED
+    run.italic = True
 
 
 def _build_letter_signoff(doc: Document, sender: dict):

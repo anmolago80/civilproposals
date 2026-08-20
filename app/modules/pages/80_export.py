@@ -49,6 +49,7 @@ with tabs[9]:
                 buffer = export_docx.build_letter_docx(
                     project_info=_project_info(),
                     firm=_firm_export_context(),
+                    risk_register=st.session_state.risk_register,
                     sender=sender,
                     analysis=st.session_state.analysis,
                     understanding_text=understanding_text,

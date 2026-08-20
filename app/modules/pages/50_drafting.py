@@ -136,6 +136,95 @@ with tabs[5]:
             _show_error("Draft generation failed", exc)
 
     # -----------------------------------------------------------------
+    # Risk register
+    # -----------------------------------------------------------------
+    st.markdown("---")
+    st.markdown("#### Risk register")
+    st.caption(
+        "A first-pass risk / impact / mitigation table, structured from the risks the brief "
+        "itself raises and the gaps the analysis found. **A mitigation is a commitment your "
+        "firm will be held to**, so the AI only ever states one the brief already describes -- "
+        "everything else comes back as **TBC** for you to decide. Edit anything below."
+    )
+    _risk_ready = (
+        st.session_state.analysis is not None
+        and bool(st.session_state.ai_config.get("api_key"))
+        and _current_project_already_paid()
+    )
+    rcol1, rcol2 = st.columns([1, 2])
+    with rcol1:
+        _draft_risk_clicked = st.button(
+            "Draft risk register", type="primary", disabled=not _risk_ready, key="draft_risk_btn",
+        )
+    with rcol2:
+        if not st.session_state.ai_config.get("api_key"):
+            st.caption(_AI_HINT_SENTENCE)
+        elif not _current_project_already_paid():
+            st.caption(_PROJECT_NOT_PAID_HINT)
+        elif st.session_state.analysis is None:
+            st.caption("Run Tender Analysis first -- the register is built from the brief's own risks.")
+
+    if _draft_risk_clicked:
+        if st.session_state.risk_register and not st.session_state.get("_confirm_rerisk"):
+            st.session_state._confirm_rerisk = True
+        else:
+            st.session_state._confirm_rerisk = False
+            with st.spinner("Structuring the risk register..."):
+                try:
+                    st.session_state.risk_register = risk_register.draft_risk_register(
+                        st.session_state.analysis,
+                        st.session_state.gap_items or [],
+                        st.session_state.ai_config,
+                    )
+                    if not (st.session_state.risk_register.entries if st.session_state.risk_register else []):
+                        st.warning(
+                            "No risks came back -- the brief may not raise any. Nothing has been "
+                            "changed; add rows by hand below if you want a register anyway."
+                        )
+                    else:
+                        st.success(f"Structured {len(st.session_state.risk_register.entries)} risk(s) -- review below.")
+                except Exception as exc:
+                    _show_error("Drafting the risk register failed", exc)
+
+    if st.session_state.get("_confirm_rerisk"):
+        st.warning(
+            "You already have a risk register, and some of it may be your own edits. Drafting "
+            "again replaces every row. Click **Draft risk register** once more to go ahead."
+        )
+        if st.button("Cancel", key="cancel_rerisk"):
+            st.session_state._confirm_rerisk = False
+            st.rerun()
+
+    if st.session_state.risk_register and st.session_state.risk_register.entries:
+        _risk_rows = [
+            {"Risk": e.risk, "Impact": e.impact, "Mitigation": e.mitigation, "Source": e.source}
+            for e in st.session_state.risk_register.entries
+        ]
+        _edited_risks = st.data_editor(
+            _risk_rows, key="risk_register_editor", num_rows="dynamic", use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Risk": st.column_config.TextColumn("Risk", width="medium"),
+                "Impact": st.column_config.TextColumn("Impact", width="medium"),
+                "Mitigation": st.column_config.TextColumn("Mitigation", width="medium"),
+                "Source": st.column_config.TextColumn("Source", disabled=True, width="small"),
+            },
+        )
+        st.session_state.risk_register = risk_register.RiskRegister(entries=[
+            risk_register.RiskEntry(
+                risk=(row.get("Risk") or "").strip(),
+                impact=(row.get("Impact") or "").strip() or risk_register.TBC,
+                mitigation=(row.get("Mitigation") or "").strip() or risk_register.TBC,
+                source=(row.get("Source") or "").strip(),
+            )
+            for row in _edited_risks if (row.get("Risk") or "").strip()
+        ])
+        st.caption(
+            "Rows left as **TBC** export in red, so nobody submits an unfilled mitigation by "
+            "accident."
+        )
+
+    # -----------------------------------------------------------------
     # Design stages -- the grid that fills the methodology table
     # -----------------------------------------------------------------
     st.markdown("---")

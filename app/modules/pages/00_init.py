@@ -107,6 +107,7 @@ from modules import (
     methodology_pptx,
     methodology_stages,
     firm_profile,
+    risk_register,
     program_pptx,
     proposal_library,
     reference_library,

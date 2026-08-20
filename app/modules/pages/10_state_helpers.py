@@ -189,6 +189,9 @@ def _init_state():
         # list). None means "the stage drafter has never been run" -- distinct
         # from [] which would mean "run, and produced nothing".
         "methodology_stages": None,
+        # First-pass risk/impact/mitigation table (risk_register.RiskRegister).
+        # None means the step has never been run.
+        "risk_register": None,
         # Whether the user has confirmed their firm issues Work Verification
         # Records. Never assumed: the WVR line used to print as fact in every
         # methodology export without the app ever being told.
@@ -566,6 +569,10 @@ def _structured_material_by_section(sections: list) -> dict:
                 "structured entries -- use ONLY these, not any raw uploaded text) ---\n"
                 + "\n".join(lines)
             )
+        elif any(word in lowered for word in ("risk", "safety", "quality")) and st.session_state.risk_register:
+            block = risk_register.format_for_prompt(st.session_state.risk_register)
+            if block:
+                out[title] = block
         elif "personnel" in lowered and st.session_state.resource_plan:
             from modules.resourcing import personnel_profiles_deduped
             lines = []

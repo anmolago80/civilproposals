@@ -60,6 +60,7 @@ from modules.team_intro import TeamIntro
 from modules.experience_intro import ExperienceIntro
 from modules.pitch_review import PitchReview
 from modules.methodology_stages import MethodologyStage
+from modules.risk_register import RiskRegister
 
 PROJECT_FILE_VERSION = 1
 
@@ -103,6 +104,7 @@ MODEL_SINGLE = {
     "team_intro": TeamIntro,
     "experience_intro": ExperienceIntro,
     "pitch_review": PitchReview,
+    "risk_register": RiskRegister,
 }
 
 # key -> model class, for an optional list[Model] (None, not [], means "not run yet").
