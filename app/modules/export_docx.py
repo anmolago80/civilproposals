@@ -1687,22 +1687,36 @@ def _build_reference_experience(
     reference_project_photos = reference_project_photos or {}
     doc.add_heading("Our relevant project experience", level=2)
     _build_experience_intro(doc, experience_intro, theme)
+    # Two cards side by side, each sized from the page's REAL text width
+    # rather than a fixed 7.8 cm. Two 7.8 cm images plus the gap between the
+    # cells overflowed A4's ~17 cm text column, so Word squashed both photos
+    # to fit -- visibly, and differently depending on the image.
+    photo_w = _reference_photo_width(doc)
     for start in range(0, len(reference_projects), 2):
         pair = reference_projects[start:start + 2]
         table = doc.add_table(rows=1, cols=2)
         table.autofit = True
         for i, cell in enumerate(table.rows[0].cells):
             if i < len(pair):
-                _fill_reference_project_cell(cell, pair[i], reference_project_photos, theme)
+                _fill_reference_project_cell(cell, pair[i], reference_project_photos, theme, photo_w)
         doc.add_paragraph()
 
 
-def _fill_reference_project_cell(cell, project, photos: dict[str, bytes], theme: dict):
+def _reference_photo_width(doc: Document):
+    """Half the usable text width, less the gap between the two cards."""
+    sec = doc.sections[-1]
+    usable = sec.page_width - sec.left_margin - sec.right_margin
+    return Emu(int((usable - Cm(0.5)) / 2))
+
+
+def _fill_reference_project_cell(cell, project, photos: dict[str, bytes], theme: dict,
+                                 photo_width=None):
+    photo_width = photo_width or Cm(7.8)
     photo_bytes = photos.get(project.title)
     p0 = cell.paragraphs[0]
     if photo_bytes:
         try:
-            p0.add_run().add_picture(io.BytesIO(photo_bytes), width=Cm(7.8))
+            p0.add_run().add_picture(io.BytesIO(photo_bytes), width=photo_width)
         except Exception:
             photo_bytes = None
     if not photo_bytes:
@@ -1712,7 +1726,7 @@ def _fill_reference_project_cell(cell, project, photos: dict[str, bytes], theme:
         nested = cell.add_table(rows=1, cols=1)
         nested.autofit = False
         nested.rows[0].height = Cm(3.6)
-        nested.rows[0].cells[0].width = Cm(7.8)
+        nested.rows[0].cells[0].width = photo_width
         _add_photo_placeholder_box(nested.rows[0].cells[0])
 
     title_p = cell.add_paragraph()
