@@ -256,6 +256,10 @@ if st.session_state.get("_firm_profile_mode"):
             _fields["logo_filename"] = _logo_upload.name
         try:
             firm_profile.save_profile(_profile_user_id, **_fields)
+            # The fee tab caches the rate card for the session (it reads it on
+            # every rerun); drop the cache so an edited rate takes effect now
+            # rather than at the next login.
+            st.session_state.pop("_firm_rate_card_cache", None)
             st.success("Firm profile saved. New projects will start from it.")
         except Exception as exc:  # noqa: BLE001 -- never show a stack trace mid-bid
             st.error(

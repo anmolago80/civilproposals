@@ -218,6 +218,17 @@ with tabs[8]:
                             # state-defaults comment for _discipline_fee_editor_version.
                             st.session_state._discipline_fee_editor_version += 1
 
+                # Rates the firm has already told us, filled into rows that
+                # are still at zero -- see the same block on the Large Scope
+                # tab. Hours stay the user's.
+                _letter_prefilled_rates = _prefill_rates_from_firm_profile()
+                if _letter_prefilled_rates:
+                    st.caption(
+                        f"Filled the rate on {_letter_prefilled_rates} discipline(s) from your "
+                        "Firm Profile rate card. Hours are still yours to enter."
+                    )
+                _target_fee_prefill("letter")
+
                 letter_disc_fee_rows = [
                     {
                         "discipline": l.discipline,
@@ -469,6 +480,8 @@ with tabs[8]:
                             ))
                     return reconciled
 
+                _fee_history_panel("letter_apply_history")
+
                 bcol1, bcol2, bcol3 = st.columns(3)
                 with bcol1:
                     if st.button("Reset % from discipline fee build-up", key="letter_reset_from_buildup_btn", type="primary"):
@@ -491,23 +504,20 @@ with tabs[8]:
                         st.session_state.fee_estimates = _letter_reconcile_estimates(estimates)
                 with bcol3:
                     refresh_ready = bool(st.session_state.ai_config.get("api_key")) and _current_project_already_paid()
-                    if st.button("Refresh via AI knowledge (not a live web fetch)", disabled=not refresh_ready,
+                    if st.button(fee_estimation_engine.AI_BENCHMARK_LABEL, disabled=not refresh_ready,
                                  help=None if refresh_ready else (
                                      _PROJECT_NOT_PAID_HINT if not _current_project_already_paid()
                                      else _AI_HINT_SENTENCE
                                  ), key="letter_refresh_btn", type="primary"):
                         fee_cap = st.session_state.analysis.fee_cap if st.session_state.analysis else None
-                        with st.spinner("Asking the AI provider for its knowledge of published benchmarks..."):
-                            estimates, _refresh_warning = fee_estimation_engine.refresh_estimate_from_web(
-                                st.session_state.project_type, letter_buildup_discs, fee_cap, st.session_state.ai_config,
-                                scope_summary=(st.session_state.analysis.project_scope
-                                               if st.session_state.analysis else ""),
-                            )
-                        # A silent fallback returned the bundled table looking
-                        # exactly like a successful refresh.
-                        if _refresh_warning:
-                            st.warning(_refresh_warning)
-                        st.session_state.fee_estimates = _letter_reconcile_estimates(estimates)
+                        with st.spinner("Asking the AI how a fee like this typically divides..."):
+                            estimates, _refresh_error = _fee_ai_refresh(letter_buildup_discs, fee_cap)
+                        if _refresh_error:
+                            # The table is left EXACTLY as it was -- see the
+                            # same note on the Large Scope tab.
+                            st.error(_refresh_error)
+                        else:
+                            st.session_state.fee_estimates = _letter_reconcile_estimates(estimates)
 
                 st.session_state.fee_estimates = _letter_reconcile_estimates(st.session_state.fee_estimates)
 

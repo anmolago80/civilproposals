@@ -82,6 +82,43 @@ def main() -> int:
         at.run()
         for exc in at.exception:
             failures.append(f"[program style] exception: {exc.value}")
+        # The target-fee prefill sits above the discipline build-up on the same
+        # tab. Give one row a rate so the hours-derivation path runs for real
+        # rather than short-circuiting on "no rate anywhere".
+        for _line in at.session_state["discipline_fee_lines"]:
+            _line.rate_per_hour = 200.0
+        at.run()
+        target = [n for n in at.number_input if n.key == "letter_target_fee"]
+        apply_button = [b for b in at.button if b.key == "letter_target_apply"]
+        if not target or not apply_button:
+            failures.append("[fee prefill] the target-fee control never rendered")
+        else:
+            target[0].set_value(400000.0).run()
+            [b for b in at.button if b.key == "letter_target_apply"][0].click().run()
+            for exc in at.exception:
+                failures.append(f"[fee prefill] exception: {exc.value}")
+            priced = [l for l in at.session_state["discipline_fee_lines"] if l.fee_amount > 0]
+            if not priced:
+                failures.append("[fee prefill] pre-filling from a target fee priced nothing")
+            elif abs(sum(l.fee_amount for l in priced) - 400000.0) > 400000.0 * 0.05:
+                failures.append(
+                    "[fee prefill] the pre-filled rows don't add up to the target: "
+                    f"{sum(l.fee_amount for l in priced):,.0f}")
+            # Rows the user has priced must survive a second pre-fill -- and
+            # the target has to CHANGE between the two runs for that to prove
+            # anything. Re-running with the same target produces identical
+            # numbers whether the guard works or not, which is exactly how a
+            # first version of this check passed against a deliberately
+            # broken guard.
+            before = [(l.discipline, l.total_hours) for l in at.session_state["discipline_fee_lines"]]
+            [n for n in at.number_input if n.key == "letter_target_fee"][0].set_value(900000.0).run()
+            [b for b in at.button if b.key == "letter_target_apply"][0].click().run()
+            after = [(l.discipline, l.total_hours) for l in at.session_state["discipline_fee_lines"]]
+            if before != after:
+                failures.append(
+                    "[fee prefill] a second pre-fill at a different target clobbered rows the "
+                    "user had priced")
+
         style_radios = [r for r in at.radio if r.key == "program_style"]
         if not style_radios:
             failures.append("[program style] the style picker never rendered")

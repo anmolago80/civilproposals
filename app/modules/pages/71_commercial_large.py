@@ -77,6 +77,17 @@ with tabs[8]:
                         # state-defaults comment for _discipline_fee_editor_version.
                         st.session_state._discipline_fee_editor_version += 1
 
+            # Rates the firm has already told us, filled into rows that are
+            # still at zero. Hours stay the user's -- a standing rate card
+            # says what the firm charges, not how long this job takes.
+            _prefilled_rates = _prefill_rates_from_firm_profile()
+            if _prefilled_rates:
+                st.caption(
+                    f"Filled the rate on {_prefilled_rates} discipline(s) from your Firm Profile "
+                    "rate card. Hours are still yours to enter."
+                )
+            _target_fee_prefill("large")
+
             disc_fee_rows = [
                 {
                     "discipline": l.discipline,
@@ -467,6 +478,8 @@ with tabs[8]:
                         ))
                 return reconciled
 
+            _fee_history_panel("large_apply_history")
+
             bcol1, bcol2, bcol3 = st.columns(3)
             with bcol1:
                 if st.button("Reset % from discipline fee build-up", key="reset_from_buildup_btn", type="primary"):
@@ -490,24 +503,22 @@ with tabs[8]:
                     st.session_state.fee_estimates = _reconcile_estimates(estimates)
             with bcol3:
                 refresh_ready = bool(st.session_state.ai_config.get("api_key")) and _current_project_already_paid()
-                if st.button("Refresh via AI knowledge (not a live web fetch)", disabled=not refresh_ready,
+                if st.button(fee_estimation_engine.AI_BENCHMARK_LABEL, disabled=not refresh_ready,
                              help=None if refresh_ready else (
                                  _PROJECT_NOT_PAID_HINT if not _current_project_already_paid()
                                  else _AI_HINT_SENTENCE
                              ), key="refresh_btn", type="primary"):
                     fee_cap = (str(manual_total) if manual_total > 0
                                else (st.session_state.analysis.fee_cap if st.session_state.analysis else None))
-                    with st.spinner("Asking the AI provider for its knowledge of published benchmarks..."):
-                        estimates, _refresh_warning = fee_estimation_engine.refresh_estimate_from_web(
-                            st.session_state.project_type, buildup_discs, fee_cap, st.session_state.ai_config,
-                            scope_summary=(st.session_state.analysis.project_scope
-                                           if st.session_state.analysis else ""),
-                        )
-                    # A silent fallback returned the bundled table looking
-                    # exactly like a successful refresh.
-                    if _refresh_warning:
-                        st.warning(_refresh_warning)
-                    st.session_state.fee_estimates = _reconcile_estimates(estimates)
+                    with st.spinner("Asking the AI how a fee like this typically divides..."):
+                        estimates, _refresh_error = _fee_ai_refresh(buildup_discs, fee_cap)
+                    if _refresh_error:
+                        # The table is left EXACTLY as it was. Falling back to
+                        # the bundled figures made a failed call look like a
+                        # successful one that happened to agree.
+                        st.error(_refresh_error)
+                    else:
+                        st.session_state.fee_estimates = _reconcile_estimates(estimates)
 
             st.session_state.fee_estimates = _reconcile_estimates(st.session_state.fee_estimates)
 

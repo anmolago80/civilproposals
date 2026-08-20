@@ -458,6 +458,10 @@ with tabs[9]:
                     client_name=st.session_state.client_name,
                     tender_name=st.session_state.tender_name,
                 )
+                # Archiving is the strongest signal that this pricing is real
+                # and finished, so the fee snapshot is refreshed here too. The
+                # upsert in fee_history keeps it from counting as a second bid.
+                _record_fee_snapshot()
                 st.success(f"Archived to the library under '{_archived['project_type']}' as {_archived['filename']}.")
             except Exception as exc:
                 _show_error("Couldn't archive to the library", exc)

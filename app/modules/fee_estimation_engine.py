@@ -9,11 +9,17 @@ to submit. See README.md for the full reasoning; the short version:
   patterns by project type (sample_data/fee_benchmarks.json). Fast, works
   offline, and is honestly labelled as a rule-of-thumb rather than a
   researched figure.
-- An optional "refresh from web" action asks the configured AI provider for
-  its knowledge of published fee benchmarks. This is NOT a live web fetch --
-  none of the base provider APIs wired up in ai_interface.py browse the
-  internet by default -- so results are clearly labelled as AI-recalled
-  knowledge, not researched fact, with a confidence flag.
+- An optional "AI-modelled benchmarks" action asks the configured AI provider
+  for its knowledge of published fee benchmarks. It was called "refresh from
+  web" and it never touched the web -- none of the base provider APIs wired
+  up in ai_interface.py browse the internet -- so the name was a claim the
+  feature could not back. It is now named for what it does, and every figure
+  it produces is labelled AI-modelled, carries a range rather than a single
+  false-precision number, and states its own basis.
+- Three labelled tiers, in descending order of how much they should be
+  trusted: the firm's own history (see modules/fee_history.py), the bundled
+  rule-of-thumb table, and AI-modelled benchmarks. Every estimate says which
+  tier it came from.
 - Where the brief states a real fee cap/budget ceiling, the split is
   anchored to that actual number instead of guessing a project value.
 """
@@ -44,6 +50,19 @@ class DisciplineFeeEstimate(BaseModel):
     fee_amount: float | None = None
     source: str
     confidence: str  # High | Medium | Low
+    # The plausible band around fee_percentage, where the source gave one.
+    # A single number implies a precision none of these tiers has; the AI
+    # tier in particular returned one significant figure dressed up as three.
+    # None means "this source gave a point estimate", not "the range is zero".
+    pct_low: float | None = None
+    pct_high: float | None = None
+
+    @property
+    def range_text(self) -> str:
+        """"12.0-18.0%" where a range is known, "15.0%" where it isn't."""
+        if self.pct_low is None or self.pct_high is None:
+            return f"{self.fee_percentage:.1f}%"
+        return f"{self.pct_low:.1f}-{self.pct_high:.1f}%"
 
 
 def estimate_fee_split(
@@ -68,75 +87,137 @@ def estimate_fee_split(
     return estimates
 
 
-def refresh_estimate_from_web(
+AI_BENCHMARK_LABEL = "AI-modelled benchmarks"
+
+_AI_BENCHMARK_SYSTEM = """You are advising an Australian civil engineering consultancy on how a \
+design fee typically divides between disciplines. Work from published fee-scale guidance, \
+industry association fee guides and typical Australian market practice for this kind of \
+commission. You have no live access to the web and must not imply that you do: say what your \
+figure is based on, and give a plausible RANGE rather than a single number, because a single \
+number implies a precision this kind of estimate does not have."""
+
+_AI_BENCHMARK_PROMPT = """PROJECT TYPE: {project_type}
+CONTEXT: Australian civil engineering consulting commission.
+
+PROJECT SCOPE AS STATED IN THE BRIEF:
+{project_scope}
+
+SCOPE ITEMS THE BRIEF LISTS:
+{scope_items}
+
+DISCIPLINES TO SPLIT THE FEE ACROSS (return one entry for EACH, using the exact text given):
+{disciplines}
+
+FEE CAP / BUDGET CEILING STATED IN THE BRIEF: {fee_cap}
+
+Weight the split towards what THIS job actually involves, as described above, rather than the \
+average job of this type. Where the scope barely touches a discipline, say so with a low range.
+
+Return a JSON object:
+{{
+  "estimates": [
+    {{"discipline": string (exactly as given above),
+      "pct_low": number, "pct_high": number, "pct_typical": number,
+      "basis": string (one short sentence -- what this figure is based on),
+      "confidence": "High"|"Medium"|"Low"}}
+  ]
+}}
+The pct_typical values across all disciplines should sum to approximately 100."""
+
+
+def _format_scope_items(analysis) -> str:
+    items = getattr(analysis, "scope_items", None) or [] if analysis is not None else []
+    lines = []
+    for item in items:
+        title = (getattr(item, "title", "") or "").strip()
+        if title:
+            lines.append(f"- {title}")
+    return "\n".join(lines) or "- (none extracted)"
+
+
+def refresh_estimate_from_ai(
     project_type: str,
     disciplines_involved: list[str] | None = None,
     fee_cap_text: str | None = None,
     config: dict | None = None,
     scope_summary: str = "",
+    analysis=None,
+    capture_prompt: list | None = None,
 ) -> tuple[list[DisciplineFeeEstimate], str]:
     """
-    Ask the configured AI provider for a fee-split estimate drawing on its general
-    knowledge of published industry fee benchmarks. Explicitly NOT a live web fetch --
-    see module docstring.
+    Ask the configured AI provider how a fee of this kind typically divides,
+    given THIS brief's scope, scope items, discipline list and fee cap.
 
-    Returns (estimates, warning). A failure falls back to the bundled table
-    AND says so in the warning: this used to fall back silently, so a user
-    who pressed "refresh from web" got the same bundled numbers back with no
-    indication that the refresh hadn't happened, and would reasonably read
-    the unchanged figures as confirmation rather than as a failure.
+    Explicitly not a live web fetch, and no longer named as though it were --
+    see the module docstring. Returns (estimates, error). On failure the
+    estimates list is EMPTY and the error explains why: the previous version
+    fell back to the bundled table, so a user who pressed the button got the
+    bundled numbers back with nothing on screen disagreeing with them, and
+    would reasonably read unchanged figures as a second source confirming the
+    first. Two tiers must never be able to impersonate each other.
+
+    `capture_prompt`, if given, has the prompt appended to it -- the tests
+    assert on the real prompt rather than on a re-derivation of it, which is
+    the only way to catch context quietly failing to reach the model.
     """
-    disciplines_hint = ", ".join(disciplines_involved) if disciplines_involved else "(not specified -- infer typical disciplines for this project type)"
-    scope_block = (
-        f"\n\nTHIS PROJECT'S ACTUAL SCOPE (weight the split towards what this job really "
-        f"involves, not the average job of this type):\n{scope_summary.strip()[:1500]}"
-        if (scope_summary or "").strip() else ""
+    disciplines = [d for d in (disciplines_involved or []) if (d or "").strip()]
+    prompt = _AI_BENCHMARK_PROMPT.format(
+        project_type=(project_type or "").strip() or "(not specified)",
+        project_scope=(scope_summary or "").strip()[:1500] or "(not extracted)",
+        scope_items=_format_scope_items(analysis),
+        disciplines="\n".join(f"- {d}" for d in disciplines)
+                    or "- (not specified -- use the disciplines typical for this project type)",
+        fee_cap=(fee_cap_text or "").strip() or "(none stated in the brief)",
     )
-    cap_block = (
-        f"\n\nSTATED FEE CAP / BUDGET CEILING FOR THIS JOB: {fee_cap_text}"
-        if (fee_cap_text or "").strip() else ""
-    )
-    prompt = f"""You are asked for an INDICATIVE fee split by engineering discipline for a \
-"{project_type}" project, covering disciplines: {disciplines_hint}.{scope_block}{cap_block}
-
-Draw on your knowledge of published fee-scale guidance, industry association fee guides, \
-and typical market practice for this project type. Be honest that this is general knowledge, \
-not a live lookup, and mark your confidence accordingly -- "High" only if you're recalling a \
-specific named published source, "Low" if this is a general rule-of-thumb.
-
-Return a JSON object:
-{{
-  "estimates": [
-    {{"discipline": string, "fee_percentage": number, "source": string, "confidence": "High"|"Medium"|"Low"}}
-  ]
-}}
-Percentages across all disciplines should sum to approximately 100."""
+    if capture_prompt is not None:
+        capture_prompt.append(prompt)
 
     try:
-        data = call_ai_json(prompt, config=config, max_tokens=1500)
-        raw_estimates = data.get("estimates", [])
+        data = call_ai_json(prompt, system_message=_AI_BENCHMARK_SYSTEM, config=config,
+                            max_tokens=2000)
+        raw_estimates = (data or {}).get("estimates") or []
         if not raw_estimates:
-            raise ValueError("empty estimate list")
+            raise ValueError("the AI returned no estimates")
         total_amount = _parse_currency(fee_cap_text) if fee_cap_text else None
         estimates = []
         for item in raw_estimates:
-            pct = float(item.get("fee_percentage", 0))
+            low = _as_float(item.get("pct_low"))
+            high = _as_float(item.get("pct_high"))
+            typical = _as_float(item.get("pct_typical"))
+            if typical is None and low is not None and high is not None:
+                typical = (low + high) / 2
+            if typical is None:
+                continue
+            if low is not None and high is not None and low > high:
+                low, high = high, low
+            basis = (item.get("basis") or "").strip() or "no basis given"
             estimates.append(DisciplineFeeEstimate(
-                discipline=item.get("discipline", "Unspecified"),
-                fee_percentage=pct,
-                fee_amount=round(total_amount * pct / 100, 0) if total_amount else None,
-                source=f"AI-recalled industry benchmark (not a live web fetch) -- {item.get('source', 'no source given')}. Verify independently.",
-                confidence=item.get("confidence", "Low"),
+                discipline=(item.get("discipline") or "Unspecified").strip(),
+                fee_percentage=round(typical, 1),
+                pct_low=round(low, 1) if low is not None else None,
+                pct_high=round(high, 1) if high is not None else None,
+                fee_amount=round(total_amount * typical / 100, 0) if total_amount else None,
+                source=f"{AI_BENCHMARK_LABEL} (no live lookup) -- {basis} Verify independently.",
+                confidence=(item.get("confidence") or "Low").strip(),
             ))
+        if not estimates:
+            raise ValueError("no usable percentages in the AI's response")
         estimates.sort(key=lambda e: -e.fee_percentage)
         return estimates, ""
     except Exception as exc:
-        # Still falls back to the reliable bundled table -- but says so. A
-        # silent fallback returns numbers that look like a successful refresh.
-        return estimate_fee_split(project_type, fee_cap_text), (
-            f"Couldn't refresh the benchmark split ({str(exc)[:120]}). The figures below are "
-            f"the bundled reference table, unchanged -- not a fresh estimate."
+        return [], (
+            f"Couldn't get {AI_BENCHMARK_LABEL} ({str(exc)[:140]}). Nothing on the table below "
+            f"has changed -- these are still whatever figures were already there, not a fresh "
+            f"estimate."
         )
+
+
+def _as_float(value) -> float | None:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if result >= 0 else None
 
 
 def fee_estimates_to_excel(

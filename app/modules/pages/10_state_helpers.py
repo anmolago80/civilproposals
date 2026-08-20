@@ -942,6 +942,11 @@ def _export_input_signature() -> str:
 
 def _mark_export_generated() -> None:
     st.session_state._export_signature = _export_input_signature()
+    # Every generated pack leaves its priced split behind, so the next bid of
+    # this type can start from what this firm actually charged rather than
+    # from a published average. Best-effort by design: a bookkeeping failure
+    # must never cost someone the pack they just waited for.
+    _record_fee_snapshot()
 
 
 def _export_is_stale() -> bool:
@@ -1189,6 +1194,223 @@ def _files_signature(files) -> tuple:
     on every Streamlit rerun (reruns fire on nearly every interaction, and
     re-parsing large PDFs each time is what makes the app feel frozen)."""
     return tuple((getattr(f, "name", ""), getattr(f, "size", None)) for f in (files or []))
+
+
+# ---------------------------------------------------------------------------
+# Fee prepopulation -- three labelled tiers, best first (Batch 10)
+#
+# The fee sheet used to open at zeros with one "benchmark" behind it: a
+# bundled table of published industry averages. The ladder below adds the two
+# tiers that are actually about THIS firm and THIS brief, and every figure
+# any of them produces says which tier it came from, so a user can never mix
+# up their own past pricing with a rule of thumb or with an AI's recollection.
+# ---------------------------------------------------------------------------
+
+def _fee_history_user_id() -> str | None:
+    """The account fee snapshots belong to. None in local mode, where there
+    is no user to scope a history to -- history is per firm, and a shared
+    local install has no way to tell whose pricing is whose."""
+    try:
+        return current_user.id if (IS_SAAS_MODE and current_user) else None  # noqa: F821
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _record_fee_snapshot() -> None:
+    """Leave this project's priced split behind for the next bid of the same
+    type. Called when a pack is generated and when one is archived; the
+    upsert in fee_history keeps that from counting as two bids."""
+    fee_history.record_snapshot(
+        _fee_history_user_id(),
+        _current_project_key(),
+        st.session_state.get("project_type") or "",
+        st.session_state.get("discipline_fee_lines") or [],
+        st.session_state.get("project_name") or "",
+    )
+
+
+def _firm_rate_card() -> dict:
+    """The firm's standard charge-out rates, or {} -- including when the Firm
+    Profile has never been filled in, which is the normal case for a new
+    account and must not be an error.
+
+    Cached for the session because the fee tab re-reads it on every rerun,
+    and that is every keystroke in a fee table. The Firm Profile editor
+    clears the cache when it saves, so an edited rate card takes effect
+    immediately rather than at the next login."""
+    if "_firm_rate_card_cache" in st.session_state:
+        return st.session_state["_firm_rate_card_cache"]
+    card = {}
+    try:
+        card = firm_profile.rate_card(firm_profile.get_or_create(_fee_history_user_id())) or {}
+    except Exception as exc:  # noqa: BLE001 -- an empty rate card is a fine answer
+        print(f"[fee prefill] couldn't read the rate card: {exc}", file=sys.stderr)
+    st.session_state["_firm_rate_card_cache"] = card
+    return card
+
+
+def _prefill_rates_from_firm_profile() -> int:
+    """Fill in each discipline's RATE from the firm's rate card, leaving hours
+    alone. Returns how many rows were filled.
+
+    Only ever fills a row whose rate is still zero. A rate the user has typed
+    is their pricing decision for this bid, and a standing rate card is not
+    entitled to overwrite it."""
+    card = {str(k).strip().lower(): float(v or 0) for k, v in _firm_rate_card().items()}
+    if not card:
+        return 0
+    filled = 0
+    for line in st.session_state.get("discipline_fee_lines") or []:
+        if (line.rate_per_hour or 0) > 0:
+            continue
+        rate = card.get((line.discipline or "").strip().lower())
+        if rate and rate > 0:
+            line.rate_per_hour = rate
+            filled += 1
+    if filled:
+        st.session_state._discipline_fee_editor_version += 1
+    return filled
+
+
+def _fee_history_panel(apply_key: str) -> None:
+    """The firm's own median split, shown ABOVE the bundled table because it
+    is the better source -- and only once there are enough past bids for a
+    median to mean anything (see fee_history.MIN_BIDS_FOR_BENCHMARK)."""
+    history = fee_history.fee_history_benchmarks(
+        _fee_history_user_id(), st.session_state.get("project_type") or "")
+    if not history["disciplines"]:
+        return
+    st.markdown(f"**Your firm's history** (median of {history['bids']} bids)")
+    st.caption(
+        "Your own past splits for this project type, from packs you've exported or archived. "
+        "This is a record of how your firm has priced, not a market rate and not a "
+        "recommendation -- the range shows how much it has actually varied."
+    )
+    st.dataframe(
+        [
+            {
+                "Discipline": entry["discipline"],
+                "Median %": entry["median_pct"],
+                "Range": f"{entry['low_pct']:.1f}-{entry['high_pct']:.1f}%",
+                "Bids": entry["bids"],
+            }
+            for entry in history["disciplines"]
+        ],
+        use_container_width=True, hide_index=True,
+    )
+    if st.button("Apply your firm's split", key=apply_key, type="primary"):
+        discs = [l.discipline for l in (st.session_state.get("discipline_fee_lines") or [])]
+        split, source = fee_history.best_available_split(
+            _fee_history_user_id(), st.session_state.get("project_type") or "", discs)
+        st.session_state.fee_estimates = [
+            fee_estimation_engine.DisciplineFeeEstimate(
+                discipline=disc, fee_percentage=split.get(disc, 0.0),
+                source=f"{fee_history.SOURCE_HISTORY} -- median of {history['bids']} past bids",
+                confidence="Your own data",
+            )
+            for disc in discs
+        ]
+        st.rerun()
+
+
+def _target_fee_prefill(state_prefix: str) -> None:
+    """"Pre-fill from target fee": split a target across the disciplines by the
+    best split available, and derive hours from each row's rate.
+
+    Only ever fills rows that are still untouched. A row the user has priced
+    is the whole point of the sheet, and a prefill that overwrote it would be
+    the single worst thing this feature could do -- so it asks first, every
+    time, and names what it would change.
+    """
+    lines = st.session_state.get("discipline_fee_lines") or []
+    if not lines:
+        return
+    analysis = st.session_state.get("analysis")
+    cap_amount = fee_estimation_engine._parse_currency(
+        getattr(analysis, "fee_cap", "") if analysis is not None else "")
+    default = float(cap_amount or 0.0)
+
+    with st.expander("Pre-fill from a target fee", expanded=False):
+        st.caption(
+            "Splits a target across the disciplines below using the best benchmark available "
+            "(your firm's history where you have it, otherwise the bundled rule-of-thumb), "
+            "then derives hours from each row's rate. It is a first-pass split of a number you "
+            "chose -- adjust every row before export."
+            + (f" Defaulted to the brief's stated fee cap ({analysis.fee_cap})."
+               if cap_amount else "")
+        )
+        target = st.number_input(
+            "Target fee ($, excl. GST)", min_value=0.0, step=1000.0, value=default,
+            key=f"{state_prefix}_target_fee",
+        )
+        priced = [l.discipline for l in lines if l.fee_amount > 0]
+        overwrite = False
+        if priced:
+            st.warning(
+                "**Already priced: " + ", ".join(priced) + ".** Pre-filling leaves those rows "
+                "exactly as they are unless you tick the box below."
+            )
+            overwrite = st.checkbox(
+                "Also replace the rows I've already priced", value=False,
+                key=f"{state_prefix}_target_overwrite",
+            )
+        if st.button("Pre-fill from target fee", key=f"{state_prefix}_target_apply",
+                     type="primary", disabled=target <= 0):
+            split, source = fee_history.best_available_split(
+                _fee_history_user_id(), st.session_state.get("project_type") or "",
+                [l.discipline for l in lines])
+            card = {str(k).strip().lower(): float(v or 0) for k, v in _firm_rate_card().items()}
+            filled, no_rate = 0, []
+            for line in lines:
+                if line.fee_amount > 0 and not overwrite:
+                    continue
+                amount = target * split.get(line.discipline, 0.0) / 100
+                if amount <= 0:
+                    continue
+                rate = line.rate_per_hour or card.get((line.discipline or "").strip().lower(), 0)
+                if not rate:
+                    # No rate anywhere means hours can't be derived. Leaving
+                    # hours at 0 and saying so beats inventing a rate, which
+                    # would put a fabricated number in the one table that is
+                    # meant to be entirely the user's own.
+                    no_rate.append(line.discipline)
+                    continue
+                line.rate_per_hour = rate
+                line.total_hours = round(amount / rate, 1)
+                line.note = (line.note or "") or f"Indicative -- {source} split of your target fee"
+                filled += 1
+            st.session_state._discipline_fee_editor_version += 1
+            if filled:
+                st.success(
+                    f"Pre-filled {filled} discipline(s) from a {source} split. Every figure is "
+                    "indicative -- adjust before export."
+                )
+            if no_rate:
+                st.warning(
+                    "**No rate for " + ", ".join(no_rate) + "**, so hours couldn't be derived. "
+                    "Enter a rate (or add one to your Firm Profile rate card) and pre-fill again."
+                )
+            if not filled and not no_rate:
+                st.info("Nothing to pre-fill -- every row is already priced.")
+            st.rerun()
+
+
+def _fee_ai_refresh(disciplines: list[str], fee_cap: str | None):
+    """The AI-modelled benchmark call, fed this brief's real context.
+
+    Returns (estimates, error). Estimates come back EMPTY on failure, and the
+    caller must leave the table alone -- the previous version fell back to the
+    bundled figures, so a failed call looked exactly like a successful one
+    that happened to agree."""
+    analysis = st.session_state.get("analysis")
+    return fee_estimation_engine.refresh_estimate_from_ai(
+        st.session_state.get("project_type") or "",
+        disciplines,
+        fee_cap,
+        st.session_state.ai_config,
+        scope_summary=(getattr(analysis, "project_scope", "") or "") if analysis is not None else "",
+        analysis=analysis,
+    )
 
 
 def _org_model_from_state():

@@ -202,6 +202,41 @@ class LibraryEntry(Base):
     user = relationship("User", back_populates="library_entries")
 
 
+class FeeSnapshot(Base):
+    """One row per project whose fee build-up has been exported or archived:
+    the per-discipline hours/rate/amount split, as priced, kept so the firm's
+    OWN history can seed the next bid of the same type.
+
+    Why this exists: the fee sheet opened at zeros and the only "benchmark"
+    on offer was a bundled rule-of-thumb table of industry averages. A firm
+    that has priced eleven bridge duplications has far better data about its
+    own splits than any published average, and it was throwing it away.
+
+    UNIQUE on (user_id, project_key) deliberately. This is written both when
+    a pack is archived and when one is generated, and a user who regenerates
+    a pack five times has still only bid once -- without the constraint,
+    "median of 5 bids" would be one bid counted five times, which is worse
+    than having no history at all because it looks like corroboration.
+    """
+    __tablename__ = "fee_snapshots"
+    __table_args__ = (
+        UniqueConstraint("user_id", "project_key", name="uq_fee_snapshot_user_project_key"),
+    )
+
+    id = Column(String, primary_key=True, default=_uid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    project_key = Column(String, nullable=False)
+
+    project_name = Column(String, default="")
+    project_type = Column(String, default="Unspecified", index=True)
+    total_amount = Column(Float, default=0.0)
+    # [{discipline, hours, rate, amount, pct_of_total}] -- JSON rather than a
+    # child table because it is only ever read back whole, per project.
+    lines_json = Column(Text, default="[]")
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+
 class ReferenceLibraryEntry(Base):
     """A firm 'reference project' (case study / past-experience writeup) the
     user has uploaded directly to the Project Reference Library -- separate

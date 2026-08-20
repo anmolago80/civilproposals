@@ -731,6 +731,143 @@ def test_org_chart_styles(failures: list[str]) -> None:
             failures.append(f"[9] the {style} preview failed with 8 disciplines")
 
 
+def test_fee_prepopulation(failures: list[str]) -> None:
+    """Batch 10: three labelled tiers of fee prepopulation -- the firm's own
+    history, the bundled rule-of-thumb, and AI-modelled benchmarks -- with
+    history ranked first, snapshots isolated per user, and a failed AI call
+    that refuses to impersonate a successful one."""
+    from modules import db, fee_estimation_engine, fee_history, resourcing
+
+    db.init_db()
+
+    def line(discipline, hours, rate):
+        return resourcing.DisciplineFeeLine(discipline=discipline, total_hours=hours,
+                                            rate_per_hour=rate)
+
+    user_a, user_b = "test-fee-user-a", "test-fee-user-b"
+    try:
+        with db.get_session() as session:
+            session.query(db.FeeSnapshot).filter(
+                db.FeeSnapshot.user_id.in_([user_a, user_b])).delete(synchronize_session=False)
+            session.commit()
+    except Exception as exc:  # noqa: BLE001
+        failures.append(f"[10] couldn't reach the fee_snapshots table: {exc}")
+        return
+
+    # One bid is not a median -- nothing is offered until there are two.
+    fee_history.record_snapshot(user_a, "proj-1", "Bridge",
+                                [line("Structural", 100, 200), line("Geotechnical", 50, 200)])
+    if fee_history.fee_history_benchmarks(user_a, "Bridge")["disciplines"]:
+        failures.append("[10] a single past bid is presented as a benchmark")
+
+    fee_history.record_snapshot(user_a, "proj-2", "Bridge",
+                                [line("Structural", 60, 200), line("Geotechnical", 140, 200)])
+    history = fee_history.fee_history_benchmarks(user_a, "Bridge")
+    if history["bids"] != 2:
+        failures.append(f"[10] wrong bid count: {history['bids']}")
+    medians = {e["discipline"]: e["median_pct"] for e in history["disciplines"]}
+    # Structural was 66.7% then 30%; Geotechnical 33.3% then 70%.
+    if abs(medians.get("Structural", 0) - 48.4) > 0.6:
+        failures.append(f"[10] the Structural median is wrong: {medians}")
+    ranges = {e["discipline"]: (e["low_pct"], e["high_pct"]) for e in history["disciplines"]}
+    if abs(ranges["Structural"][0] - 30.0) > 0.2 or abs(ranges["Structural"][1] - 66.7) > 0.2:
+        failures.append(f"[10] the Structural range is wrong: {ranges}")
+
+    # Re-exporting the same project must refresh its snapshot, not add a bid.
+    fee_history.record_snapshot(user_a, "proj-2", "Bridge",
+                                [line("Structural", 60, 200), line("Geotechnical", 140, 200)])
+    if fee_history.fee_history_benchmarks(user_a, "Bridge")["bids"] != 2:
+        failures.append("[10] regenerating a pack counted as another bid")
+
+    # Per-user isolation: one firm's pricing must never reach another's.
+    if fee_history.fee_history_benchmarks(user_b, "Bridge")["disciplines"]:
+        failures.append("[10] one user's fee history leaked into another user's benchmark")
+    if fee_history.fee_history_benchmarks(None, "Bridge")["disciplines"]:
+        failures.append("[10] fee history is served without a user to scope it to")
+
+    # An unpriced row is dropped, not averaged in as a 0% discipline.
+    fee_history.record_snapshot(user_b, "proj-3", "Road",
+                                [line("Structural", 10, 100), line("Survey", 0, 0)])
+    fee_history.record_snapshot(user_b, "proj-4", "Road",
+                                [line("Structural", 10, 100), line("Survey", 0, 0)])
+    road = fee_history.fee_history_benchmarks(user_b, "Road")
+    if any(e["discipline"] == "Survey" for e in road["disciplines"]):
+        failures.append("[10] an unpriced discipline was stored as a 0% benchmark")
+
+    # A project with nothing priced isn't a bid at all.
+    if fee_history.record_snapshot(user_b, "proj-5", "Road", [line("Structural", 0, 0)]):
+        failures.append("[10] an unpriced project was recorded as a bid")
+
+    # Tier ranking: history wins where it covers the disciplines, bundled
+    # otherwise, and both say which they are.
+    split, source = fee_history.best_available_split(
+        user_a, "Bridge", ["Structural", "Geotechnical"])
+    if source != fee_history.SOURCE_HISTORY:
+        failures.append(f"[10] history isn't ranked above the bundled table: {source}")
+    if abs(sum(split.values()) - 100) > 0.5:
+        failures.append(f"[10] the applied split doesn't total 100%: {split}")
+    _, source = fee_history.best_available_split(user_b, "Bridge", ["Structural", "Survey"])
+    if source != fee_history.SOURCE_BUNDLED:
+        failures.append(f"[10] a user with no history isn't falling back to bundled: {source}")
+    split, _ = fee_history.best_available_split(user_b, "Bridge", ["Nonexistent Discipline"])
+    if abs(sum(split.values()) - 100) > 0.5:
+        failures.append(f"[10] an unrecognised discipline list doesn't total 100%: {split}")
+
+    # B4: the AI call must actually receive this brief's context. Asserted
+    # against the REAL prompt -- re-deriving it in the test would pass even if
+    # the context stopped reaching the model.
+    class _Analysis:
+        project_scope = "Duplicate the existing creek bridge and realign 400 m of approach road."
+        scope_items = [type("Item", (), {"title": "Bridge superstructure design", "tasks": []})()]
+
+    captured: list = []
+    estimates, error = fee_estimation_engine.refresh_estimate_from_ai(
+        "Bridge", ["Structural", "Geotechnical"], "$450,000",
+        config={"provider": "Anthropic Claude", "api_key": ""},
+        scope_summary=_Analysis.project_scope, analysis=_Analysis(),
+        capture_prompt=captured,
+    )
+    if not captured:
+        failures.append("[10] the AI benchmark prompt was never built")
+    else:
+        prompt = captured[0]
+        for expected in ("Duplicate the existing creek bridge", "Bridge superstructure design",
+                         "Structural", "Geotechnical", "$450,000", "Australian civil engineering"):
+            if expected not in prompt:
+                failures.append(f"[10] the AI prompt is missing context: {expected!r}")
+    # No API key configured, so the call fails -- and a failure must NOT hand
+    # back the bundled table dressed as a fresh estimate.
+    if estimates:
+        failures.append("[10] a failed AI call still returned estimates")
+    if not error or fee_estimation_engine.AI_BENCHMARK_LABEL not in error:
+        failures.append(f"[10] a failed AI call didn't surface an honest error: {error!r}")
+
+    # The label no longer claims to browse the web.
+    if "web" in fee_estimation_engine.AI_BENCHMARK_LABEL.lower():
+        failures.append("[10] the AI benchmark button still claims to fetch from the web")
+    if hasattr(fee_estimation_engine, "refresh_estimate_from_web"):
+        failures.append("[10] the old refresh_estimate_from_web name is still exported")
+
+    # Ranges, not single numbers, once the source gives one.
+    ranged = fee_estimation_engine.DisciplineFeeEstimate(
+        discipline="Structural", fee_percentage=15.0, pct_low=12.0, pct_high=18.0,
+        source="x", confidence="Low")
+    if ranged.range_text != "12.0-18.0%":
+        failures.append(f"[10] a ranged estimate doesn't render its range: {ranged.range_text}")
+    point = fee_estimation_engine.DisciplineFeeEstimate(
+        discipline="Structural", fee_percentage=15.0, source="x", confidence="Low")
+    if point.range_text != "15.0%":
+        failures.append(f"[10] a point estimate invented a range: {point.range_text}")
+
+    try:
+        with db.get_session() as session:
+            session.query(db.FeeSnapshot).filter(
+                db.FeeSnapshot.user_id.in_([user_a, user_b])).delete(synchronize_session=False)
+            session.commit()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def main() -> int:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     failures: list[str] = []
@@ -748,6 +885,7 @@ def main() -> int:
     test_program_styles(failures)
     test_optional_design_manager(failures)
     test_org_chart_styles(failures)
+    test_fee_prepopulation(failures)
 
     if failures:
         print("BATCH 1 WIRING TESTS FAILED:")

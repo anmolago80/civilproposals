@@ -94,6 +94,7 @@ from modules import (
     pitch_review as pitch_review_module,
     graphics_engine,
     fee_estimation_engine,
+    fee_history,
     export_docx,
     divider_designer,
     team_bios,
