@@ -214,6 +214,16 @@ def _show_error(action: str, exc: Exception) -> None:
     Full detail still goes to stderr (visible in Railway's Deploy Logs),
     just not onto a page a paying customer is looking at."""
     print(f"[{action}] {exc}", file=sys.stderr)
+    # AIConfigError messages are written FOR the user -- "switch to a model
+    # with a larger output budget", "your API key was rejected", "the
+    # selected model was cut off". Flattening those into "please try again"
+    # threw away the only sentence that told someone what to do, and left
+    # them retrying a thing that could not work. Everything else stays
+    # generic: a provider's raw API error body or a library's internal
+    # message is not something a customer can act on.
+    if isinstance(exc, ai_interface.AIConfigError):
+        st.error(f"**{action}.** {exc}")
+        return
     st.error(f"{action} -- please try again. If it keeps happening, email hello@civilproposals.com and we'll take a look.")
 
 # Design pass: hide Streamlit's default chrome (hamburger menu, "Deploy"

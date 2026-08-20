@@ -660,6 +660,28 @@ def _fee_apply_control(state_prefix: str, pending: bool, indent_note: str = "tot
     )
 
 
+# Below this a "draft" is not a draft. An AI call that returns a sentence
+# and a heading has failed at the job, but it looks like success from the
+# outside -- the expander opens, there is text in it.
+MIN_USEFUL_DRAFT_WORDS = 40
+
+
+def _thin_drafts(drafts: dict) -> list[str]:
+    """Section titles whose draft came back empty or barely there.
+
+    A blank draft rendered as a blank expander under a green "Draft
+    generation complete", which is the app asserting success about a thing
+    that did not happen. Nobody scrolls twelve expanders checking."""
+    thin = []
+    for title, draft in (drafts or {}).items():
+        text = (getattr(draft, "draft_text", "") or "").strip()
+        if not text:
+            thin.append(f"{title} (empty)")
+        elif len(text.split()) < MIN_USEFUL_DRAFT_WORDS:
+            thin.append(f"{title} ({len(text.split())} words)")
+    return thin
+
+
 def _placeholders_in_generated_pack(buffer) -> list:
     """Reads a just-generated proposal DOCX back and lists the placeholders
     really in it, for the Tender Summary's User Input Required list. Never

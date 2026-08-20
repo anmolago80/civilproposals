@@ -135,7 +135,11 @@ with tabs[7]:
                          ), type="primary"):
                 with st.spinner("Re-reading the brief for every discipline the scope implies..."):
                     try:
-                        detected = tender_analyser.detect_disciplines_from_text(brief_text, st.session_state.ai_config)
+                        detected, _detect_warnings = tender_analyser.detect_disciplines_from_text(
+                            brief_text, st.session_state.ai_config,
+                        )
+                        for _warning in _detect_warnings:
+                            st.warning(_warning)
                         existing = {a.slot for a in st.session_state.resource_plan if a.slot_kind == "discipline"}
                         dismissed_now = {d.lower() for d in st.session_state.dismissed_disciplines}
                         added = []
@@ -153,6 +157,10 @@ with tabs[7]:
                         st.session_state.resource_plan = resourcing.normalize_plan_disciplines(st.session_state.resource_plan)
                         if added:
                             st.success("Added: " + ", ".join(added))
+                        elif _detect_warnings:
+                            # Don't claim "nothing found" when the scan didn't
+                            # actually complete -- see the warnings above.
+                            pass
                         else:
                             st.info("No new disciplines found beyond what's already listed.")
                     except Exception as exc:

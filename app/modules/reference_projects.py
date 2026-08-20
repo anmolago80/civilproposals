@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from modules.ai_interface import call_ai_json
+from modules.ai_interface import call_ai_json, was_repaired
 
 SYSTEM_MESSAGE = """You are preparing the "Relevant Experience" section of an engineering/\
 infrastructure tender proposal from a firm's own library of past-project write-ups, which may \
@@ -126,7 +126,13 @@ def draft_reference_projects(
     material = (raw_text or "").strip()
     if not material:
         return [], ["No project reference material was supplied -- nothing to draft from."]
+    truncation_warning = []
     if len(material) > max_chars:
+        truncation_warning = [
+            f"Only the first {max_chars:,} characters of the reference material were read "
+            f"({len(material):,} were supplied) -- projects described later may be missing "
+            f"from the list below."
+        ]
         material = material[:max_chars] + "\n\n[...truncated for length...]"
 
     prompt = PROMPT_TEMPLATE.format(
@@ -140,7 +146,12 @@ def draft_reference_projects(
 
     raw_projects = data.get("projects", []) if isinstance(data, dict) else []
     projects = [ReferenceProject.model_validate(p) for p in raw_projects]
-    warnings = list(data.get("warnings", [])) if isinstance(data, dict) else []
+    warnings = truncation_warning + (list(data.get("warnings", [])) if isinstance(data, dict) else [])
+    if was_repaired(data):
+        warnings.append(
+            "The AI's reply was cut off and had to be recovered, so this list may be "
+            "incomplete -- check that every project you expected is here."
+        )
     if not projects:
         warnings.append("No individual reference projects could be confidently identified in the uploaded material.")
     return projects, warnings

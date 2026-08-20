@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from modules.ai_interface import call_ai, call_ai_json
+from modules.ai_interface import call_ai, call_ai_json, was_repaired
 from modules.document_processor import clean_extracted_text, split_text_into_chunks
 
 
@@ -291,27 +291,46 @@ Use short, standard discipline names. Include EVERYTHING the scope implies; don'
 
 
 def detect_disciplines_from_text(brief_text: str, config: dict | None = None,
-                                 max_chars: int = 30000) -> list[str]:
+                                 max_chars: int = 30000) -> tuple[list[str], list[str]]:
     """
     Focused discipline detection: read the brief and return the disciplines the
     job needs, inferring from the scope (not just the ones the brief names
     explicitly). This is deliberately separate from the big analyse_tender()
     pass -- a single narrow question the model answers far more reliably than as
     one field among twenty. Returns a de-duplicated list of raw discipline
-    names (the caller canonicalises). Returns [] on failure rather than raising.
+    names (the caller canonicalises).
+
+    Returns (disciplines, warnings). It used to return a bare [] both when
+    the brief genuinely implied nothing new AND when the call failed or the
+    brief was truncated -- so the UI reported "no new disciplines found" for
+    an error, which is a confident, wrong answer to a question that was
+    never actually asked.
     """
+    warnings: list[str] = []
     material = (brief_text or "").strip()
     if not material:
-        return []
+        return [], warnings
     if len(material) > max_chars:
         material = material[:max_chars] + "\n\n[...truncated for length...]"
+        warnings.append(
+            f"The brief is longer than the {max_chars:,}-character limit for this scan, so only "
+            f"its first part was read -- disciplines mentioned later may have been missed."
+        )
     try:
         data = call_ai_json(
             DISCIPLINE_DETECTION_PROMPT.format(brief=material),
             system_message=DISCIPLINE_DETECTION_SYSTEM, config=config, max_tokens=800,
         )
-    except Exception:
-        return []
+    except Exception as exc:
+        return [], warnings + [
+            f"The discipline re-scan didn't complete ({str(exc)[:140]}). Nothing was added -- "
+            f"this is not the same as finding nothing."
+        ]
+    if was_repaired(data):
+        warnings.append(
+            "The AI's response had to be recovered from a cut-off reply, so the discipline list "
+            "may be incomplete -- double-check it."
+        )
     raw = data.get("disciplines", []) if isinstance(data, dict) else []
     out: list[str] = []
     seen = set()
@@ -320,7 +339,7 @@ def detect_disciplines_from_text(brief_text: str, config: dict | None = None,
         if name and name.lower() not in seen:
             seen.add(name.lower())
             out.append(name)
-    return out
+    return out, warnings
 
 
 def _format_annotations(annotations: list[dict] | None) -> str:

@@ -339,6 +339,33 @@ def test_firm_profile(failures: list[str]) -> None:
         failures.append("[3c] an empty profile still produced a seed")
 
 
+def test_failure_honesty(failures: list[str]) -> None:
+    """Batch 6: a step that didn't happen must not report as one that found
+    nothing."""
+    from modules import ai_interface, reference_projects, team_bios
+
+    # A repaired (truncated) parse is flagged rather than looking clean.
+    if not ai_interface.was_repaired({ai_interface.REPAIRED_FLAG: True}):
+        failures.append("[6d] a repaired response isn't detectable by callers")
+    if ai_interface.was_repaired({"ok": 1}):
+        failures.append("[6d] an ordinary response is being reported as repaired")
+
+    # Truncation is reported, not silent.
+    long_text = "x " * 40000
+    members, warns = team_bios.draft_team_bios_from_cv("", max_chars=100)
+    if members:
+        failures.append("[6c] empty CV text produced members")
+    # The truncation branch must produce a warning before any AI call is
+    # attempted, so check the message construction directly.
+    import inspect
+    source = inspect.getsource(team_bios.draft_team_bios_from_cv)
+    if "characters of the CV material were read" not in source:
+        failures.append("[6c] CV truncation is still silent")
+    source = inspect.getsource(reference_projects.draft_reference_projects)
+    if "characters of the reference material were read" not in source:
+        failures.append("[6c] reference-material truncation is still silent")
+
+
 def main() -> int:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     failures: list[str] = []
@@ -351,6 +378,7 @@ def main() -> int:
     test_excel_fee_exports(failures)
     test_fee_percentages_add_up(failures)
     test_firm_profile(failures)
+    test_failure_honesty(failures)
 
     if failures:
         print("BATCH 1 WIRING TESTS FAILED:")

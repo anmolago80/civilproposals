@@ -192,6 +192,15 @@ def call_ai(prompt: str, system_message: str | None = None, config: dict | None 
 JSON_MAX_TOKENS_CEILING = 16000
 
 
+# Set on a result dict that had to be salvaged from a truncated response.
+# Callers that surface data to a user should check it (see was_repaired).
+REPAIRED_FLAG = "_ai_response_was_repaired"
+
+
+def was_repaired(data) -> bool:
+    return bool(isinstance(data, dict) and data.get(REPAIRED_FLAG))
+
+
 def call_ai_json(prompt: str, system_message: str | None = None, config: dict | None = None,
                   max_tokens: int = 4000) -> dict:
     """
@@ -245,6 +254,13 @@ def call_ai_json(prompt: str, system_message: str | None = None, config: dict | 
     # we got (close off a truncated object) rather than failing outright.
     repaired = _try_parse_json(last_raw, repair=True)
     if repaired is not None:
+        # A repaired parse closes off a TRUNCATED object, so trailing fields
+        # can be missing entirely -- and the result looks exactly like a
+        # clean one to every caller. Flagging it lets the UI say "this was
+        # recovered from a cut-off response, check it" instead of presenting
+        # a possibly-incomplete answer as if it were whole.
+        if isinstance(repaired, dict):
+            repaired[REPAIRED_FLAG] = True
         return repaired
 
     raise AIConfigError(

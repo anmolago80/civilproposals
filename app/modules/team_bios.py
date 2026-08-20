@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from modules.ai_interface import call_ai_json
+from modules.ai_interface import call_ai_json, was_repaired
 
 SYSTEM_MESSAGE = """You are compressing real CVs into short bios for a fee proposal letter, \
 in this exact three-line format:
@@ -102,7 +102,16 @@ def draft_team_bios_from_cv(
     material = (cv_text or "").strip()
     if not material:
         return [], ["No CV/company profile text was supplied -- nothing to draft from."]
+    truncation_warning = []
     if len(material) > max_chars:
+        # Silently dropping two-thirds of a CV library and then presenting
+        # the result as the firm's people is exactly the kind of quiet
+        # incompleteness this tool exists not to produce.
+        truncation_warning = [
+            f"Only the first {max_chars:,} characters of the CV material were read "
+            f"({len(material):,} were supplied) -- people whose CVs appear later may be "
+            f"missing from the draft below."
+        ]
         material = material[:max_chars] + "\n\n[...truncated for length...]"
 
     prompt = PROMPT_TEMPLATE.format(material=material,
@@ -111,7 +120,12 @@ def draft_team_bios_from_cv(
 
     raw_members = data.get("team_members", [])
     members = [TeamMember.model_validate(m) for m in raw_members]
-    warnings = list(data.get("warnings", []))
+    warnings = truncation_warning + list(data.get("warnings", []))
+    if was_repaired(data):
+        warnings.append(
+            "The AI's reply was cut off and had to be recovered, so this list may be "
+            "incomplete -- check that everyone you expected is here."
+        )
     if not members:
         warnings.append("No individual team members could be confidently identified in the uploaded material.")
     return members, warnings

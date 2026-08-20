@@ -131,7 +131,19 @@ with tabs[5]:
             )
             st.session_state.drafts = {**(st.session_state.drafts or {}), **new_drafts}
             progress.progress(1.0, text="Done.")
-            st.success("Draft generation complete.")
+            # "Complete" has to mean complete. An empty or one-sentence draft
+            # used to render as a blank expander under a green success
+            # message, and nobody opens twelve expanders to check.
+            _thin = _thin_drafts(new_drafts)
+            if _thin:
+                st.warning(
+                    "**Drafting finished, but some sections came back empty or very short:** "
+                    + ", ".join(_thin)
+                    + ". Re-run drafting for those, or write them yourself -- they will export "
+                    "as red placeholders until you do."
+                )
+            if len(_thin) < len(new_drafts):
+                st.success(f"Draft generation complete for {len(new_drafts) - len(_thin)} section(s).")
         except Exception as exc:
             _show_error("Draft generation failed", exc)
 
@@ -556,7 +568,15 @@ with tabs[5]:
                     ) if part),
                     program_weeks=_program_week_count() or None,
                 )
-                st.success("Executive summary drafted.")
+                _es = st.session_state.executive_summary
+                if not _es or not ((_es.intro or "").strip() or _es.blocks):
+                    st.warning(
+                        "The executive summary came back empty -- nothing has been saved over "
+                        "what you had. Try again, or write it yourself; the pack's first page "
+                        "exports as a red placeholder until it exists."
+                    )
+                else:
+                    st.success("Executive summary drafted.")
             except Exception as exc:
                 _show_error("Executive summary generation failed", exc)
 
@@ -591,7 +611,16 @@ with tabs[5]:
                     st.session_state.team_intro = team_intro_module.draft_team_intro(
                         _included_people, st.session_state.analysis, _project_info(), st.session_state.ai_config,
                     )
-                    st.success("Team introduction drafted.")
+                    _ti = st.session_state.team_intro
+                    if not _ti or not ((_ti.heading or "").strip() or _ti.paragraphs):
+                        st.warning(
+                            "The team introduction came back empty. This usually means the "
+                            "nominated people have no write-ups yet -- fill in their "
+                            "\"on this project they will...\" text on Team & Resourcing and "
+                            "try again."
+                        )
+                    else:
+                        st.success("Team introduction drafted.")
                 except Exception as exc:
                     _show_error("Team introduction generation failed", exc)
         if not st.session_state.resource_plan:
@@ -625,7 +654,15 @@ with tabs[5]:
                         st.session_state.reference_projects, st.session_state.analysis,
                         _project_info(), st.session_state.ai_config,
                     )
-                    st.success("Project experience introduction drafted.")
+                    _ei = st.session_state.experience_intro
+                    if not _ei or not (getattr(_ei, "paragraph", "") or "").strip():
+                        st.warning(
+                            "The project experience introduction came back empty -- the "
+                            "reference projects may have no description or relevance text yet. "
+                            "The section falls back to its default note until this exists."
+                        )
+                    else:
+                        st.success("Project experience introduction drafted.")
                 except Exception as exc:
                     _show_error("Project experience introduction generation failed", exc)
         if not st.session_state.reference_projects:
