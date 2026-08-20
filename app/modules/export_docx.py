@@ -2095,7 +2095,13 @@ def _build_review_checklist(doc: Document, sections: list):
     doc.add_heading("Review Checklist", level=1)
     items = [
         "Delete every red 'DELETE BEFORE SUBMISSION' guidance box in this document.",
-        "Replace every bracketed placeholder (e.g. [USER TO INSERT ...]) with verified, project-specific content.",
+        # The marker format named here has to match what the exporters
+        # actually write, or the instruction sends someone searching the
+        # document for a string that occurs nowhere in it. "[USER TO
+        # INSERT ...]" is a draft_generator prompt convention that never
+        # survives into an export; these three are what really appears.
+        "Replace every red bracketed placeholder -- [INSERT ...], [CONFIRM ...] and "
+        "[TO BE COMPLETED: ...] -- with verified, project-specific content.",
         "Confirm every page limit and formatting rule against the current brief and any addenda.",
         "Complete and attach all returnable schedules / forms listed in the Compliance Matrix.",
         "Confirm named personnel, CVs, certifications, and insurances are current and accurate.",
