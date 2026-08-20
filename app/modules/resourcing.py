@@ -548,7 +548,16 @@ def seed_discipline_fee_lines(disciplines_involved: list[str] | None) -> list[Di
     return [DisciplineFeeLine(discipline=d) for d in required_disciplines(disciplines_involved)]
 
 
-def discipline_fee_lines_to_excel(lines: list[DisciplineFeeLine], theme_name: str | None = None) -> bytes | None:
+UNPRICED_NOTE = "Not yet priced"
+UNPRICED_EXPLANATION = (
+    "A blank hours/rate/total cell means that discipline has NOT been priced yet -- "
+    "it is not a zero-cost or included-at-no-charge line. Price it in the app, or "
+    "delete the row, before this workbook goes to anyone."
+)
+
+
+def discipline_fee_lines_to_excel(lines: list[DisciplineFeeLine], theme_name: str | None = None,
+                                  project_info: dict | None = None) -> bytes | None:
     """
     Build a downloadable .xlsx of the hours x rate discipline fee build-up
     (the Fee Estimate tab's first table). Adds a "Total" summary row and an
@@ -557,10 +566,28 @@ def discipline_fee_lines_to_excel(lines: list[DisciplineFeeLine], theme_name: st
     sanity-check figure for whether the priced hours/rates make sense in
     aggregate, not just discipline by discipline. Returns None if openpyxl
     isn't installed (caller should show an install hint rather than crash).
+
+    An unpriced discipline exports as BLANK cells with a "Not yet priced"
+    note, never as a literal 0. The DOCX has always said "[ENTER FEE]" for
+    exactly this case; the spreadsheet said "$0", which reads to a client --
+    or to a colleague picking the file up later -- as a deliberate offer to
+    do that discipline for nothing.
     """
     from modules.excel_export import build_fee_workbook
 
-    rows = [[l.discipline, l.total_hours, l.rate_per_hour, l.fee_amount, l.note] for l in lines]
+    rows = []
+    any_unpriced = False
+    for l in lines:
+        priced = bool(l.total_hours or l.rate_per_hour)
+        if not priced:
+            any_unpriced = True
+        rows.append([
+            l.discipline,
+            l.total_hours or None,
+            l.rate_per_hour or None,
+            l.fee_amount or None,
+            l.note or (UNPRICED_NOTE if not priced else ""),
+        ])
     total_hours = sum(l.total_hours for l in lines)
     total_fee = sum(l.fee_amount for l in lines)
     avg_rate = (total_fee / total_hours) if total_hours else None
@@ -576,7 +603,28 @@ def discipline_fee_lines_to_excel(lines: list[DisciplineFeeLine], theme_name: st
         column_formats={2: "#,##0.0", 3: "$#,##0.00", 4: "$#,##0"},
         summary_rows=summary_rows,
         theme_name=theme_name,
+        title="Discipline fee build-up",
+        meta=fee_export_meta(project_info),
+        notes=[UNPRICED_EXPLANATION] if any_unpriced else None,
     )
+
+
+def fee_export_meta(project_info: dict | None) -> list[tuple[str, str]]:
+    """The identifying block at the top of an exported fee workbook. Only
+    fields the project actually holds are included -- an empty client name
+    leaves the row out rather than printing a blank or a guess."""
+    from datetime import datetime
+
+    info = project_info or {}
+    pairs = [
+        ("Project", (info.get("project_name") or "").strip()),
+        ("Client", (info.get("client_name") or "").strip()),
+        ("Tender / EOI", (info.get("tender_name") or "").strip()),
+        ("Bidder", (info.get("bidder_name") or "").strip()),
+    ]
+    meta = [(label, value) for label, value in pairs if value]
+    meta.append(("Exported", datetime.now().strftime("%d %B %Y")))
+    return meta
 
 
 _FILENAME_NOISE = {

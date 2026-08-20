@@ -333,7 +333,8 @@ with tabs[8]:
                 if st.session_state.get("_letter_disc_fee_cache_sig") != _letter_disc_signature:
                     st.session_state._letter_disc_fee_cache_sig = _letter_disc_signature
                     st.session_state._letter_disc_fee_cache_xlsx = resourcing.discipline_fee_lines_to_excel(
-                        letter_rebuilt, theme_name=st.session_state.proposal_theme)
+                        letter_rebuilt, theme_name=st.session_state.proposal_theme,
+                        project_info=_project_info())
                     st.session_state._letter_disc_fee_cache_pie = graphics_engine.generate_fee_distribution_pie(
                         [(l.discipline, l.fee_amount) for l in letter_rebuilt],
                         "Fee distribution by discipline (hours x rate)",
@@ -570,6 +571,7 @@ with tabs[8]:
                     st.session_state.fee_estimates,
                     indicative_amounts=_letter_pct_indicative_amounts,
                     theme_name=st.session_state.proposal_theme,
+                    project_info=_project_info(),
                 )
                 if letter_pct_xlsx:
                     st.download_button(

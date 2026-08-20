@@ -173,6 +173,65 @@ def test_graphics_recommendations_are_current(failures: list[str]) -> None:
         failures.append("[1g] the divider hint is still hardcoded to bridge/road")
 
 
+def _sheet_rows(blob: bytes) -> list[list]:
+    import io as _io
+
+    import openpyxl
+    ws = openpyxl.load_workbook(_io.BytesIO(blob)).active
+    return [list(row) for row in ws.iter_rows(values_only=True)]
+
+
+def test_excel_fee_exports(failures: list[str]) -> None:
+    """1(h): an unpriced discipline exported as a literal $0, which reads as
+    an offer to do that work for nothing; the workbook carried nothing
+    identifying the project; and the fee-% total cell was left empty."""
+    from modules import fee_estimation_engine, resourcing
+
+    info = {"project_name": "Example Creek Bridge", "client_name": "Example Shire Council",
+            "tender_name": "RFT 2026-014", "bidder_name": "Test Engineering Pty Ltd"}
+
+    lines = [
+        resourcing.DisciplineFeeLine(discipline="Structural", total_hours=800, rate_per_hour=210),
+        resourcing.DisciplineFeeLine(discipline="Hydraulics", total_hours=0, rate_per_hour=0),
+    ]
+    rows = _sheet_rows(resourcing.discipline_fee_lines_to_excel(lines, "Government", info))
+    flat = [str(cell) for row in rows for cell in row if cell is not None]
+
+    unpriced = next((r for r in rows if r and r[0] == "Hydraulics"), None)
+    if unpriced is None:
+        failures.append("[1h] the unpriced discipline row is missing entirely")
+    else:
+        if any(cell == 0 for cell in unpriced[1:4]):
+            failures.append(f"[1h] an unpriced discipline still exports as 0: {unpriced}")
+        if unpriced[4] != resourcing.UNPRICED_NOTE:
+            failures.append(f"[1h] the unpriced row carries no explanatory note: {unpriced}")
+    if not any("NOT been priced" in cell for cell in flat):
+        failures.append("[1h] the workbook doesn't explain what a blank fee cell means")
+    for expected in ("Example Creek Bridge", "Example Shire Council", "RFT 2026-014"):
+        if expected not in flat:
+            failures.append(f"[1h] the fee build-up workbook doesn't identify the project ({expected})")
+    priced = next((r for r in rows if r and r[0] == "Structural"), None)
+    if priced is None or priced[3] != 168000:
+        failures.append(f"[1h] a priced discipline no longer exports its total: {priced}")
+
+    estimates = [
+        fee_estimation_engine.DisciplineFeeEstimate(
+            discipline="Structural", fee_percentage=58.3, confidence="Medium", source="Benchmark"),
+        fee_estimation_engine.DisciplineFeeEstimate(
+            discipline="Geotechnical", fee_percentage=41.7, confidence="Medium", source="Benchmark"),
+    ]
+    rows = _sheet_rows(fee_estimation_engine.fee_estimates_to_excel(estimates, project_info=info))
+    total_row = next((r for r in rows if r and r[0] == "Total"), None)
+    if total_row is None:
+        failures.append("[1h] the fee-split workbook has no Total row")
+    elif total_row[1] is None:
+        failures.append("[1h] the fee-% total cell is still empty")
+    elif abs(total_row[1] - 100.0) > 0.05:
+        failures.append(f"[1h] the fee-% total is wrong: {total_row[1]}")
+    if "Example Creek Bridge" not in [str(c) for r in rows for c in r if c is not None]:
+        failures.append("[1h] the fee-split workbook doesn't identify the project")
+
+
 def main() -> int:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     failures: list[str] = []
@@ -182,6 +241,7 @@ def main() -> int:
     test_sender_address_is_wired_and_saved(failures)
     test_program_start_date(failures)
     test_graphics_recommendations_are_current(failures)
+    test_excel_fee_exports(failures)
 
     if failures:
         print("BATCH 1 WIRING TESTS FAILED:")

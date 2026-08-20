@@ -216,7 +216,8 @@ with tabs[8]:
             if st.session_state.get("_disc_fee_cache_sig") != _disc_signature:
                 st.session_state._disc_fee_cache_sig = _disc_signature
                 st.session_state._disc_fee_cache_xlsx = resourcing.discipline_fee_lines_to_excel(
-                    rebuilt, theme_name=st.session_state.proposal_theme)
+                    rebuilt, theme_name=st.session_state.proposal_theme,
+                    project_info=_project_info())
                 st.session_state._disc_fee_cache_pie = graphics_engine.generate_fee_distribution_pie(
                     [(l.discipline, l.fee_amount) for l in rebuilt],
                     "Fee distribution by discipline (hours x rate)",
@@ -584,6 +585,7 @@ with tabs[8]:
                 st.session_state.fee_estimates,
                 indicative_amounts=_fee_pct_indicative_amounts,
                 theme_name=st.session_state.proposal_theme,
+                project_info=_project_info(),
             )
             if pct_xlsx:
                 st.download_button(

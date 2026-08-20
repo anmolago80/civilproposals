@@ -124,6 +124,7 @@ def fee_estimates_to_excel(
     estimates: list[DisciplineFeeEstimate],
     indicative_amounts: dict[str, float] | None = None,
     theme_name: str | None = None,
+    project_info: dict | None = None,
 ) -> bytes | None:
     """
     Build a downloadable .xlsx of the indicative benchmark % split table.
@@ -134,26 +135,49 @@ def fee_estimates_to_excel(
     Returns None if openpyxl isn't installed.
     """
     from modules.excel_export import build_fee_workbook
+    from modules.resourcing import UNPRICED_NOTE, fee_export_meta
 
     indicative_amounts = indicative_amounts or {}
     rows = []
     total_amount = 0.0
+    total_pct = 0.0
     any_amount = False
+    any_unpriced = False
     for e in estimates:
         amount = indicative_amounts.get(e.discipline, e.fee_amount)
+        total_pct += e.fee_percentage or 0.0
         if amount:
             total_amount += amount
             any_amount = True
-        rows.append([e.discipline, e.fee_percentage, amount, e.confidence, e.source])
+        else:
+            any_unpriced = True
+        # A blank $ column means "no total project fee entered to apply this
+        # percentage to" -- exporting 0 there reads as a priced-at-nothing
+        # discipline, which is the opposite of what it means.
+        rows.append([e.discipline, e.fee_percentage or None, amount or None,
+                     e.confidence, e.source])
 
-    summary_rows = [["Total", None, total_amount if any_amount else None, "", ""]]
+    # The Fee % total cell was left empty, so the one number that tells you
+    # whether the split adds up to 100% was the one number missing.
+    summary_rows = [["Total", total_pct or None, total_amount if any_amount else None, "", ""]]
+    notes = []
+    if any_unpriced:
+        notes.append(
+            "A blank Indicative $ cell means no total project fee has been entered to apply "
+            "that percentage to -- it is not a zero-value discipline."
+        )
+    if abs(total_pct - 100.0) > 0.05 and total_pct:
+        notes.append(f"The percentages total {total_pct:.1f}%, not 100% -- check the split before using it.")
     return build_fee_workbook(
         sheet_title="Indicative fee split",
         headers=["Discipline", "Fee %", "Indicative $", "Confidence", "Source"],
         rows=rows,
-        column_formats={2: '0"%"', 3: "$#,##0"},
+        column_formats={2: '0.0"%"', 3: "$#,##0"},
         summary_rows=summary_rows,
         theme_name=theme_name,
+        title="Indicative fee split by discipline",
+        meta=fee_export_meta(project_info),
+        notes=notes or None,
     )
 
 
