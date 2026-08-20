@@ -17,8 +17,7 @@ the same ABN, insurances, logo and signatory being re-typed (or left as red
 placeholders) on every single bid.
 """
 
-import io
-import json
+import sys
 
 import streamlit as st
 
@@ -42,7 +41,22 @@ if st.session_state.get("_firm_profile_mode"):
             pass
 
     _profile_user_id = current_user.id if (IS_SAAS_MODE and current_user) else None  # noqa: F821
-    _profile = firm_profile.get_or_create(_profile_user_id)
+    try:
+        _profile = firm_profile.get_or_create(_profile_user_id)
+    except Exception as exc:  # noqa: BLE001
+        # The one unguarded database call on this page. A user mid-bid must
+        # never see a traceback -- and this page is optional, so failing it
+        # cleanly costs them nothing except this screen.
+        print(f"[firm profile] {exc}", file=sys.stderr)
+        st.error(
+            "**Couldn't open your firm profile just now.** Nothing has been lost -- your "
+            "profile is stored separately from your projects. Try again in a moment, and if it "
+            "keeps happening email hello@civilproposals.com."
+        )
+        if st.button("← Back to the app", key="_firm_exit_error"):
+            _exit_firm_profile()
+            st.rerun()
+        st.stop()
 
     _hl, _hr = st.columns([4, 1])
     with _hl:
