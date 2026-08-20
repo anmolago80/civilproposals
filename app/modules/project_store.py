@@ -76,6 +76,7 @@ PLAIN_KEYS = [
     "terms_of_engagement_text", "team_bio_warnings",
     "fee_seed_total", "program_num_weeks", "program_schedule", "program_week_labels",
     "resource_extra_names", "cv_library_filenames", "cv_extracted_names", "dismissed_disciplines",
+    "removed_management_roles",
     "body_font", "reference_project_warnings", "dismissed_fee_disciplines",
     "fee_estimate_manual_total", "project_differentiator", "project_sales_pitch",
     "methodology_wvr_confirmed", "cover_photo_index", "fee_sections_included",

@@ -42,7 +42,8 @@ with tabs[7]:
         # Coerce None -> [] for projects saved before this feature existed (those
         # load these keys back as None under the "not run yet" convention).
         if not st.session_state.resource_plan:
-            st.session_state.resource_plan = resourcing.build_resource_plan(brief_disciplines)
+            st.session_state.resource_plan = resourcing.build_resource_plan(
+                brief_disciplines, st.session_state.removed_management_roles)
         else:
             # Drop any Project Management discipline-lead row left over from a
             # project saved before this was de-duplicated against the Project
@@ -109,8 +110,42 @@ with tabs[7]:
             )
 
         st.markdown("#### Management roles")
-        st.caption("Always present on the chart: the client's PM at the top, then your Project Director, Project Manager and Design Manager.")
+        st.caption(
+            "The client's PM sits at the top of the chart, then your Project Director and "
+            "Project Manager -- those three are always there. Design Manager is optional: "
+            "remove it with the ✕ if this commission doesn't have one, and it disappears from "
+            "the chart and the pack entirely rather than sitting there as an unresolvable TBC."
+        )
         _render_resource_rows("management", known_names)
+
+        # Only offered while the role is actually gone, mirroring how a removed
+        # discipline is re-added. Adding it back also clears the removal record,
+        # so the reconcile pass stops suppressing it.
+        _mgmt_slots = {a.slot for a in st.session_state.resource_plan if a.slot_kind == "management"}
+        for _optional_role in sorted(resourcing.OPTIONAL_MANAGEMENT_ROLES):
+            if _optional_role in _mgmt_slots:
+                continue
+            _acol1, _acol2 = st.columns([2, 3])
+            with _acol1:
+                if st.button(f"+ Add {_optional_role}", key=f"_add_mgmt_{_optional_role}",
+                             type="primary"):
+                    st.session_state.removed_management_roles = [
+                        r for r in st.session_state.removed_management_roles if r != _optional_role
+                    ]
+                    # Slotted back into its proper place in the chain rather
+                    # than appended, so the chart and the pen-pic order stay in
+                    # resourcing.MANDATORY_ORG_ROLES order.
+                    st.session_state.resource_plan.insert(
+                        _management_insert_index(st.session_state.resource_plan, _optional_role),
+                        resourcing.ResourceAssignment(
+                            slot=_optional_role, slot_kind="management", is_lead=True),
+                    )
+                    st.rerun()
+            with _acol2:
+                st.caption(
+                    f"{_optional_role} is currently off this project's chart. Adding it back "
+                    "restores an unassigned row here -- nothing else changes."
+                )
 
         st.divider()
         st.markdown("#### Discipline leads")
@@ -211,7 +246,8 @@ with tabs[7]:
         st.markdown("#### Key personnel profile details")
         st.caption(
             "Feeds the numbered Key Personnel profiles in the exported pack -- Project Director, "
-            "Project Manager, Design Manager, then discipline leads, in that order. Everything here "
+            "Project Manager, Design Manager (when the project has one), then discipline leads, "
+            "in that order. Everything here "
             "is optional, user-entered text (never guessed): leave a field blank and the export "
             "shows a clearly marked placeholder instead."
         )
@@ -315,8 +351,8 @@ with tabs[7]:
             "Personnel section. A full photo + write-up profile takes real page space, so when a "
             "page-limited section is full, untick anyone whose profile isn't essential to include -- "
             "they're still on the job (still in the org chart and fee build-up), they just won't get "
-            "a dedicated profile. Project Director/Manager/Design Manager are always recommended "
-            "(project leadership), every other tick can be pre-set from an AI read of this project's "
+            "a dedicated profile. Whichever leadership roles this project carries are always "
+            "recommended (project leadership), every other tick can be pre-set from an AI read of this project's "
             "scope below, and you can always override any tick by hand."
         )
         _suggest_ready = (

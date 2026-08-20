@@ -560,6 +560,80 @@ def methodology_stage(name: str, week_start: int, week_end: int):
     return MethodologyStage(name=name, week_start=week_start, week_end=week_end)
 
 
+def test_optional_design_manager(failures: list[str]) -> None:
+    """Batch 11: Design Manager is optional. A commission without one must
+    render with the role simply absent -- never as a red TBC, because an
+    intentional removal is not a gap."""
+    import io as _io
+
+    from pptx import Presentation
+
+    from modules import org_chart, org_chart_pptx, project_store, resourcing
+
+    if "removed_management_roles" not in project_store.PLAIN_KEYS:
+        failures.append("[11] the removal isn't saved with the project")
+    loaded = project_store.load_project(project_store.save_project(
+        _State(removed_management_roles=["Design Manager"]))).get("removed_management_roles")
+    if loaded != ["Design Manager"]:
+        failures.append(f"[11] the removal didn't survive save/load: {loaded}")
+
+    # Project Director and Project Manager stay mandatory today.
+    if resourcing.OPTIONAL_MANAGEMENT_ROLES != {"Design Manager"}:
+        failures.append(
+            f"[11] unexpected optional roles: {resourcing.OPTIONAL_MANAGEMENT_ROLES}")
+    for role in ("Project Director", "Project Manager", resourcing.CLIENT_ROLE):
+        if resourcing.is_removable_management_role(role):
+            failures.append(f"[11] {role} became removable")
+    if not resourcing.is_removable_management_role("Design Manager"):
+        failures.append("[11] Design Manager isn't removable")
+
+    # A rebuild -- which is what re-running Tender Analysis does -- must not
+    # quietly put a removed role back.
+    rebuilt = resourcing.build_resource_plan(["Structural"], ["Design Manager"])
+    if any(a.slot == "Design Manager" for a in rebuilt):
+        failures.append("[11] rebuilding the plan resurrected the removed Design Manager")
+    for role in ("Project Director", "Project Manager", resourcing.CLIENT_ROLE):
+        if not any(a.slot == role for a in rebuilt):
+            failures.append(f"[11] rebuilding the plan dropped the mandatory {role}")
+
+    # Naming a mandatory role in the removal list must be ignored, not obeyed.
+    if "Project Director" not in resourcing.management_roles_for_plan(["Project Director"]):
+        failures.append("[11] a hand-edited project file can delete the Project Director")
+
+    plan = resourcing.build_resource_plan(["Structural", "Geotechnical"], ["Design Manager"])
+    for a in plan:
+        if a.slot == "Project Director":
+            a.person_name = "Jane Citizen"
+        if a.slot == "Structural":
+            a.person_name = "Tom Sample"
+
+    deck = Presentation(_io.BytesIO(org_chart_pptx.populate_org_chart(
+        plan, client_name="Example Council", project_name="P", tender_name="RFT-1")))
+    slide_text = " ".join(
+        shape.text_frame.text for shape in deck.slides[0].shapes if shape.has_text_frame)
+    if "Design Manager" in slide_text:
+        failures.append("[11] the removed Design Manager is still drawn on the org chart deck")
+    for role in ("Project Director", "Project Manager"):
+        if role not in slide_text:
+            failures.append(f"[11] the org chart deck lost its {role}")
+
+    # The in-app / DOCX-embedded PNG must render too -- it takes a different
+    # code path from the deck.
+    if not org_chart.render_org_chart(plan, project_title="P"):
+        failures.append("[11] the org chart PNG didn't render without a Design Manager")
+
+    # Nothing downstream may emit a phantom line for the missing role.
+    from modules import draft_generator
+
+    if "Design Manager" in draft_generator.format_team_context(plan):
+        failures.append("[11] the AI team context names a Design Manager that isn't staffed")
+    if any(e["role_label"] == "Design Manager" for e in resourcing.letter_team_entries(plan)):
+        failures.append("[11] the letter pack's team list still has a Design Manager")
+    if any(r == "Design Manager"
+           for entry in resourcing.personnel_profiles_deduped(plan) for r in entry["roles"]):
+        failures.append("[11] a Key Personnel profile is still reserved for the removed role")
+
+
 def main() -> int:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     failures: list[str] = []
@@ -575,6 +649,7 @@ def main() -> int:
     test_failure_honesty(failures)
     test_fee_presentation_ticks(failures)
     test_program_styles(failures)
+    test_optional_design_manager(failures)
 
     if failures:
         print("BATCH 1 WIRING TESTS FAILED:")

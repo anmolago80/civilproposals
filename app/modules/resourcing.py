@@ -11,11 +11,15 @@ brief plus a couple of hard rules, never from a "typical team" template:
   is ALWAYS included whether or not the brief names it -- every job the firm
   prices carries PM effort, so leaving it out of the fee build-up would
   understate the bid every time.
-- Every org chart, regardless of project, carries the four management roles a
-  design commission always has: the client's Project Manager at the top (their
-  side of the table), then the firm's Project Director, Project Manager, and
-  Design Manager. These are separate from the discipline leads and are never
-  dropped, even if the brief doesn't spell them out.
+- Every org chart carries the client's Project Manager at the top (their side
+  of the table), then the firm's Project Director and Project Manager. Those
+  three are separate from the discipline leads and are never dropped, even if
+  the brief doesn't spell them out.
+- Design Manager is OPTIONAL (see OPTIONAL_MANAGEMENT_ROLES). It is created by
+  default because most design commissions have one, but a smaller commission
+  often does not, and the user can remove it exactly as they remove a
+  discipline lead. A role the user removed on purpose is not a gap: nothing
+  downstream renders a TBC for it, it simply is not there.
 
 Nothing here calls the AI. Name assignment is done by the user in the app
 (picking from CV-derived names or typing someone in who has no CV uploaded);
@@ -36,6 +40,17 @@ from modules.ai_interface import call_ai_json
 CLIENT_ROLE = "Client Project Manager"
 FIRM_MANAGEMENT_ROLES = ["Project Director", "Project Manager", "Design Manager"]
 MANDATORY_ORG_ROLES = [CLIENT_ROLE] + FIRM_MANAGEMENT_ROLES
+
+# Management roles the user may remove from the chart, the way they can remove
+# a discipline lead. Everything else in MANDATORY_ORG_ROLES stays put: a
+# commission always has a client contact, a director and a project manager,
+# but plenty of smaller ones have no separate Design Manager -- and until this
+# existed, that role sat on every chart and every pen-pic list carrying a red
+# TBC that could never be resolved.
+#
+# A set rather than a hardcoded check so that making another role optional
+# later is a one-line change here, not a hunt through the consumers.
+OPTIONAL_MANAGEMENT_ROLES = {"Design Manager"}
 
 # Fixed note shown next to the firm's three leadership roles' "include in proposal"
 # tick -- these three are never judged against scope (see suggest_proposal_inclusion),
@@ -499,16 +514,45 @@ def excluded_personnel_names(plan: list) -> set[str]:
     return excluded
 
 
-def build_resource_plan(disciplines_involved: list[str] | None) -> list[ResourceAssignment]:
+def is_removable_management_role(slot: str) -> bool:
+    """Whether this management row gets a remove control. See
+    OPTIONAL_MANAGEMENT_ROLES."""
+    return (slot or "").strip() in OPTIONAL_MANAGEMENT_ROLES
+
+
+def management_roles_for_plan(removed_roles: list[str] | None = None) -> list[str]:
+    """The management rows a plan should carry, minus any OPTIONAL role the
+    user has removed.
+
+    Only optional roles can be dropped: a `removed_roles` list naming
+    "Project Director" (hand-edited project file, or a future change that
+    made it optional and was then reverted) is ignored rather than silently
+    producing a chart with no director.
     """
-    Build the starting resourcing plan: the four mandatory management roles
-    first (unassigned), then one lead slot per required discipline --
+    removed = {
+        (role or "").strip().lower() for role in (removed_roles or [])
+        if (role or "").strip() in OPTIONAL_MANAGEMENT_ROLES
+    }
+    return [role for role in MANDATORY_ORG_ROLES if role.lower() not in removed]
+
+
+def build_resource_plan(disciplines_involved: list[str] | None,
+                        removed_management_roles: list[str] | None = None) -> list[ResourceAssignment]:
+    """
+    Build the starting resourcing plan: the mandatory management roles first
+    (unassigned, minus any optional one the user has removed -- see
+    management_roles_for_plan), then one lead slot per required discipline --
     excluding Project Management, which the Project Manager management role
     already covers (see resourcing_disciplines). The user fills in the names
     in the app.
+
+    `removed_management_roles` is threaded through rather than read from
+    session state because this is also the path a re-analysed brief rebuilds
+    the plan on: without it, re-running Tender Analysis would quietly put a
+    Design Manager the user had removed back on the chart.
     """
     plan: list[ResourceAssignment] = []
-    for role in MANDATORY_ORG_ROLES:
+    for role in management_roles_for_plan(removed_management_roles):
         plan.append(ResourceAssignment(slot=role, slot_kind="management", is_lead=True))
     for disc in resourcing_disciplines(disciplines_involved):
         plan.append(ResourceAssignment(slot=disc, slot_kind="discipline", is_lead=True))

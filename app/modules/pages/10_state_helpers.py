@@ -107,6 +107,12 @@ def _init_state():
         "cv_library_filenames": [],
         "cv_extracted_names": [],
         "org_chart_png": None,
+        # Optional management roles (resourcing.OPTIONAL_MANAGEMENT_ROLES) the
+        # user has removed from this project's chart. Kept as an explicit
+        # record rather than inferred from the plan's absence, for the same
+        # reason dismissed_disciplines exists: without it, every reconcile
+        # pass would helpfully put the role back.
+        "removed_management_roles": [],
         "body_font": "Arial",
         # Key-personnel headshots (Team & Resourcing tab), keyed by person_name --
         # same pattern as team_photos. None means "not run yet" is not applicable
@@ -1177,6 +1183,29 @@ def _files_signature(files) -> tuple:
     return tuple((getattr(f, "name", ""), getattr(f, "size", None)) for f in (files or []))
 
 
+def _management_insert_index(plan: list, role: str) -> int:
+    """Where a re-added management role goes back in the plan.
+
+    Before the first management row that comes AFTER it in
+    resourcing.MANDATORY_ORG_ROLES, so the chain reads client -> director ->
+    manager -> design manager however many times it has been removed and
+    restored. Appending instead would leave the restored role below the
+    discipline leads in the pen-pic order."""
+    order = resourcing.MANDATORY_ORG_ROLES
+    if role not in order:
+        return len(plan)
+    rank = order.index(role)
+    for index, assignment in enumerate(plan):
+        if getattr(assignment, "slot_kind", "") != "management":
+            continue
+        slot = getattr(assignment, "slot", "")
+        if slot in order and order.index(slot) > rank:
+            return index
+    # No later management row -- go after the last management row there is.
+    last = [i for i, a in enumerate(plan) if getattr(a, "slot_kind", "") == "management"]
+    return (last[-1] + 1) if last else 0
+
+
 def _render_resource_rows(kind: str, known_names: list) -> None:
     """Render the assign-a-person rows for the Team & Resourcing tab, for either
     the 'management' roles or the 'discipline' leads. Each row lets the user pick
@@ -1201,7 +1230,12 @@ def _render_resource_rows(kind: str, known_names: list) -> None:
         if a.slot_kind != kind:
             continue
         is_support = kind == "discipline" and not a.is_lead
-        cols = st.columns([3, 3, 1, 1]) if kind == "discipline" else st.columns([3, 3, 1])
+        # A management row gets a remove control only if the role is optional
+        # (resourcing.OPTIONAL_MANAGEMENT_ROLES) -- a chart with no project
+        # director isn't a chart.
+        removable_management = kind == "management" and resourcing.is_removable_management_role(a.slot)
+        cols = (st.columns([3, 3, 1, 1]) if kind == "discipline"
+                else (st.columns([3, 3, 1]) if removable_management else st.columns([3, 3])))
         with cols[0]:
             if is_support:
                 st.caption(f"↳ under {a.slot}")
@@ -1238,6 +1272,14 @@ def _render_resource_rows(kind: str, known_names: list) -> None:
             else:
                 a.person_name = choice
                 a.from_cv = choice in known_names
+        if removable_management:
+            with cols[2]:
+                if st.button(
+                    "✕", key=f"res_del_{kind}_{i}",
+                    help=f"Remove {a.slot} from this project -- not every commission has one. "
+                         f"You can add it back below.",
+                 type="primary"):
+                    remove_index = i
         if kind == "discipline":
             with cols[2]:
                 if not is_support and st.button(
@@ -1264,7 +1306,13 @@ def _render_resource_rows(kind: str, known_names: list) -> None:
         st.rerun()
     if remove_index is not None:
         removed = plan.pop(remove_index)
-        if removed.is_lead:
+        if removed.slot_kind == "management":
+            # Recorded, not merely absent -- otherwise the next reconcile pass
+            # (or a re-run of Tender Analysis, which rebuilds the plan) puts it
+            # straight back. Same reasoning as dismissed_disciplines.
+            if removed.slot not in st.session_state.removed_management_roles:
+                st.session_state.removed_management_roles.append(removed.slot)
+        elif removed.is_lead:
             # Cascade: a removed lead's support rows have nothing left to be
             # nested under, so they go too rather than becoming orphans.
             plan[:] = [x for x in plan if not (x.slot_kind == "discipline" and not x.is_lead and x.slot == removed.slot)]

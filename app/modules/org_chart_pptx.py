@@ -316,6 +316,10 @@ def populate_org_chart(resource_plan: list, client_name: str = "", project_name:
 
     # ---- resourcing lookups -----------------------------------------------
     mgmt_by_slot = {}
+    # Which management roles this project actually carries. A role absent from
+    # the plan was removed on purpose (see resourcing.OPTIONAL_MANAGEMENT_ROLES)
+    # and must not be drawn at all.
+    present_mgmt_slots: set[str] = set()
     # [slot, lead_name, [(support_name, support_title), ...]] in first-seen
     # order, one entry per slot. A support member (see
     # resourcing.ResourceAssignment.custom_title) is anyone added under a
@@ -328,6 +332,7 @@ def populate_org_chart(resource_plan: list, client_name: str = "", project_name:
         if not slot:
             continue
         if slot in _MANAGEMENT_CHAIN:
+            present_mgmt_slots.add(slot)
             if name and not mgmt_by_slot.get(slot):
                 mgmt_by_slot[slot] = name
             continue
@@ -344,40 +349,36 @@ def populate_org_chart(resource_plan: list, client_name: str = "", project_name:
             entry[2].append((name, title))
 
     # ---- management chain -- single vertical stack ------------------------
+    # Built from the roles the plan ACTUALLY carries, in _MANAGEMENT_CHAIN
+    # order, rather than four hardcoded boxes. Design Manager is optional
+    # (resourcing.OPTIONAL_MANAGEMENT_ROLES) and a project that removed it must
+    # get a three-box chain -- not a fourth box with a TBC in it, which is what
+    # the hardcoded version drew and which reads as an unfilled gap rather than
+    # a deliberate absence.
     cx = _SLIDE_W // 2
     mgmt_x = cx - _MGMT_W // 2
 
-    client_y = Inches(0.25)
-    _management_box(slide, mgmt_x, client_y, "Client Project Manager",
-                     mgmt_by_slot.get("Client Project Manager", ""), _BLACK)
-
-    pd_y = Emu(client_y + _MGMT_H + _MGMT_ROW_GAP)
-    _management_box(slide, mgmt_x, pd_y, "Project Director",
-                     mgmt_by_slot.get("Project Director", ""), palette["mgmt"], palette["mgmt_text"])
-
-    pm_y = Emu(pd_y + _MGMT_H + _MGMT_ROW_GAP)
-    _management_box(slide, mgmt_x, pm_y, "Project Manager",
-                     mgmt_by_slot.get("Project Manager", ""), palette["mgmt"], palette["mgmt_text"])
-
-    dm_y = Emu(pm_y + _MGMT_H + _MGMT_ROW_GAP)
-    _management_box(slide, mgmt_x, dm_y, "Design Manager",
-                     mgmt_by_slot.get("Design Manager", ""), palette["mgmt"], palette["mgmt_text"])
-
-    for top_y, bottom_y in (
-        (Emu(client_y + _MGMT_H), pd_y),
-        (Emu(pd_y + _MGMT_H), pm_y),
-        (Emu(pm_y + _MGMT_H), dm_y),
-    ):
-        _connector(slide, MSO_CONNECTOR.STRAIGHT, cx, top_y, cx, bottom_y)
+    chain = [role for role in _MANAGEMENT_CHAIN if role in present_mgmt_slots]
+    chain_y = Inches(0.25)
+    previous_bottom = None
+    for role in chain:
+        fill = _BLACK if role == "Client Project Manager" else palette["mgmt"]
+        colour = _WHITE if role == "Client Project Manager" else palette["mgmt_text"]
+        _management_box(slide, mgmt_x, chain_y, role, mgmt_by_slot.get(role, ""), fill, colour)
+        if previous_bottom is not None:
+            _connector(slide, MSO_CONNECTOR.STRAIGHT, cx, previous_bottom, cx, chain_y)
+        previous_bottom = Emu(chain_y + _MGMT_H)
+        chain_y = Emu(chain_y + _MGMT_H + _MGMT_ROW_GAP)
+    chain_bottom = previous_bottom if previous_bottom is not None else Inches(0.25)
 
     # ---- Peer Review box, top-right: one line per discipline ---------------
     _add_peer_review_box(slide, [slot for slot, _name, _supports in disciplines],
-                          top=Inches(0.25), bottom_limit=Emu(dm_y + _MGMT_H), palette=palette)
+                          top=Inches(0.25), bottom_limit=chain_bottom, palette=palette)
 
     # ---- discipline cards -- symmetric, fully data-driven, wraps to more
     # rows rather than shrinking past legibility -------------------------
     n = len(disciplines)
-    bottom_y = Emu(dm_y + _MGMT_H)
+    bottom_y = chain_bottom
     if n:
         available = _SLIDE_W - 2 * _COL_MARGIN
         max_cols_per_row = max(1, int((available + _MIN_GAP) // (_DISC_W_MIN + _MIN_GAP)))
@@ -386,7 +387,7 @@ def populate_org_chart(resource_plan: list, client_name: str = "", project_name:
 
         rows = [disciplines[i:i + cols_per_row] for i in range(0, n, cols_per_row)]
 
-        prev_bottom_y = Emu(dm_y + _MGMT_H)
+        prev_bottom_y = chain_bottom
         for row in rows:
             row_n = len(row)
             disc_w = _DISC_W_DEFAULT

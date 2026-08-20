@@ -96,6 +96,67 @@ def main() -> int:
             if at.session_state["program_style"] != "timeline":
                 failures.append("[program style] the chosen style did not round-trip")
 
+    # The Design Manager ✕ and the "+ Add Design Manager" that replaces it are
+    # only reachable once the Team & Resourcing tab has a plan to render.
+    if not failures:
+        from modules import resourcing
+        from modules.tender_analyser import ScopeItem, TenderAnalysis
+
+        at = AppTest.from_file("app.py", default_timeout=180)
+        at.session_state["analysis"] = TenderAnalysis(
+            project_scope="Example scope",
+            disciplines_involved=["Structural", "Geotechnical"],
+            scope_items=[ScopeItem(title="Concept design", tasks=["Sketch options"])],
+        )
+        at.session_state["resource_plan"] = resourcing.build_resource_plan(
+            ["Structural", "Geotechnical"])
+        at.run()
+        for exc in at.exception:
+            failures.append(f"[design manager] exception: {exc.value}")
+
+        def _slots(app):
+            return [a.slot for a in app.session_state["resource_plan"]
+                    if a.slot_kind == "management"]
+
+        remove = [b for b in at.button if b.key == "res_del_management_3"]
+        if "Design Manager" not in _slots(at):
+            failures.append("[design manager] the seeded plan has no Design Manager to remove")
+        elif not remove:
+            failures.append("[design manager] the Design Manager row has no remove control")
+        else:
+            remove[0].click().run()
+            for exc in at.exception:
+                failures.append(f"[design manager] exception after removing: {exc.value}")
+            if "Design Manager" in _slots(at):
+                failures.append("[design manager] ✕ didn't remove the role")
+            if at.session_state["removed_management_roles"] != ["Design Manager"]:
+                failures.append("[design manager] the removal wasn't recorded")
+            # It must survive a plain rerun -- the reconcile pass runs again
+            # every time the tab renders, and that is where it used to come back.
+            at.run()
+            if "Design Manager" in _slots(at):
+                failures.append("[design manager] the reconcile pass resurrected the role")
+            add = [b for b in at.button if b.key == "_add_mgmt_Design Manager"]
+            if not add:
+                failures.append("[design manager] no way to add the role back")
+            else:
+                add[0].click().run()
+                for exc in at.exception:
+                    failures.append(f"[design manager] exception after re-adding: {exc.value}")
+                restored = _slots(at)
+                if "Design Manager" not in restored:
+                    failures.append("[design manager] the role wasn't restored")
+                elif restored != resourcing.MANDATORY_ORG_ROLES:
+                    failures.append(
+                        f"[design manager] restored out of chain order: {restored}")
+                if at.session_state["removed_management_roles"]:
+                    failures.append("[design manager] the removal record wasn't cleared")
+
+        # Project Director and Project Manager must stay non-removable.
+        for index, role in ((1, "Project Director"), (2, "Project Manager")):
+            if [b for b in at.button if b.key == f"res_del_management_{index}"]:
+                failures.append(f"[design manager] {role} became removable")
+
     if failures:
         print("SMOKE TEST FAILED:")
         for f in failures:
