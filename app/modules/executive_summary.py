@@ -57,14 +57,32 @@ KEY SCOPE ITEMS (from the brief):
 DISCIPLINES INVOLVED:
 {disciplines}
 
+BIDDER (the firm writing this response): {bidder_name}
+
+FEE AND PROGRAM CONTEXT (where the brief or the bid states them -- reference only what is \
+here, never a figure or a duration you were not given):
+{commercial_context}
+
+USER-STATED WIN THEMES (the bid team's own words on what sets this firm apart and why it \
+should win -- REPHRASE ONLY; never extend these into a claim they did not make):
+{win_themes}
+
 NOMINATED TEAM (the ACTUAL people staffed to this bid -- only use these names; for any role \
 not listed here, refer to the role generically, never invent a name):
 {team_context}
 
+WHAT THE PROPOSAL ITSELF ACTUALLY SAYS -- the headings of the sections that have been drafted, \
+in order. The executive summary INTRODUCES this document, so it must not promise anything the \
+document does not go on to cover. If a subject is not among these sections, do not claim the \
+proposal addresses it:
+{drafted_sections}
+
 Write:
 1. A short intro (2-3 sentences) that names the project and client, and sets a warm, confident \
 tone -- this firm is genuinely well-placed to deliver this project.
-2. Between 5 and 8 short blocks, each with a catchy, benefit-forward title (think "Safe hands \
+2. Between 3 and 5 short blocks (this page has a ONE-PAGE budget -- 5 to 8 blocks plus an intro \
+does not fit on one page, so choose the strongest few rather than covering every angle), each \
+with a catchy, benefit-forward title (think "Safe hands \
 with our technical team", "Designing for holistic resilience", "Committed and available" -- \
 specific to THIS project's real scope and team, not generic filler) and a tight paragraph (2-4 \
 sentences) underneath. Cover a spread of angles appropriate to what's actually in this brief -- \
@@ -94,16 +112,31 @@ class ExecutiveSummary(BaseModel):
     blocks: list[ExecutiveSummaryBlock] = Field(default_factory=list)
 
 
+# One page, and an exec summary that overruns is the first thing an
+# evaluator notices about a proposal's discipline. Enforced after the call
+# as well as asked for in the prompt.
+MAX_BLOCKS = 5
+
+
 def draft_executive_summary(
     analysis,
     project_info: dict | None = None,
     team_context: str | None = None,
     config: dict | None = None,
+    drafted_section_titles: list[str] | None = None,
+    win_themes: str = "",
+    program_weeks: int | None = None,
 ) -> ExecutiveSummary:
     """Draft the Executive Summary. `analysis` is a tender_analyser.TenderAnalysis;
     `team_context` should already be filtered to only personnel actually going
     into the proposal (draft_generator.format_team_context(resource_plan) --
-    which itself now respects the "Include in proposal" tick)."""
+    which itself now respects the "Include in proposal" tick).
+
+    `drafted_section_titles`: the headings of the sections that have actually
+    been drafted. The executive summary introduces the document, and without
+    knowing what is in it, it could promise an evaluator something the
+    methodology never mentions -- so it is generated AFTER the drafts and
+    told what they cover."""
     project_info = project_info or {}
     scope_items = getattr(analysis, "scope_items", None) or []
     scope_lines = []
@@ -113,8 +146,21 @@ def draft_executive_summary(
         if title:
             scope_lines.append(f"- {title}" + (f": {', '.join(tasks[:4])}" if tasks else ""))
 
+    commercial_bits = []
+    fee_cap = (getattr(analysis, "fee_cap", "") or "").strip()
+    if fee_cap:
+        commercial_bits.append(f"- Fee cap stated in the brief: {fee_cap}")
+    if program_weeks:
+        commercial_bits.append(f"- Delivery program entered for this bid: {program_weeks} weeks")
+
     prompt = PROMPT_TEMPLATE.format(
         project_name=project_info.get("project_name") or "(not supplied)",
+        bidder_name=project_info.get("bidder_name") or "(not supplied)",
+        commercial_context="\n".join(commercial_bits) or "- (none stated)",
+        win_themes=(win_themes or "").strip() or "(none written)",
+        drafted_sections="\n".join(f"- {t}" for t in (drafted_section_titles or []))
+                          or "- (no sections drafted yet -- do not claim the proposal covers any "
+                             "specific subject)",
         client_name=project_info.get("client_name") or "(not supplied)",
         project_scope=(getattr(analysis, "project_scope", "") or "").strip() or "(not extracted)",
         client_objectives="\n".join(f"- {o}" for o in (getattr(analysis, "client_objectives", None) or [])) or "- (none extracted)",
@@ -130,4 +176,5 @@ def draft_executive_summary(
         for b in (data.get("blocks") or [])
         if (b.get("body") or "").strip()
     ]
-    return ExecutiveSummary(intro=(data.get("intro") or "").strip(), blocks=blocks)
+    # Hard cap: the prompt asks for a page's worth, this guarantees it.
+    return ExecutiveSummary(intro=(data.get("intro") or "").strip(), blocks=blocks[:MAX_BLOCKS])

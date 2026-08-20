@@ -1066,6 +1066,11 @@ def _build_proposal_response(
         note = guidance_notes.get(section.title)
         if note:
             _add_red_guidance_block(doc, note)
+        # Length against the section's own page budget. A draft at a third of
+        # its allocation reads as thin to an evaluator scoring it, and a draft
+        # well over won't fit -- neither is visible without counting words by
+        # hand, so the guidance note says it.
+        _add_length_note(doc, section, (drafts or {}).get(section.title))
 
         draft = drafts.get(section.title)
 
@@ -2451,6 +2456,31 @@ def _add_placeholder_paragraph(doc: Document, text: str):
     run = p.add_run(text)
     run.font.color.rgb = RED
     run.font.italic = True
+
+
+def _add_length_note(doc: Document, section, draft) -> None:
+    """Flags a draft that is well under or over its page allocation."""
+    if draft is None:
+        return
+    from modules.draft_generator import LENGTH_TOLERANCE, length_verdict, target_words
+
+    verdict = length_verdict(section, draft)
+    if not verdict:
+        return
+    words = len((draft.draft_text or "").split())
+    target = target_words(section)
+    pages = getattr(section, "allocated_pages", 1)
+    p = doc.add_paragraph()
+    run = p.add_run(
+        f"[LENGTH: this draft is about {words} words against roughly {target} for its "
+        f"{pages}-page allocation -- {'well under' if verdict == 'under' else 'well over'} "
+        f"budget (more than {int(LENGTH_TOLERANCE * 100)}% out). "
+        + ("Expand it with real detail, or re-check the allocation."
+           if verdict == "under" else
+           "Cut it back, or re-check the allocation.")
+    )
+    run.font.color.rgb = RED
+    run.italic = True
 
 
 def _add_red_guidance_block(doc: Document, note):

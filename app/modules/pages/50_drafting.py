@@ -444,6 +444,11 @@ with tabs[5]:
         "drafted warm and sales-forward rather than dry -- catchy titles, short readable "
         "blocks, grounded in the real brief and the real (included) nominated team."
     )
+    if not st.session_state.drafts:
+        st.caption(
+            "Draft the sections first -- the summary is written from what the proposal "
+            "actually says, so that it can't promise a subject the document doesn't cover."
+        )
     if st.button("Generate Executive Summary (AI)", disabled=not ready, type="primary"):
         with st.spinner("Drafting executive summary..."):
             try:
@@ -451,6 +456,16 @@ with tabs[5]:
                 _team_context = draft_generator.format_team_context(st.session_state.resource_plan)
                 st.session_state.executive_summary = executive_summary_module.draft_executive_summary(
                     st.session_state.analysis, _project_info(), _team_context, st.session_state.ai_config,
+                    # The summary introduces the document, so it is told what
+                    # the document actually contains -- without this it could
+                    # promise an evaluator a subject the methodology never
+                    # mentions.
+                    drafted_section_titles=sorted((st.session_state.drafts or {}).keys()),
+                    win_themes="\n\n".join(part for part in (
+                        (st.session_state.project_differentiator or "").strip(),
+                        (st.session_state.project_sales_pitch or "").strip(),
+                    ) if part),
+                    program_weeks=_program_week_count() or None,
                 )
                 st.success("Executive summary drafted.")
             except Exception as exc:
