@@ -36,8 +36,8 @@ def build_sample_project() -> dict:
     """One realistic in-progress project, as a plain dict of the session-state
     values the exporters read."""
     from modules import (
-        draft_generator, fee_estimation_engine, proposal_structure, reference_projects,
-        resourcing, tender_analyser,
+        draft_generator, fee_estimation_engine, page_allocation, proposal_structure,
+        reference_projects, resourcing, tender_analyser, weighting_engine,
     )
 
     analysis = tender_analyser.TenderAnalysis(
@@ -79,12 +79,45 @@ def build_sample_project() -> dict:
         disciplines_involved=["Structural", "Geotechnical", "Hydraulics & Hydrology"],
     )
 
-    # The real Large Scope skeleton (Executive Summary, Relevant Experience,
-    # Key Personnel, Methodology, ...) -- built through the same entry point
-    # the Proposal Structure tab uses, so the exported document has the same
-    # shape a user's would.
+    # The real Large Scope skeleton, built through the same entry point the
+    # Proposal Structure tab uses, so the exported document has the shape a
+    # user's would. Weighted criteria are supplied (rather than left empty)
+    # because a bare skeleton is only the four fixed sections -- no Commercial
+    # or Relationship Management section, and so no coverage of the parts of
+    # the exporter that render them.
+    weighted_criteria = [
+        weighting_engine.WeightedCriterion(
+            criterion_name="Methodology and program", criterion_code="SC1",
+            applied_weighting=35.0, weighting_source="tender_provided",
+            mapped_section="Methodology / Approach", priority_rank=1,
+        ),
+        weighting_engine.WeightedCriterion(
+            criterion_name="Relevant experience", criterion_code="SC2",
+            applied_weighting=25.0, weighting_source="tender_provided",
+            mapped_section="Relevant Experience", priority_rank=2,
+        ),
+        weighting_engine.WeightedCriterion(
+            criterion_name="Key personnel", criterion_code="SC3",
+            applied_weighting=20.0, weighting_source="tender_provided",
+            mapped_section="Key Personnel / Capability", priority_rank=3,
+        ),
+        weighting_engine.WeightedCriterion(
+            criterion_name="Commercial and value for money", criterion_code="SC4",
+            applied_weighting=20.0, weighting_source="tender_provided",
+            mapped_section="Commercial", priority_rank=4,
+        ),
+    ]
+    allocations = [
+        page_allocation.PageAllocation(
+            section_name=c.mapped_section, weighting=c.applied_weighting,
+            page_limit_source="weighted_total_limit", allocated_pages=3,
+            reason="Weighted share of the total page limit.",
+        )
+        for c in weighted_criteria
+    ]
     sections = proposal_structure.build_proposal_structure(
-        analysis, weighted_criteria=[], allocations=[], proposal_format="formal",
+        analysis, weighted_criteria=weighted_criteria, allocations=allocations,
+        proposal_format="formal",
     )
 
     resource_plan = [
@@ -137,7 +170,9 @@ def build_sample_project() -> dict:
     program_schedule = {
         "Project inception and site investigation": [i < 3 for i in range(12)],
         "Concept design": [2 <= i < 6 for i in range(12)],
-        "Detailed design": [5 <= i < 12 for i in range(12)],
+        # Week 12 is deliberately idle: the derived cash flow must show a
+        # gap there rather than smearing fee across a week with no work.
+        "Detailed design": [5 <= i < 11 for i in range(12)],
     }
 
     drafts = {
@@ -234,6 +269,8 @@ def generate_all(project: dict) -> dict:
         org_chart_png=org_png,
         reference_projects=project["reference_projects"],
         discipline_fee_lines=project["discipline_fee_lines"],
+        program_schedule=project["program_schedule"],
+        program_week_labels=project["program_week_labels"],
     ).getvalue()
 
     out["Tender_Summary.docx"] = export_docx.build_tender_summary_docx(
@@ -333,6 +370,35 @@ def check(files: dict, failures: list[str]) -> None:
         failures.append("[1c] the org chart's replace-me note is missing")
     if "Project organisation chart" not in large:
         failures.append("[1c] the org chart heading disappeared")
+
+    # 1(d): the cash-flow profile is derived when the fee build-up and the
+    # program both exist, instead of telling the user to combine them by hand.
+    if "[INSERT PROJECT CASH FLOW PROFILE" in large:
+        failures.append("[1d] cash flow is still a placeholder despite a priced fee and a program")
+    if "Indicative only, derived from your fee build-up and program" not in large:
+        failures.append("[1d] the derived cash flow's honesty note is missing")
+
+    from modules import export_docx
+    project = build_sample_project()
+    rows = export_docx.cash_flow_rows(
+        project["discipline_fee_lines"], project["program_schedule"], project["program_week_labels"],
+    )
+    expected_total = sum(l.fee_amount for l in project["discipline_fee_lines"])
+    if not rows:
+        failures.append("[1d] cash_flow_rows returned nothing for a fully-specified project")
+    else:
+        if abs(rows[-1][2] - expected_total) > 0.01:
+            failures.append(f"[1d] cash flow doesn't sum to the fee total: {rows[-1][2]} vs {expected_total}")
+        # Week 12 has no scope item active in the fixture -- it must carry $0
+        # rather than have money smeared into it.
+        if abs(rows[-1][1]) > 0.01:
+            failures.append("[1d] a week with no programmed work was given fee")
+
+    # ...and it must NOT invent a profile when either input is missing.
+    if export_docx.cash_flow_rows(project["discipline_fee_lines"], {}, []):
+        failures.append("[1d] a cash flow was derived with no program")
+    if export_docx.cash_flow_rows([], project["program_schedule"], project["program_week_labels"]):
+        failures.append("[1d] a cash flow was derived with no priced fee")
 
 
 def main() -> int:

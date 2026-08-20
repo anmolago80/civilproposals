@@ -151,6 +151,11 @@ with tabs[9]:
                     differentiator_text=st.session_state.project_differentiator,
                     sales_pitch_text=st.session_state.project_sales_pitch,
                     ocr_note=_ocr_export_note(),
+                    # Feeds the Commercial section's derived cash-flow profile
+                    # (export_docx.cash_flow_rows) -- the priced fee build-up
+                    # spread over the weeks this program actually has work in.
+                    program_schedule=st.session_state.program_schedule,
+                    program_week_labels=st.session_state.program_week_labels,
                 )
                 st.session_state.docx_buffer = buffer
 

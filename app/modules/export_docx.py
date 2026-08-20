@@ -86,6 +86,8 @@ def build_docx(
     differentiator_text: str | None = None,
     sales_pitch_text: str | None = None,
     ocr_note: str | None = None,
+    program_schedule: dict[str, list[bool]] | None = None,
+    program_week_labels: list[str] | None = None,
 ) -> io.BytesIO:
     theme = _theme_colours(project_info.get("proposal_theme"))
     font = body_font or DEFAULT_FONT
@@ -120,7 +122,9 @@ def build_docx(
                              project_info=project_info,
                              team_intro=team_intro,
                              experience_intro=experience_intro,
-                             sales_pitch_text=sales_pitch_text)
+                             sales_pitch_text=sales_pitch_text,
+                             program_schedule=program_schedule,
+                             program_week_labels=program_week_labels)
 
     buffer = io.BytesIO()
     doc.save(buffer)
@@ -937,6 +941,8 @@ def _build_proposal_response(
     team_intro=None,
     experience_intro=None,
     sales_pitch_text: str | None = None,
+    program_schedule: dict[str, list[bool]] | None = None,
+    program_week_labels: list[str] | None = None,
 ):
     divider_images = divider_images or {}
     resource_plan = resource_plan or []
@@ -1025,7 +1031,9 @@ def _build_proposal_response(
         if _is_relationship_section(section.title):
             _build_relationship_management(doc, project_info, theme)
         if _is_commercial_section(section.title):
-            _build_commercial_section(doc, discipline_fee_lines, theme)
+            _build_commercial_section(doc, discipline_fee_lines, theme,
+                                      program_schedule=program_schedule,
+                                      program_week_labels=program_week_labels)
             if local_benefit_needed:
                 _build_local_benefits(doc, project_info, theme)
         elif _is_local_benefit_section(section.title):
@@ -1844,7 +1852,9 @@ def _build_relationship_management(doc: Document, project_info: dict | None, the
     doc.add_paragraph()
 
 
-def _build_commercial_section(doc: Document, discipline_fee_lines: list | None, theme: dict | None):
+def _build_commercial_section(doc: Document, discipline_fee_lines: list | None, theme: dict | None,
+                              program_schedule: dict[str, list[bool]] | None = None,
+                              program_week_labels: list[str] | None = None):
     """A punchier, structured commercial section -- a fee table by discipline/
     stage with a highlighted total, then short Cash flow / Contractual
     arrangements sub-sections -- instead of a single generic AI-drafted
@@ -1875,7 +1885,7 @@ def _build_commercial_section(doc: Document, discipline_fee_lines: list | None, 
             run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
 
     doc.add_heading("Cash flow", level=3)
-    _add_placeholder_paragraph(doc, "[INSERT PROJECT CASH FLOW PROFILE, BASED ON THE FEE AND PROGRAM]")
+    _build_cash_flow(doc, discipline_fee_lines, program_schedule, program_week_labels, theme)
 
     doc.add_heading("Contractual arrangements", level=3)
     p = doc.add_paragraph()
@@ -1884,6 +1894,108 @@ def _build_commercial_section(doc: Document, discipline_fee_lines: list | None, 
         "ARRANGEMENTS (E.G. MEMORANDUM OF UNDERSTANDING / SUBCONSULTANCY AGREEMENTS)]"
     )
     r.font.color.rgb = RED
+    doc.add_paragraph()
+
+
+# Above this many active weeks a week-by-week cash-flow table stops being
+# readable in a proposal and starts being a spreadsheet, so weeks are grouped
+# into blocks. Four weeks is the natural block: it reads as a month, which is
+# also the interval most of these engagements actually invoice on.
+_CASH_FLOW_MAX_ROWS = 20
+_CASH_FLOW_BLOCK_WEEKS = 4
+
+
+def cash_flow_rows(discipline_fee_lines: list | None,
+                   program_schedule: dict[str, list[bool]] | None,
+                   program_week_labels: list[str] | None) -> list[tuple[str, float, float]]:
+    """First-pass cash-flow profile: the priced fee spread straight-line over
+    the weeks the program actually has work in.
+
+    Returns [(period_label, amount_this_period, cumulative)], or [] when
+    either input is missing -- the caller then keeps the placeholder rather
+    than inventing a profile. Straight-line is a deliberate choice: it is
+    derived arithmetic over two things the user entered, not a guess at how
+    their effort is really shaped, and the exported note says exactly that.
+
+    Weeks with no scope item active carry no fee, so a program with a gap in
+    the middle shows that gap rather than smearing money across it.
+    """
+    total = sum((getattr(line, "fee_amount", 0.0) or 0.0) for line in (discipline_fee_lines or []))
+    if total <= 0 or not program_schedule or not program_week_labels:
+        return []
+
+    week_count = len(program_week_labels)
+    active = []
+    for index in range(week_count):
+        if any(
+            index < len(weeks) and bool(weeks[index])
+            for weeks in program_schedule.values()
+        ):
+            active.append(index)
+    if not active:
+        return []
+
+    per_week = total / len(active)
+    weekly = [per_week if index in set(active) else 0.0 for index in range(week_count)]
+
+    # Group only when a per-week table would be unreadably long.
+    if week_count > _CASH_FLOW_MAX_ROWS:
+        blocks = []
+        for start in range(0, week_count, _CASH_FLOW_BLOCK_WEEKS):
+            end = min(start + _CASH_FLOW_BLOCK_WEEKS, week_count)
+            label = (f"{program_week_labels[start]} - {program_week_labels[end - 1]}"
+                     if end - 1 > start else program_week_labels[start])
+            blocks.append((label, sum(weekly[start:end])))
+    else:
+        blocks = [(program_week_labels[i], weekly[i]) for i in range(week_count)]
+
+    rows = []
+    running = 0.0
+    for label, amount in blocks:
+        running += amount
+        rows.append((label, amount, running))
+    return rows
+
+
+def _build_cash_flow(doc: Document, discipline_fee_lines: list | None,
+                     program_schedule: dict[str, list[bool]] | None,
+                     program_week_labels: list[str] | None, theme: dict | None):
+    """Renders the derived cash-flow profile, or the original placeholder when
+    the inputs it needs don't exist yet.
+
+    This used to be an unconditional "[INSERT PROJECT CASH FLOW PROFILE, BASED
+    ON THE FEE AND PROGRAM]" -- while the app was already holding both the fee
+    build-up and the week-by-week program that placeholder was telling the user
+    to go and combine by hand."""
+    theme = theme or _theme_colours(None)
+    rows = cash_flow_rows(discipline_fee_lines, program_schedule, program_week_labels)
+    if not rows:
+        _add_placeholder_paragraph(doc, "[INSERT PROJECT CASH FLOW PROFILE, BASED ON THE FEE AND PROGRAM]")
+        return
+
+    note = doc.add_paragraph()
+    run = note.add_run(
+        "Indicative only, derived from your fee build-up and program by spreading the total "
+        "evenly across the weeks with work programmed -- refine to your real invoicing "
+        "profile before submission."
+    )
+    run.font.bold = True
+    run.font.color.rgb = RED
+
+    total = rows[-1][2]
+    table = _add_table(
+        doc,
+        ["Period", "Fee (excl. GST)", "Cumulative"],
+        [[label, f"${amount:,.0f}", f"${cumulative:,.0f}"] for label, amount, cumulative in rows],
+        theme=theme,
+    )
+    total_row = table.add_row()
+    for cell, text in zip(total_row.cells, ["Total", f"${total:,.0f}", f"${total:,.0f}"]):
+        cell.text = text
+        _shade_cell(cell, str(theme["accent"]))
+        cell_run = cell.paragraphs[0].runs[0]
+        cell_run.font.bold = True
+        cell_run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
     doc.add_paragraph()
 
 
