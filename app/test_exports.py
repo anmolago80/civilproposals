@@ -421,6 +421,27 @@ def check(files: dict, failures: list[str]) -> None:
         failures.append("[1e] an unthemed project no longer gets the original palette")
 
 
+def check_program_overflow(failures: list[str]) -> None:
+    """1(i): beyond ~15 scope items the program's rows ran off the bottom of
+    the slide, and PowerPoint shows nothing rather than complaining."""
+    import io as _io
+
+    from pptx import Presentation
+
+    from modules import program_pptx
+
+    for count in (3, 15, 30):
+        schedule = {f"Scope item {i}": [True] * 12 for i in range(count)}
+        blob = program_pptx.populate_program(
+            schedule, [f"Wk {i + 1}" for i in range(12)], project_name="P")
+        prs = Presentation(_io.BytesIO(blob))
+        lowest = max(shape.top + shape.height for shape in prs.slides[0].shapes)
+        if lowest > prs.slide_height:
+            failures.append(
+                f"[1i] {count} scope items overflow the program slide by "
+                f"{(lowest - prs.slide_height) / 914400:.2f} in")
+
+
 def main() -> int:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     out_dir = None
@@ -439,6 +460,7 @@ def main() -> int:
 
     failures: list[str] = []
     check(files, failures)
+    check_program_overflow(failures)
 
     if failures:
         print("EXPORT TESTS FAILED:")

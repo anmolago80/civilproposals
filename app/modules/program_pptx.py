@@ -83,6 +83,11 @@ def _text(slide, x, y, w, h, text, size_pt, color, bold=False, align=PP_ALIGN.LE
     return box
 
 
+# Below this a Gantt row is too thin to read the scope item in; the slide
+# grows rather than squeezing past it.
+_MIN_ROW_H = Inches(0.3)
+
+
 def populate_program(
     program_schedule: dict[str, list[bool]],
     week_labels: list[str],
@@ -137,7 +142,18 @@ def populate_program(
 
     header_h = Inches(0.4)
     row_h = Emu(int((grid_bottom - grid_top - header_h) / len(items)))
-    row_h = Emu(max(int(row_h), int(Inches(0.3))))
+    row_h = Emu(max(int(row_h), int(_MIN_ROW_H)))
+
+    # Past roughly 15 scope items the rows stop fitting between grid_top and
+    # the bottom of a standard slide, and the minimum row height above then
+    # pushed the surplus rows straight off the bottom edge -- silently, since
+    # PowerPoint happily stores shapes outside the slide and simply doesn't
+    # show them. Grow the slide instead, exactly as org_chart_pptx.py already
+    # does for wide charts: a taller slide is a normal thing to paste from,
+    # a program missing its last four scope items is not.
+    needed_height = Emu(int(grid_top + header_h + row_h * len(items) + M))
+    if needed_height > prs.slide_height:
+        prs.slide_height = needed_height
 
     # Header row
     _rect(slide, grid_left, grid_top, label_col_w, header_h, P["header_bg"])
