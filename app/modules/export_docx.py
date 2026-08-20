@@ -1064,7 +1064,12 @@ def _build_proposal_response(
                 doc.add_paragraph("[NO DRAFT BODY -- generate a draft for this section]")
             _end_columns(doc)
         else:
-            doc.add_paragraph("[NO DRAFT GENERATED YET -- run Draft Responses for this section]").italic = True
+            # .italic on a Paragraph is a silent no-op -- python-docx only
+            # honours it on a Run -- so this was the one placeholder in the
+            # document rendering as ordinary black body text, indistinguishable
+            # from real drafted content at a glance.
+            _add_placeholder_paragraph(
+                doc, "[NO DRAFT GENERATED YET -- run Draft Responses for this section]")
 
         # 5b. The sales pitch, pinned to the very end of the Methodology
         # section's content (after the table and the AI draft body, not
