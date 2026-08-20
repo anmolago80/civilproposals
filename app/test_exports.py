@@ -215,7 +215,7 @@ def build_sample_project() -> dict:
             "tender_name": "RFT 2026-014",
             "bidder_name": "Test Engineering Pty Ltd",
             "submission_date_input": "14 July 2026",
-            "proposal_theme": "Forest Green",
+            "proposal_theme": "Government",
             "project_type": "Bridge",
         },
         "analysis": analysis,
@@ -302,6 +302,8 @@ def generate_all(project: dict) -> dict:
         project["resource_plan"],
         client_name=info["client_name"],
         project_name=info["project_name"],
+        tender_name=info["tender_name"],
+        theme_name=info["proposal_theme"],
     )
     out["Methodology_Table.pptx"] = methodology_pptx.populate_methodology(
         project["analysis"],
@@ -399,6 +401,24 @@ def check(files: dict, failures: list[str]) -> None:
         failures.append("[1d] a cash flow was derived with no program")
     if export_docx.cash_flow_rows([], project["program_schedule"], project["program_week_labels"]):
         failures.append("[1d] a cash flow was derived with no priced fee")
+
+    # 1(e): org chart PPTX -- themed, carrying the tender number, and marking
+    # an untitled support member instead of calling them "Team member".
+    org = pptx_text(files["Org_Chart.pptx"])
+    if "RFT 2026-014" not in org:
+        failures.append("[1e] the tender number never reaches the org chart title")
+    if "[Project Number]" in org:
+        failures.append("[1e] the org chart still shows the [Project Number] placeholder")
+    if "Team member" in org:
+        failures.append("[1e] an untitled support member still renders as 'Team member'")
+    if "[CONFIRM TITLE]" not in org:
+        failures.append("[1e] an untitled support member has no red placeholder")
+
+    from modules import org_chart_pptx
+    if org_chart_pptx._resolve_palette("Government")["header"] == org_chart_pptx._CYAN_HEADER:
+        failures.append("[1e] the org chart is still hardcoded to the cyan palette")
+    if org_chart_pptx._resolve_palette(None)["header"] != org_chart_pptx._CYAN_HEADER:
+        failures.append("[1e] an unthemed project no longer gets the original palette")
 
 
 def main() -> int:

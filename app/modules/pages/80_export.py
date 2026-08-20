@@ -208,6 +208,8 @@ with tabs[9]:
                         st.session_state.resource_plan or [],
                         client_name=st.session_state.client_name,
                         project_name=st.session_state.project_name,
+                        tender_name=st.session_state.tender_name,
+                        theme_name=st.session_state.proposal_theme,
                     )
                     st.download_button(
                         "Download Org Chart (PPTX)",

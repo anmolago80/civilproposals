@@ -53,6 +53,11 @@ from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Emu, Inches, Pt
 
 # ---- palette -------------------------------------------------------------
+# The fallback palette, used when no proposal theme is given. Everything
+# below is now themed from divider_designer.THEME_COLOURS instead (see
+# _resolve_palette) -- this chart was the last generated artefact still
+# hardcoded to navy/cyan, so a Government-themed pack exported a green
+# cover, green dividers, green tables and then one cyan org chart.
 _NAVY = RGBColor(0x00, 0x37, 0x63)
 _BLACK = RGBColor(0x00, 0x00, 0x00)
 _CYAN_HEADER = RGBColor(0x00, 0xB0, 0xF0)
@@ -93,6 +98,45 @@ _PEER_MAX_ROWS_PER_COL = 14
 # resourcing.CLIENT_ROLE / FIRM_MANAGEMENT_ROLES) -- every other slot in the
 # plan is a discipline and gets its own column below it.
 _MANAGEMENT_CHAIN = ["Client Project Manager", "Project Director", "Project Manager", "Design Manager"]
+
+
+def _tint(rgb: RGBColor, amount: float) -> RGBColor:
+    """Blend towards white. amount=0 -> unchanged, 1 -> white."""
+    return RGBColor(*(int(c + (255 - c) * amount) for c in (rgb[0], rgb[1], rgb[2])))
+
+
+def _text_on(bg: RGBColor) -> RGBColor:
+    """Readable text colour for a given fill. A themed accent can be light
+    (Minimalist) or dark (Corporate); white-on-everything was safe while the
+    header was always cyan and isn't any more."""
+    luminance = (0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2]) / 255
+    return _DARK_TEXT if luminance > 0.62 else _WHITE
+
+
+def _resolve_palette(theme_name: str | None) -> dict:
+    """The chart's colours, from the same divider_designer.THEME_COLOURS every
+    other generated graphic uses. No theme (or an unknown one) keeps the
+    original navy/cyan look, so nothing changes for a project that never
+    picked a theme."""
+    from modules.divider_designer import THEME_COLOURS
+
+    colours = THEME_COLOURS.get(theme_name or "")
+    if not colours:
+        return {
+            "mgmt": _NAVY, "mgmt_text": _WHITE,
+            "header": _CYAN_HEADER, "header_text": _WHITE,
+            "body": _CYAN_BODY,
+        }
+    primary = RGBColor(*colours["primary"])
+    accent = RGBColor(*colours["accent"])
+    # Minimalist's "primary" is a near-white wash by design -- the same
+    # special case export_docx._theme_colours() and program_pptx apply.
+    mgmt = RGBColor(0x2A, 0x2A, 0x2A) if theme_name == "Minimalist" else primary
+    return {
+        "mgmt": mgmt, "mgmt_text": _text_on(mgmt),
+        "header": accent, "header_text": _text_on(accent),
+        "body": _tint(accent, 0.88),
+    }
 
 
 def _set_text(text_frame, lines, align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE):
@@ -141,13 +185,38 @@ def _name_or_tbc(name: str, on_dark: bool = False):
     return ("TBC", 11, False, _RED_TBC_ON_DARK if on_dark else _RED_TBC)
 
 
-def _management_box(slide, x, y, label, name, fill):
+def _title_or_confirm(title: str):
+    """A support member's own job title on this project.
+
+    Blank used to render the literal words "Team member", which reads in the
+    finished chart as a real, deliberate title -- the one place in this module
+    where a missing value was filled in rather than marked. It is now the
+    standard red placeholder, like every other unknown in this tool."""
+    title = (title or "").strip()
+    if title:
+        return (title, 8, True, _GREY_TEXT)
+    return ("[CONFIRM TITLE]", 8, True, _RED_TBC)
+
+
+def _project_line(tender_name: str, project_name: str) -> str:
+    """The chart's third title line. The tender/RFT number was never passed
+    in, so this line read "[Project Number] <name>" on every chart even for
+    a project whose number had been entered on the Project Setup tab.
+    Either part missing keeps its bracket placeholder, same convention as
+    the client line above it."""
+    number = (tender_name or "").strip() or "[Project Number]"
+    name = (project_name or "").strip() or "[Project Name]"
+    return f"{number} {name}"
+
+
+def _management_box(slide, x, y, label, name, fill, text_colour=_WHITE):
     box = _rect(slide, x, y, _MGMT_W, _MGMT_H, fill)
-    _set_text(box.text_frame, [(label, 11, True, _WHITE), _name_or_tbc(name, on_dark=True)])
+    on_dark = text_colour == _WHITE
+    _set_text(box.text_frame, [(label, 11, True, text_colour), _name_or_tbc(name, on_dark=on_dark)])
     return box
 
 
-def _add_peer_review_box(slide, discipline_names, top, bottom_limit):
+def _add_peer_review_box(slide, discipline_names, top, bottom_limit, palette=None):
     """One consolidated list, top-right: every discipline followed by a red
     "TBC" (e.g. "Structural - TBC") for the user to fill in once reviewers
     are confirmed. The app has no peer-reviewer data anywhere, so this is a
@@ -157,6 +226,7 @@ def _add_peer_review_box(slide, discipline_names, top, bottom_limit):
     growing sideways rather than colliding with the chart below it."""
     if not discipline_names:
         return
+    palette = palette or _resolve_palette(None)
     n = len(discipline_names)
     available_h = max(Emu(bottom_limit - top), _PEER_LINE_H)
     max_rows_by_space = max(1, int(available_h // _PEER_LINE_H))
@@ -179,12 +249,12 @@ def _add_peer_review_box(slide, discipline_names, top, bottom_limit):
     # Same header-bar-plus-body styling as every discipline card, so this
     # box reads as part of the same chart rather than a bolted-on list.
     header_h = _DISC_HEADER_H
-    header = _rect(slide, start_x, top, total_w, header_h, _CYAN_HEADER)
-    _set_text(header.text_frame, [("Peer Review", 11, True, _WHITE)])
+    header = _rect(slide, start_x, top, total_w, header_h, palette["header"])
+    _set_text(header.text_frame, [("Peer Review", 11, True, palette["header_text"])])
 
     list_top = Emu(top + header_h)
     list_h = Emu(rows_per_col * _PEER_LINE_H + Inches(0.1))
-    _rect(slide, start_x, list_top, total_w, list_h, _CYAN_BODY, line_color=_BORDER_COLOR)
+    _rect(slide, start_x, list_top, total_w, list_h, palette["body"], line_color=_BORDER_COLOR)
 
     for c in range(columns):
         chunk = discipline_names[c * rows_per_col:(c + 1) * rows_per_col]
@@ -213,7 +283,8 @@ def _add_peer_review_box(slide, discipline_names, top, bottom_limit):
             tbc_run.font.color.rgb = _RED_TBC
 
 
-def populate_org_chart(resource_plan: list, client_name: str = "", project_name: str = "") -> bytes:
+def populate_org_chart(resource_plan: list, client_name: str = "", project_name: str = "",
+                       tender_name: str = "", theme_name: str | None = None) -> bytes:
     """
     Builds a fresh .pptx (returned as bytes) from `resource_plan` (a list of
     resourcing.ResourceAssignment): the fixed Client Project Manager ->
@@ -226,6 +297,8 @@ def populate_org_chart(resource_plan: list, client_name: str = "", project_name:
     placeholders otherwise, same as every other not-yet-known field in this
     tool.
     """
+    palette = _resolve_palette(theme_name)
+
     prs = Presentation()
     prs.slide_width = _SLIDE_W
     prs.slide_height = _SLIDE_H
@@ -238,7 +311,7 @@ def populate_org_chart(resource_plan: list, client_name: str = "", project_name:
     _set_text(tf, [
         ("Design Phase Organisation Chart", 20, True, _DARK_TEXT),
         ((client_name or "").strip() or "[Client / Department]", 12, False, _GREY_TEXT),
-        ((project_name or "").strip() or "[Project Number] [Project Name]", 12, False, _GREY_TEXT),
+        (_project_line(tender_name, project_name), 12, False, _GREY_TEXT),
     ], align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP)
 
     # ---- resourcing lookups -----------------------------------------------
@@ -267,7 +340,7 @@ def populate_org_chart(resource_plan: list, client_name: str = "", project_name:
             if name and not entry[1]:
                 entry[1] = name
         else:
-            title = (getattr(a, "custom_title", "") or "").strip() or "Team member"
+            title = (getattr(a, "custom_title", "") or "").strip()
             entry[2].append((name, title))
 
     # ---- management chain -- single vertical stack ------------------------
@@ -279,13 +352,16 @@ def populate_org_chart(resource_plan: list, client_name: str = "", project_name:
                      mgmt_by_slot.get("Client Project Manager", ""), _BLACK)
 
     pd_y = Emu(client_y + _MGMT_H + _MGMT_ROW_GAP)
-    _management_box(slide, mgmt_x, pd_y, "Project Director", mgmt_by_slot.get("Project Director", ""), _NAVY)
+    _management_box(slide, mgmt_x, pd_y, "Project Director",
+                     mgmt_by_slot.get("Project Director", ""), palette["mgmt"], palette["mgmt_text"])
 
     pm_y = Emu(pd_y + _MGMT_H + _MGMT_ROW_GAP)
-    _management_box(slide, mgmt_x, pm_y, "Project Manager", mgmt_by_slot.get("Project Manager", ""), _NAVY)
+    _management_box(slide, mgmt_x, pm_y, "Project Manager",
+                     mgmt_by_slot.get("Project Manager", ""), palette["mgmt"], palette["mgmt_text"])
 
     dm_y = Emu(pm_y + _MGMT_H + _MGMT_ROW_GAP)
-    _management_box(slide, mgmt_x, dm_y, "Design Manager", mgmt_by_slot.get("Design Manager", ""), _NAVY)
+    _management_box(slide, mgmt_x, dm_y, "Design Manager",
+                     mgmt_by_slot.get("Design Manager", ""), palette["mgmt"], palette["mgmt_text"])
 
     for top_y, bottom_y in (
         (Emu(client_y + _MGMT_H), pd_y),
@@ -296,7 +372,7 @@ def populate_org_chart(resource_plan: list, client_name: str = "", project_name:
 
     # ---- Peer Review box, top-right: one line per discipline ---------------
     _add_peer_review_box(slide, [slot for slot, _name, _supports in disciplines],
-                          top=Inches(0.25), bottom_limit=Emu(dm_y + _MGMT_H))
+                          top=Inches(0.25), bottom_limit=Emu(dm_y + _MGMT_H), palette=palette)
 
     # ---- discipline cards -- symmetric, fully data-driven, wraps to more
     # rows rather than shrinking past legibility -------------------------
@@ -325,10 +401,10 @@ def populate_org_chart(resource_plan: list, client_name: str = "", project_name:
             row_bottom_y = Emu(disc_y + _DISC_HEADER_H + _DISC_ROLE_H)
             x = start_x
             for slot, name, supports in row:
-                header = _rect(slide, x, disc_y, disc_w, _DISC_HEADER_H, _CYAN_HEADER)
-                _set_text(header.text_frame, [(slot, 10, True, _WHITE)])
+                header = _rect(slide, x, disc_y, disc_w, _DISC_HEADER_H, palette["header"])
+                _set_text(header.text_frame, [(slot, 10, True, palette["header_text"])])
                 lead_y = Emu(disc_y + _DISC_HEADER_H)
-                lead_box = _rect(slide, x, lead_y, disc_w, _DISC_ROLE_H, _CYAN_BODY, line_color=_BORDER_COLOR)
+                lead_box = _rect(slide, x, lead_y, disc_w, _DISC_ROLE_H, palette["body"], line_color=_BORDER_COLOR)
                 _set_text(lead_box.text_frame, [("Lead", 8, True, _GREY_TEXT), _name_or_tbc(name)])
                 card_bottom = Emu(lead_y + _DISC_ROLE_H)
                 # Support rows: one extra thin row per team member added under
@@ -336,9 +412,9 @@ def populate_org_chart(resource_plan: list, client_name: str = "", project_name:
                 # member" only if the user hasn't typed a title yet).
                 for support_name, support_title in supports:
                     support_box = _rect(slide, x, card_bottom, disc_w, _DISC_ROLE_H,
-                                         _CYAN_BODY, line_color=_BORDER_COLOR)
+                                         palette["body"], line_color=_BORDER_COLOR)
                     _set_text(support_box.text_frame, [
-                        (support_title, 8, True, _GREY_TEXT), _name_or_tbc(support_name),
+                        _title_or_confirm(support_title), _name_or_tbc(support_name),
                     ])
                     card_bottom = Emu(card_bottom + _DISC_ROLE_H)
                 row_bottom_y = Emu(max(row_bottom_y, card_bottom))
