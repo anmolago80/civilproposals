@@ -1301,19 +1301,33 @@ def _build_personnel_block(
     below, using up a page for information already presented twice."""
     theme = theme or _theme_colours(None)
     _build_team_intro(doc, team_intro, theme)
-    # Deliberately NOT embedding the auto-generated org_chart_png here (even though
-    # it's still passed in and rendered as a live preview in the app's Team &
-    # Resourcing tab) -- the user's actual org chart is built and finished in
-    # PowerPoint (see assets/org_chart_template.pptx, exported alongside this
-    # document from the Export tab) and pasted in by hand, since that gives a much
-    # richer, better-formatted chart than this tool can generate. This placeholder
-    # marks exactly where that finished chart goes.
     doc.add_heading("Project organisation chart", level=2)
+    # The generated chart goes in as a FIRST PASS, and the red note below it
+    # stays. Both matter. Previously org_chart_png was accepted here and
+    # deliberately dropped, on the reasoning that the finished chart is built
+    # in the companion PowerPoint (assets/org_chart_template.pptx) and pasted
+    # in by hand -- which is still true, and still what the note says. But
+    # dropping it meant a user who had assigned their whole team and watched
+    # the chart render in the Team & Resourcing tab got a blank space with a
+    # red instruction in the exported pack: work they had done, not shown.
+    # An accurate first-pass image that says "replace me with the PowerPoint
+    # version" is strictly better than an empty box that says the same thing.
+    if org_chart_png:
+        try:
+            _add_full_width_image(doc, org_chart_png)
+        except Exception:
+            # An unreadable PNG must never take the whole export down -- the
+            # note below still tells the user what to do.
+            pass
     _add_placeholder_paragraph(
         doc,
-        "[INSERT ORGANISATION CHART HERE -- paste in the finished chart image. A "
-        "companion PowerPoint org chart template is exported alongside this "
-        "document; build the chart there, then paste it into this space.]",
+        ("[FIRST-PASS CHART ABOVE, generated from the Team & Resourcing tab -- "
+         "replace it with the finished chart. A companion PowerPoint org chart is "
+         "exported alongside this document; finish it there, then paste it over "
+         "the image above.]") if org_chart_png else
+        ("[INSERT ORGANISATION CHART HERE -- paste in the finished chart image. A "
+         "companion PowerPoint org chart template is exported alongside this "
+         "document; build the chart there, then paste it into this space.]"),
     )
 
     _build_personnel_profiles(doc, resource_plan, personnel_photos, theme)
