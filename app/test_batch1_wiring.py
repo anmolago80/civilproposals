@@ -139,6 +139,40 @@ def test_program_start_date(failures: list[str]) -> None:
         failures.append("[1f] an unset start date did not round-trip as None")
 
 
+def test_graphics_recommendations_are_current(failures: list[str]) -> None:
+    """1(g): the graphics list is printed into the exported pack, so a stale
+    entry tells the user to hand-build something the app already made."""
+    from modules import graphics_engine, proposal_structure, tender_analyser
+
+    sections = proposal_structure.build_proposal_structure(
+        tender_analyser.TenderAnalysis(), [], [], "formal",
+    )
+    recs = {r.graphic_title: r for r in graphics_engine.recommend_graphics(
+        sections, project_type="Coastal & Ocean Engineering")}
+
+    for title in ("Organisation chart", "Methodology process diagram", "Programme timeline"):
+        rec = recs.get(title)
+        if rec is None:
+            continue  # this brief's skeleton doesn't recommend it -- fine
+        if rec.status != "Generated":
+            failures.append(f"[1g] '{title}' is still reported as needing user input")
+        if rec.placeholder_text:
+            failures.append(f"[1g] '{title}' still carries a red placeholder instruction")
+
+    # Genuinely ungenerated graphics must still be placeholdered.
+    risk = recs.get("Key risk diagram")
+    if risk is not None and risk.status == "Generated":
+        failures.append("[1g] an ungenerated graphic was wrongly marked Generated")
+
+    # The divider hint follows the project type instead of always saying bridge/road.
+    divider = next((r for r in recs.values() if "divider" in r.graphic_title.lower()), None)
+    if divider is None or "COASTAL" not in divider.placeholder_text:
+        failures.append(f"[1g] the divider hint ignores project_type: "
+                        f"{getattr(divider, 'placeholder_text', None)!r}")
+    if divider is not None and "BRIDGE / ROAD" in divider.placeholder_text:
+        failures.append("[1g] the divider hint is still hardcoded to bridge/road")
+
+
 def main() -> int:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     failures: list[str] = []
@@ -147,6 +181,7 @@ def main() -> int:
     test_blank_person_still_placeholders(failures)
     test_sender_address_is_wired_and_saved(failures)
     test_program_start_date(failures)
+    test_graphics_recommendations_are_current(failures)
 
     if failures:
         print("BATCH 1 WIRING TESTS FAILED:")

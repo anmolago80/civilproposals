@@ -170,6 +170,7 @@ with tabs[6]:
                 st.session_state.sections, flags["has_project_photos"], flags["has_company_image_library"],
                 divider_image_sections=set(new_divider_images.keys()),
                 cover_generated=bool(st.session_state.project_photo_bytes or st.session_state.cover_hero_png),
+                project_type=st.session_state.get("project_type"),
             )
             if st.session_state.weighted_criteria:
                 st.session_state.weighting_chart_png = graphics_engine.generate_weighting_chart(st.session_state.weighted_criteria)
