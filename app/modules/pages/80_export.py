@@ -190,6 +190,21 @@ with tabs[9]:
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 type="primary",
             )
+        # All three PowerPoint companions below used to be rebuilt from
+        # scratch on EVERY rerun of the script -- so every keystroke, every
+        # checkbox, every tab change re-ran three full presentation builds
+        # whose inputs hadn't changed. _cached_pptx keeps the last result per
+        # artefact, keyed by a signature of the data that actually goes into
+        # it, and rebuilds only when that signature moves.
+        def _cached_pptx(name: str, signature, build):
+            cache = st.session_state.setdefault("_pptx_cache", {})
+            entry = cache.get(name)
+            if entry is not None and entry[0] == signature:
+                return entry[1]
+            blob = build()
+            cache[name] = (signature, blob)
+            return blob
+
         # The formal pack's Key Personnel section leaves an explicit placeholder for the
         # org chart (see export_docx._build_personnel_block) rather than embedding the
         # auto-generated preview -- the finished chart is built in PowerPoint and pasted
@@ -197,19 +212,28 @@ with tabs[9]:
         # plan (see org_chart_pptx.populate_org_chart) right next to the DOCX download,
         # so it's never a separate hunt. Every discipline in resource_plan gets its own
         # column, showing that discipline's Lead name (or a red "TBC" if nobody's
-        # assigned yet) -- support roles, the client's own PM, subconsultant firms have
-        # no equivalent in the app's data and simply aren't shown, same no-invention rule
-        # as everywhere else in this tool. The Small Scope pack doesn't have a Key
+        # assigned yet) PLUS any support members added under that lead. The client's own
+        # PM counterpart and subconsultant firms have no equivalent in the app's data and
+        # simply aren't shown, same no-invention rule as everywhere else in this tool. The Small Scope pack doesn't have a Key
         # Personnel/org chart section, so skip it there.
         if not _is_letter():
             with dcols[1]:
                 try:
-                    chart_bytes = org_chart_pptx.populate_org_chart(
-                        st.session_state.resource_plan or [],
-                        client_name=st.session_state.client_name,
-                        project_name=st.session_state.project_name,
-                        tender_name=st.session_state.tender_name,
-                        theme_name=st.session_state.proposal_theme,
+                    chart_bytes = _cached_pptx(
+                        "org_chart",
+                        (
+                            tuple((a.slot, a.person_name, a.is_lead, a.custom_title)
+                                  for a in (st.session_state.resource_plan or [])),
+                            st.session_state.client_name, st.session_state.project_name,
+                            st.session_state.tender_name, st.session_state.proposal_theme,
+                        ),
+                        lambda: org_chart_pptx.populate_org_chart(
+                            st.session_state.resource_plan or [],
+                            client_name=st.session_state.client_name,
+                            project_name=st.session_state.project_name,
+                            tender_name=st.session_state.tender_name,
+                            theme_name=st.session_state.proposal_theme,
+                        ),
                     )
                     st.download_button(
                         "Download Org Chart (PPTX)",
@@ -218,8 +242,12 @@ with tabs[9]:
                         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                      type="primary")
                     st.caption(
-                        "Built from this project's assigned Lead names -- unassigned roles show as red "
-                        "\"TBC\". Fill in any remaining names, then paste the finished chart into the DOCX placeholder."
+                        "Built from this project's resourcing plan -- each discipline's lead plus "
+                        "anyone added under them, with red \"TBC\" for unassigned roles and "
+                        "[CONFIRM TITLE] where a support member has no title yet. The client's own "
+                        "PM and subconsultant firms aren't shown -- the app holds no data for them. "
+                        "Fill in the gaps, then paste the finished chart over the first-pass image "
+                        "in the DOCX."
                     )
                 except Exception:
                     # Never let a chart-generation bug block the DOCX download that
@@ -241,11 +269,20 @@ with tabs[9]:
         if not _is_letter():
             with dcols[2]:
                 try:
-                    methodology_bytes = methodology_pptx.populate_methodology(
-                        st.session_state.analysis,
-                        client_name=st.session_state.client_name,
-                        project_name=st.session_state.project_name,
-                        theme_name=st.session_state.proposal_theme,
+                    methodology_bytes = _cached_pptx(
+                        "methodology",
+                        (
+                            tuple((i.title, tuple(i.tasks))
+                                  for i in (getattr(st.session_state.analysis, "scope_items", None) or [])),
+                            st.session_state.client_name, st.session_state.project_name,
+                            st.session_state.proposal_theme,
+                        ),
+                        lambda: methodology_pptx.populate_methodology(
+                            st.session_state.analysis,
+                            client_name=st.session_state.client_name,
+                            project_name=st.session_state.project_name,
+                            theme_name=st.session_state.proposal_theme,
+                        ),
                     )
                     st.download_button(
                         "Download Methodology Table (PPTX)",
@@ -271,12 +308,22 @@ with tabs[9]:
         if not _is_letter():
             with dcols[3]:
                 try:
-                    program_bytes = program_pptx.populate_program(
-                        st.session_state.program_schedule or {},
-                        st.session_state.program_week_labels or [],
-                        client_name=st.session_state.client_name,
-                        project_name=st.session_state.project_name,
-                        theme_name=st.session_state.proposal_theme,
+                    program_bytes = _cached_pptx(
+                        "program",
+                        (
+                            tuple((title, tuple(bool(w) for w in weeks))
+                                  for title, weeks in (st.session_state.program_schedule or {}).items()),
+                            tuple(st.session_state.program_week_labels or []),
+                            st.session_state.client_name, st.session_state.project_name,
+                            st.session_state.proposal_theme,
+                        ),
+                        lambda: program_pptx.populate_program(
+                            st.session_state.program_schedule or {},
+                            st.session_state.program_week_labels or [],
+                            client_name=st.session_state.client_name,
+                            project_name=st.session_state.project_name,
+                            theme_name=st.session_state.proposal_theme,
+                        ),
                     )
                     st.download_button(
                         "Download Program (PPTX)",
