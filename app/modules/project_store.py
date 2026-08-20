@@ -59,6 +59,7 @@ from modules.executive_summary import ExecutiveSummary
 from modules.team_intro import TeamIntro
 from modules.experience_intro import ExperienceIntro
 from modules.pitch_review import PitchReview
+from modules.methodology_stages import MethodologyStage
 
 PROJECT_FILE_VERSION = 1
 
@@ -76,6 +77,7 @@ PLAIN_KEYS = [
     "resource_extra_names", "cv_library_filenames", "cv_extracted_names", "dismissed_disciplines",
     "body_font", "reference_project_warnings", "dismissed_fee_disciplines",
     "fee_estimate_manual_total", "project_differentiator", "project_sales_pitch",
+    "methodology_wvr_confirmed",
     # Bookkeeping app.py uses to detect a stale Proposal Structure (see
     # _structure_format_stale() there) -- MUST travel with "sections" and
     # "proposal_format" or a reopened project falsely looks stale: without
@@ -117,6 +119,7 @@ MODEL_LIST = {
     "resource_plan": ResourceAssignment,
     "discipline_fee_lines": DisciplineFeeLine,
     "reference_projects": ReferenceProject,
+    "methodology_stages": MethodologyStage,
 }
 
 # key -> model class, for an optional dict[str, Model] (None, not {}, means "not run yet").

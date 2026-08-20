@@ -108,6 +108,177 @@ with tabs[5]:
         except Exception as exc:
             _show_error("Draft generation failed", exc)
 
+    # -----------------------------------------------------------------
+    # Design stages -- the grid that fills the methodology table
+    # -----------------------------------------------------------------
+    st.markdown("---")
+    st.markdown("#### Design stages")
+    st.caption(
+        "The delivery stages behind the exported methodology table. The AI assigns your "
+        "brief's own scope items and deliverables to stages and rephrases them -- it never "
+        "adds a task, activity, deliverable or date that isn't in the brief, and writes "
+        "**TBC** wherever the brief doesn't support a cell. Edit anything below; what's here "
+        "when you export is exactly what goes into the table."
+    )
+
+    _stages_ready = (
+        st.session_state.analysis is not None
+        and bool(st.session_state.ai_config.get("api_key"))
+        and _current_project_already_paid()
+    )
+    _existing_stages = st.session_state.methodology_stages
+    _stages_edited = bool(_existing_stages) and any(
+        st.session_state.get(f"_stage_dirty_{i}") for i in range(len(_existing_stages))
+    )
+
+    scol1, scol2 = st.columns([1, 2])
+    with scol1:
+        _draft_stages_clicked = st.button(
+            "Draft methodology stages", type="primary", disabled=not _stages_ready,
+            key="draft_stages_btn",
+        )
+    with scol2:
+        if not st.session_state.ai_config.get("api_key"):
+            st.caption(_AI_HINT_SENTENCE)
+        elif not _current_project_already_paid():
+            st.caption(_PROJECT_NOT_PAID_HINT)
+        elif st.session_state.analysis is None:
+            st.caption("Run Tender Analysis first -- the stages are built from the brief's own scope and deliverables.")
+
+    # Regenerating over edited content needs an explicit second click. AI
+    # output must never silently overwrite something a person has changed.
+    if _draft_stages_clicked:
+        if _existing_stages and not st.session_state.get("_confirm_restage"):
+            st.session_state._confirm_restage = True
+        else:
+            st.session_state._confirm_restage = False
+            with st.spinner("Drafting methodology stages..."):
+                try:
+                    _methodology_draft = (st.session_state.drafts or {}).get("Methodology and Deliverables")
+                    st.session_state.methodology_stages = methodology_stages.draft_methodology_stages(
+                        st.session_state.analysis,
+                        methodology_draft_text=_methodology_draft.draft_text if _methodology_draft else "",
+                        program_schedule=st.session_state.program_schedule,
+                        program_week_labels=st.session_state.program_week_labels,
+                        project_info=_project_info(),
+                        config=st.session_state.ai_config,
+                    )
+                    if not st.session_state.methodology_stages:
+                        st.warning(
+                            "The AI returned no stages -- nothing has been changed. You can fill "
+                            "the grid in by hand with **Start a blank grid** below."
+                        )
+                    else:
+                        st.success(f"Drafted {len(st.session_state.methodology_stages)} stage(s) -- review and edit below.")
+                except Exception as exc:
+                    _show_error("Drafting the methodology stages failed", exc)
+
+    if st.session_state.get("_confirm_restage"):
+        st.warning(
+            "You already have a stage grid below, and some of it may be your own edits. "
+            "Drafting again replaces every stage. Click **Draft methodology stages** once "
+            "more to go ahead, or edit the grid directly instead."
+        )
+        if st.button("Cancel", key="cancel_restage"):
+            st.session_state._confirm_restage = False
+            st.rerun()
+
+    if not st.session_state.methodology_stages:
+        if st.button("Start a blank grid", key="blank_stages_btn"):
+            st.session_state.methodology_stages = methodology_stages.blank_stages()
+            st.rerun()
+        st.caption(
+            "No stages yet. Without them the exported methodology table falls back to its "
+            "generic four-stage layout with placeholder columns."
+        )
+    else:
+        _week_labels = st.session_state.program_week_labels or []
+        _week_options = [0] + list(range(1, len(_week_labels) + 1))
+
+        def _week_label(index: int) -> str:
+            if not index:
+                return "-"
+            return _week_labels[index - 1] if index <= len(_week_labels) else f"Wk {index}"
+
+        _remove_index = None
+        for _i, _stage in enumerate(st.session_state.methodology_stages):
+            with st.expander(f"Stage {_i + 1}: {_stage.name or 'Untitled'}", expanded=(_i == 0)):
+                _stage.name = st.text_input("Stage name", value=_stage.name, key=f"_stage_name_{_i}")
+                wcol1, wcol2, wcol3 = st.columns([1, 1, 2])
+                with wcol1:
+                    _ws = st.selectbox(
+                        "First week", _week_options, key=f"_stage_ws_{_i}",
+                        index=_week_options.index(_stage.week_start) if _stage.week_start in _week_options else 0,
+                        format_func=_week_label,
+                    )
+                with wcol2:
+                    _we = st.selectbox(
+                        "Last week", _week_options, key=f"_stage_we_{_i}",
+                        index=_week_options.index(_stage.week_end) if _stage.week_end in _week_options else 0,
+                        format_func=_week_label,
+                    )
+                with wcol3:
+                    st.write("")
+                    st.caption(
+                        "Week numbers come from the delivery program on the Fees & Program step. "
+                        "Set an anticipated start date there and these become real dates in the "
+                        "exported table."
+                    )
+                _stage.week_start = _ws or None
+                _stage.week_end = _we or None
+
+                _stage.key_tasks = [
+                    line.strip() for line in st.text_area(
+                        "Key tasks (one per line)", value="\n".join(_stage.key_tasks),
+                        key=f"_stage_tasks_{_i}", height=110,
+                    ).split("\n") if line.strip()
+                ]
+                _stage.engagement_activities = [
+                    line.strip() for line in st.text_area(
+                        "Engagement activities (one per line)",
+                        value="\n".join(_stage.engagement_activities),
+                        key=f"_stage_eng_{_i}", height=80,
+                    ).split("\n") if line.strip()
+                ]
+                _stage.outcome = st.text_input("Outcome", value=_stage.outcome, key=f"_stage_out_{_i}")
+                _stage.deliverables = [
+                    line.strip() for line in st.text_area(
+                        "Deliverables (one per line)", value="\n".join(_stage.deliverables),
+                        key=f"_stage_deliv_{_i}", height=90,
+                    ).split("\n") if line.strip()
+                ]
+                st.caption(
+                    "Leave a cell as **TBC** where the brief genuinely doesn't say -- it exports "
+                    "in red so nobody submits it by accident."
+                )
+                if st.button("Remove this stage", key=f"_stage_rm_{_i}"):
+                    _remove_index = _i
+
+        if _remove_index is not None:
+            st.session_state.methodology_stages.pop(_remove_index)
+            st.rerun()
+
+        acol1, acol2 = st.columns([1, 3])
+        with acol1:
+            if st.button("Add a stage", key="add_stage_btn"):
+                st.session_state.methodology_stages.append(
+                    methodology_stages.MethodologyStage(
+                        name="", key_tasks=[methodology_stages.TBC],
+                        engagement_activities=[methodology_stages.TBC],
+                        outcome=methodology_stages.TBC,
+                        deliverables=[methodology_stages.TBC],
+                    )
+                )
+                st.rerun()
+
+        st.checkbox(
+            "Confirm this firm issues Work Verification Records (WVRs) with design deliverables",
+            key="methodology_wvr_confirmed",
+            help="The methodology table used to state this as fact in every export without "
+                 "anyone having been asked. Leave it unticked and it exports as a red "
+                 "[CONFIRM WVR / QA STATEMENT] instead.",
+        )
+
     st.markdown("---")
     st.caption(
         "**Differentiator & sales pitch** -- write these in your own words: what sets this "

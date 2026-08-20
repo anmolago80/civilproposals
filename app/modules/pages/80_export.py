@@ -156,6 +156,16 @@ with tabs[9]:
                     # spread over the weeks this program actually has work in.
                     program_schedule=st.session_state.program_schedule,
                     program_week_labels=st.session_state.program_week_labels,
+                    # First-pass image of the reviewed design stages, placed
+                    # above the "paste the finished table here" note -- same
+                    # pattern as the org chart. None when no grid exists, in
+                    # which case the note renders alone, as before.
+                    methodology_stages_png=methodology_stages.render_stages_png(
+                        st.session_state.methodology_stages,
+                        st.session_state.program_week_labels,
+                        st.session_state.proposal_theme,
+                        bool(st.session_state.methodology_wvr_confirmed),
+                    ),
                 )
                 st.session_state.docx_buffer = buffer
 
@@ -196,6 +206,15 @@ with tabs[9]:
         # whose inputs hadn't changed. _cached_pptx keeps the last result per
         # artefact, keyed by a signature of the data that actually goes into
         # it, and rebuilds only when that signature moves.
+        def _methodology_stage_signature():
+            """Value signature of the reviewed stage grid, for the PPTX cache
+            and the DOCX image -- an edit to any cell has to invalidate both."""
+            return tuple(
+                (s.name, s.week_start, s.week_end, tuple(s.key_tasks),
+                 tuple(s.engagement_activities), s.outcome, tuple(s.deliverables))
+                for s in (st.session_state.methodology_stages or [])
+            )
+
         def _cached_pptx(name: str, signature, build):
             cache = st.session_state.setdefault("_pptx_cache", {})
             entry = cache.get(name)
@@ -272,16 +291,22 @@ with tabs[9]:
                     methodology_bytes = _cached_pptx(
                         "methodology",
                         (
+                            _methodology_stage_signature(),
                             tuple((i.title, tuple(i.tasks))
                                   for i in (getattr(st.session_state.analysis, "scope_items", None) or [])),
+                            tuple(st.session_state.program_week_labels or []),
                             st.session_state.client_name, st.session_state.project_name,
                             st.session_state.proposal_theme,
+                            bool(st.session_state.methodology_wvr_confirmed),
                         ),
                         lambda: methodology_pptx.populate_methodology(
                             st.session_state.analysis,
                             client_name=st.session_state.client_name,
                             project_name=st.session_state.project_name,
                             theme_name=st.session_state.proposal_theme,
+                            stages=st.session_state.methodology_stages,
+                            week_labels=st.session_state.program_week_labels,
+                            wvr_confirmed=bool(st.session_state.methodology_wvr_confirmed),
                         ),
                     )
                     st.download_button(
@@ -291,9 +316,15 @@ with tabs[9]:
                         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                      type="primary")
                     st.caption(
-                        "Column 2's Key tasks are built from this project's real scope items; columns 3-4 "
-                        "are red placeholders for stages the brief doesn't describe. Fill in the remaining "
-                        "content, then paste the finished table into the DOCX placeholder."
+                        "Built from the design stages you reviewed on the Draft Responses step -- "
+                        "every column is real content, with red TBC where the brief didn't support a "
+                        "cell. Without a reviewed grid it falls back to the generic four-stage layout. "
+                        "Fill in any TBCs, then paste the finished table over the first-pass image in "
+                        "the DOCX."
+                        if st.session_state.methodology_stages else
+                        "No design stages reviewed yet, so this is the generic four-stage fallback: "
+                        "column 2 from your real scope items, the rest red placeholders. Run **Draft "
+                        "methodology stages** on the Draft Responses step to fill all four columns."
                     )
                 except Exception:
                     # Never let a chart-generation bug block the DOCX download that

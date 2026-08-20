@@ -185,6 +185,14 @@ def _init_state():
         # build-up total the first time it's used (0.0 = "not yet set"), then
         # stays independently editable. See the Fee Estimate tab.
         "letter_fee_total_override": 0.0,
+        # The reviewed methodology stage grid (methodology_stages.MethodologyStage
+        # list). None means "the stage drafter has never been run" -- distinct
+        # from [] which would mean "run, and produced nothing".
+        "methodology_stages": None,
+        # Whether the user has confirmed their firm issues Work Verification
+        # Records. Never assumed: the WVR line used to print as fact in every
+        # methodology export without the app ever being told.
+        "methodology_wvr_confirmed": False,
         "program_num_weeks": 6,
         "program_schedule": {},
         "program_week_labels": [],

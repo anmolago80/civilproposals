@@ -208,7 +208,34 @@ def build_sample_project() -> dict:
         ),
     ]
 
+    from modules import methodology_stages as ms
+    stages = [
+        ms.MethodologyStage(
+            name="Project inception", week_start=1, week_end=3,
+            key_tasks=["Inception meeting", "Site inspection", "Geotechnical investigation"],
+            engagement_activities=["Inception meeting with the Principal"],
+            outcome="Scope, program and governance confirmed.",
+            deliverables=["Inception meeting minutes"],
+        ),
+        ms.MethodologyStage(
+            name="Concept design", week_start=3, week_end=6,
+            key_tasks=["Options assessment", "Concept drawings", "Cost estimate"],
+            # The brief says nothing about engagement in this stage -- must
+            # stay TBC, never be filled in to look complete.
+            engagement_activities=["TBC"],
+            outcome="Preferred option endorsed.",
+            deliverables=["Concept design report"],
+        ),
+        ms.MethodologyStage(
+            name="Detailed design", week_start=6, week_end=11,
+            key_tasks=["Structural design", "Drainage design", "IFC drawing set"],
+            engagement_activities=["TBC"], outcome="TBC",
+            deliverables=["Detailed design drawings (IFC)", "Design certification and RPEQ sign-off"],
+        ),
+    ]
+
     return {
+        "methodology_stages": stages,
         "project_info": {
             "project_name": "Example Creek Bridge Replacement",
             "client_name": "Example Shire Council",
@@ -242,7 +269,8 @@ def build_sample_project() -> dict:
 def generate_all(project: dict) -> dict:
     """Runs every exporter. Returns {filename: bytes}."""
     from modules import (
-        export_docx, methodology_pptx, org_chart, org_chart_pptx, program_pptx,
+        export_docx, methodology_pptx, methodology_stages, org_chart, org_chart_pptx,
+        program_pptx,
     )
 
     info = project["project_info"]
@@ -271,6 +299,10 @@ def generate_all(project: dict) -> dict:
         discipline_fee_lines=project["discipline_fee_lines"],
         program_schedule=project["program_schedule"],
         program_week_labels=project["program_week_labels"],
+        methodology_stages_png=methodology_stages.render_stages_png(
+            project["methodology_stages"], project["program_week_labels"],
+            info["proposal_theme"], wvr_confirmed=False,
+        ),
     ).getvalue()
 
     out["Tender_Summary.docx"] = export_docx.build_tender_summary_docx(
@@ -306,6 +338,15 @@ def generate_all(project: dict) -> dict:
         theme_name=info["proposal_theme"],
     )
     out["Methodology_Table.pptx"] = methodology_pptx.populate_methodology(
+        project["analysis"],
+        client_name=info["client_name"],
+        project_name=info["project_name"],
+        theme_name=info["proposal_theme"],
+        stages=project["methodology_stages"],
+        week_labels=project["program_week_labels"],
+        wvr_confirmed=False,
+    )
+    out["Methodology_Table_no_stages.pptx"] = methodology_pptx.populate_methodology(
         project["analysis"],
         client_name=info["client_name"],
         project_name=info["project_name"],
@@ -421,6 +462,63 @@ def check(files: dict, failures: list[str]) -> None:
         failures.append("[1e] an unthemed project no longer gets the original palette")
 
 
+def check_methodology_stages(failures: list[str], files: dict) -> None:
+    """Batch 2: every column of the methodology table comes from the reviewed
+    stage grid, TBC survives as TBC, and the WVR line is not asserted."""
+    from modules import methodology_pptx, methodology_stages
+
+    meth = pptx_text(files["Methodology_Table.pptx"])
+    for expected in ("Project inception", "Concept design", "Detailed design",
+                     "Options assessment", "Design certification and RPEQ sign-off",
+                     "Preferred option endorsed."):
+        if expected not in meth:
+            failures.append(f"[2c] the methodology table is missing real content: {expected!r}")
+    if "15% design stage" in meth:
+        failures.append("[2c] the hardcoded stage headers are still being used")
+    if "TBC" not in meth:
+        failures.append("[2a] a TBC cell was filled in rather than left as TBC")
+    if "Example Creek Bridge Replacement" not in meth:
+        failures.append("[2c] project_name is still not rendered on the methodology table")
+    if "Wk 1 - Wk 3" not in meth:
+        failures.append("[2c] the date chevrons were not filled from the program")
+
+    # 2(e): the WVR claim must not be asserted unless confirmed.
+    if methodology_pptx.WVR_STATEMENT in meth:
+        failures.append("[2e] the WVR statement is asserted without confirmation")
+    if methodology_pptx.WVR_CONFIRM_PLACEHOLDER not in meth:
+        failures.append("[2e] no red placeholder where the WVR statement used to be")
+    confirmed = pptx_text(methodology_pptx.populate_methodology(
+        build_sample_project()["analysis"], stages=build_sample_project()["methodology_stages"],
+        wvr_confirmed=True))
+    if methodology_pptx.WVR_STATEMENT not in confirmed:
+        failures.append("[2e] confirming the WVR statement doesn't bring it back")
+
+    # Falling back with no stages must reproduce the old behaviour.
+    legacy = pptx_text(files["Methodology_Table_no_stages.pptx"])
+    if "15% design stage" not in legacy:
+        failures.append("[2c] the no-stages fallback lost its original layout")
+
+    # 2(d): the DOCX carries the first-pass grid image.
+    large = docx_text(files["Proposal_LargeScope.docx"])
+    if "FIRST-PASS TABLE ABOVE" not in large:
+        failures.append("[2d] the methodology grid image is not embedded in the DOCX")
+
+    # Overflow: a stage with many long tasks must stay inside the slide.
+    import io as _io
+
+    from pptx import Presentation
+    fat = [methodology_stages.MethodologyStage(
+        name="Detailed design",
+        key_tasks=[f"A fairly long scope task description number {i} for overflow testing" for i in range(18)],
+        engagement_activities=["TBC"], outcome="TBC", deliverables=["TBC"],
+    )]
+    prs = Presentation(_io.BytesIO(methodology_pptx.populate_methodology(
+        build_sample_project()["analysis"], stages=fat)))
+    lowest = max(shape.top + shape.height for shape in prs.slides[0].shapes)
+    if lowest > prs.slide_height:
+        failures.append("[2c] a stage with many tasks overflows the methodology slide")
+
+
 def check_empty_letter_sections(failures: list[str]) -> None:
     """1(i): a Small Scope pack with nothing priced rendered a numbered
     "5. Fees" heading with nothing at all beneath it."""
@@ -483,6 +581,7 @@ def main() -> int:
     failures: list[str] = []
     check(files, failures)
     check_program_overflow(failures)
+    check_methodology_stages(failures, files)
     check_empty_letter_sections(failures)
 
     if failures:
