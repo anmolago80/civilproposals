@@ -19,6 +19,26 @@ from __future__ import annotations
 with tabs[9]:
     st.subheader("Export Pack")
 
+    # Readiness checklist. Most of the red in an exported pack is not missing
+    # information -- it is a step that hasn't been run. Listing those here,
+    # each with where to go, turns a silently red document into a short list
+    # of actions before anyone opens the file and starts wondering.
+    _readiness = _export_readiness()
+    if _readiness:
+        with st.expander(f"⚠️ {len(_readiness)} thing(s) still outstanding before this pack is ready",
+                         expanded=True):
+            for _item in _readiness:
+                st.markdown(
+                    f"- **{_item['label']}** -- go to *{_item['where']}*"
+                    + (f". {_item['detail']}" if _item["detail"] else "")
+                )
+            st.caption(
+                "You can export anyway -- everything outstanding shows as a red placeholder in "
+                "the document, so nothing is silently missing."
+            )
+    else:
+        st.success("Everything this pack needs has been filled in.")
+
     if _is_letter():
         st.caption("Generates the first-pass Small Scope Proposal Response Pack. Review the checklist page inside before this goes anywhere near a real submission.")
         ready = st.session_state.sections is not None
@@ -35,7 +55,7 @@ with tabs[9]:
 
         if st.button("Generate Small Scope Pack DOCX", type="primary", disabled=not ready):
             with st.spinner("Assembling document..."):
-                cover_image = st.session_state.project_photo_bytes[0] if st.session_state.project_photo_bytes else None
+                cover_image = _cover_photo_bytes()
                 sender = {
                     "name": st.session_state.letter_sender_name,
                     "title": st.session_state.letter_sender_title,
@@ -69,6 +89,7 @@ with tabs[9]:
                     ocr_note=_ocr_export_note(),
                 )
                 st.session_state.docx_buffer = buffer
+                _mark_export_generated()
 
                 # Same companion internal document the Large Scope pack generates
                 # alongside its own DOCX (see export_docx.build_tender_summary_docx) --
@@ -105,7 +126,7 @@ with tabs[9]:
 
         if st.button("Generate DOCX", type="primary", disabled=not ready):
             with st.spinner("Assembling document..."):
-                cover_image = st.session_state.project_photo_bytes[0] if st.session_state.project_photo_bytes else None
+                cover_image = _cover_photo_bytes()
 
                 # Same override the Fee Estimate tab's "Indicative fee split by discipline"
                 # section applies to its own on-screen table/Excel/chart: a manually-entered
@@ -171,6 +192,7 @@ with tabs[9]:
                     ),
                 )
                 st.session_state.docx_buffer = buffer
+                _mark_export_generated()
 
                 # Companion internal document -- everything that's about how the
                 # brief was read and how this pack was assembled (tender summary,
@@ -191,6 +213,11 @@ with tabs[9]:
             st.success("Document generated.")
 
     if st.session_state.docx_buffer:
+        if _export_is_stale():
+            st.warning(
+                "**These files were generated before your latest edits.** Downloading now gives "
+                "you the older pack. Generate again to pick up the changes."
+            )
         filename = (st.session_state.tender_name or "tender_response_pack").replace(" ", "_")
         suffix = "small_scope_pack" if _is_letter() else "large_scope_pack"
         # Small Scope: DOCX + Tender Summary. Large Scope: DOCX + Org Chart + Methodology

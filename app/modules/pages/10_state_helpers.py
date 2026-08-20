@@ -29,6 +29,10 @@ def _init_state():
         "company_uploaded_flags": {},
         "returnable_schedule_files": {},  # {filename: raw bytes} -- returnable schedules from a package ZIP (see package_intake)
         "project_photo_bytes": [],
+        # Which uploaded photo goes on the cover. Was hardcoded to the first
+        # one, with no way to choose -- the most visible image in the pack
+        # decided by upload order.
+        "cover_photo_index": 0,
         "branding_bytes": [],
         # Pre-filled from ANTHROPIC_API_KEY in a local .env file, if present (see
         # load_dotenv() at the top of this file) -- so this tab doesn't need to be
@@ -654,6 +658,167 @@ def _fee_apply_control(state_prefix: str, pending: bool, indent_note: str = "tot
         disabled=not pending,
         help=None if pending else "Nothing to apply -- the table matches the figures below.",
     )
+
+
+def _export_input_signature() -> str:
+    """A hash of everything that ends up in the exported pack.
+
+    Stamped when a pack is generated and compared on every render, so a
+    download button can say the file predates the user's latest edits.
+    Before this, editing a fee after generating the DOCX silently served the
+    OLD pack -- the worst possible failure mode here, because the user gets
+    a plausible document that is quietly wrong, and nothing on screen
+    disagrees with them."""
+    import hashlib
+    import json as _json
+
+    def _dump(value):
+        try:
+            if hasattr(value, "model_dump"):
+                return value.model_dump()
+            if isinstance(value, dict):
+                return {str(k): _dump(v) for k, v in value.items()}
+            if isinstance(value, (list, tuple)):
+                return [_dump(v) for v in value]
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                return value
+            if isinstance(value, (bytes, bytearray)):
+                # Bytes are photos/charts -- length is enough to notice a swap
+                # without hashing megabytes on every rerun.
+                return f"bytes:{len(value)}"
+            return str(value)
+        except Exception:
+            return "?"
+
+    keys = [
+        "project_name", "client_name", "tender_name", "bidder_name", "submission_date_input",
+        "proposal_theme", "project_type", "proposal_format", "body_font",
+        "analysis", "sections", "drafts", "guidance_notes", "compliance_items", "gap_items",
+        "graphics", "fee_estimates", "discipline_fee_lines", "scope_item_fees",
+        "resource_plan", "reference_projects", "executive_summary", "team_intro",
+        "experience_intro", "methodology_stages", "methodology_wvr_confirmed", "risk_register",
+        "program_schedule", "program_week_labels", "terms_of_engagement_text",
+        "project_differentiator", "project_sales_pitch", "fee_estimate_manual_total",
+        "cover_photo_index", "letter_sender_name", "letter_sender_title",
+        "letter_sender_phone", "letter_sender_email", "letter_sender_address",
+    ]
+    payload = {key: _dump(st.session_state.get(key)) for key in keys}
+    payload["_photos"] = [len(b or b"") for b in (st.session_state.get("project_photo_bytes") or [])]
+    payload["_org_chart"] = len(st.session_state.get("org_chart_png") or b"")
+    try:
+        blob = _json.dumps(payload, sort_keys=True, default=str)
+    except Exception:
+        blob = str(payload)
+    return hashlib.sha256(blob.encode("utf-8", "replace")).hexdigest()
+
+
+def _mark_export_generated() -> None:
+    st.session_state._export_signature = _export_input_signature()
+
+
+def _export_is_stale() -> bool:
+    stamped = st.session_state.get("_export_signature")
+    if not stamped:
+        return False
+    return stamped != _export_input_signature()
+
+
+def _export_readiness() -> list[dict]:
+    """What's still outstanding before this pack is worth sending.
+
+    Most of the red placeholder walls in an exported pack are not missing
+    information -- they are a step the user hasn't run yet. Listing them
+    here, each with where to go, turns a silently red document into a short
+    list of actions."""
+    items: list[dict] = []
+
+    def add(label: str, where: str, detail: str = "") -> None:
+        items.append({"label": label, "where": where, "detail": detail})
+
+    sections = st.session_state.sections or []
+    drafts = st.session_state.drafts or {}
+    undrafted = [
+        s.title for s in _draftable_sections(sections)
+        if not (drafts.get(s.title) and (drafts[s.title].draft_text or "").strip())
+    ]
+    if undrafted:
+        add(f"{len(undrafted)} section(s) have no draft", "Draft Responses",
+            ", ".join(undrafted[:4]) + (", ..." if len(undrafted) > 4 else ""))
+
+    # Drafts that came back far off their page budget.
+    from modules.draft_generator import length_verdict
+    off_budget = [
+        f"{s.title} ({length_verdict(s, drafts[s.title])})"
+        for s in sections
+        if s.title in drafts and length_verdict(s, drafts[s.title])
+    ]
+    if off_budget:
+        add(f"{len(off_budget)} draft(s) are well off their page budget", "Draft Responses",
+            ", ".join(off_budget[:4]))
+
+    plan = st.session_state.resource_plan or []
+    unassigned = [a.slot for a in plan if not (a.person_name or "").strip()]
+    if unassigned:
+        add(f"{len(unassigned)} role(s) have nobody assigned", "Team & Resourcing",
+            ", ".join(unassigned[:4]) + (", ..." if len(unassigned) > 4 else ""))
+    if not plan:
+        add("No team assigned", "Team & Resourcing", "Key Personnel will export empty.")
+
+    fee_lines = st.session_state.discipline_fee_lines or []
+    unpriced = [l.discipline for l in fee_lines if not (l.total_hours or l.rate_per_hour)]
+    if unpriced:
+        add(f"{len(unpriced)} discipline(s) are unpriced", "Fees & Program",
+            ", ".join(unpriced[:4]) + (", ..." if len(unpriced) > 4 else ""))
+    if not fee_lines:
+        add("No fee build-up entered", "Fees & Program", "The fee table exports as a placeholder.")
+
+    if not st.session_state.program_schedule:
+        add("No delivery program", "Fees & Program",
+            "Also blocks the derived cash-flow profile.")
+    elif not st.session_state.get("program_start_date"):
+        add("No anticipated start date", "Fees & Program",
+            "Optional -- set it and the program shows real dates instead of week numbers.")
+
+    if st.session_state.methodology_stages is None and not _is_letter():
+        add("Design stages not drafted", "Draft Responses",
+            "The methodology table exports with placeholder columns.")
+    if st.session_state.risk_register is None and (getattr(st.session_state.analysis, "risks", None)):
+        add("Risk register not drafted", "Draft Responses",
+            "The brief's risks export as raw bullets.")
+
+    profile = _firm_profile()
+    if firm_profile.is_empty(profile):
+        add("Firm profile is empty", "Sidebar -> Firm profile",
+            "About ten red placeholders in the pack come from here.")
+    else:
+        missing = []
+        if not (getattr(profile, "logo_bytes", None)):
+            missing.append("logo")
+        if not (getattr(profile, "abn", "") or "").strip():
+            missing.append("ABN")
+        if not (getattr(profile, "registered_address", "") or "").strip():
+            missing.append("registered address")
+        if not firm_profile.insurances(profile):
+            missing.append("insurances")
+        if missing:
+            add("Firm profile is incomplete", "Sidebar -> Firm profile", ", ".join(missing))
+
+    if not st.session_state.executive_summary:
+        add("No executive summary", "Draft Responses", "The pack's first page exports empty.")
+
+    return items
+
+
+def _cover_photo_bytes():
+    """The photo chosen for the cover, or the first uploaded one.
+
+    Was always photos[0] with no way to change it, so the single most
+    visible image in the pack was decided by upload order."""
+    photos = st.session_state.get("project_photo_bytes") or []
+    if not photos:
+        return None
+    index = st.session_state.get("cover_photo_index") or 0
+    return photos[index] if 0 <= index < len(photos) else photos[0]
 
 
 def _dates_look_equivalent(a: str, b: str) -> bool:

@@ -79,7 +79,38 @@ with tabs[6]:
                         st.rerun()
 
         st.divider()
-        st.markdown("#### 2. Divider design per section")
+        st.markdown("#### 2. Project photos")
+        if photos:
+            # Thumbnails, because "Photo 1 / Photo 2 / Photo 3" in a dropdown
+            # asks the user to remember which upload was which -- and the one
+            # that ends up on the cover is the single most visible image in
+            # the whole pack.
+            st.caption(
+                "Pick the cover photo. It fills the front page of the pack; the rest stay "
+                "available for section dividers below."
+            )
+            _cover_index = st.session_state.get("cover_photo_index") or 0
+            if _cover_index >= len(photos):
+                _cover_index = 0
+            _photo_cols = st.columns(min(4, len(photos)))
+            for _i, _photo in enumerate(photos):
+                with _photo_cols[_i % len(_photo_cols)]:
+                    try:
+                        st.image(_photo, use_container_width=True)
+                    except Exception:
+                        st.caption(f"(photo {_i + 1} couldn't be previewed)")
+                    if _i == _cover_index:
+                        st.caption("**On the cover**")
+                    elif st.button("Use as cover", key=f"_cover_pick_{_i}", use_container_width=True):
+                        st.session_state.cover_photo_index = _i
+                        # The cover image is baked into the generated pack, so
+                        # a previously-generated DOCX no longer matches.
+                        st.session_state.docx_buffer = None
+                        st.rerun()
+            st.session_state.cover_photo_index = _cover_index
+
+        st.divider()
+        st.markdown("#### 3. Divider design per section")
         if not photos:
             st.info("No project photos uploaded (Upload Docs) -- sections default to the 'Solid colour' layout. Upload photos there to unlock photo-based layouts.")
 
@@ -122,6 +153,14 @@ with tabs[6]:
                     )
                 cfg["layout"] = layout
                 cfg["photo_index"] = None if photo_choice == "(none)" else int(photo_choice.split()[-1]) - 1
+                # Show which photo "Photo 2" actually is, rather than making
+                # the user generate the banner to find out.
+                if cfg["photo_index"] is not None and cfg["photo_index"] < len(photos):
+                    with c2:
+                        try:
+                            st.image(photos[cfg["photo_index"]], use_container_width=True)
+                        except Exception:
+                            pass
                 cfg["quote_index"] = None if quote_choice == "(none)" else quote_options.index(quote_choice) - 1
                 cfg["photo_caption"] = photo_caption.strip()
 
