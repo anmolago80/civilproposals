@@ -410,6 +410,10 @@ def _company_materials_flags() -> dict:
     flags = {f"has_{k}": bool(st.session_state.company_material_text.get(k)) for k in COMPANY_MATERIAL_CATEGORIES}
     flags["has_project_photos"] = bool(st.session_state.project_photo_bytes)
     flags["has_company_image_library"] = bool(st.session_state.branding_bytes)
+    # Firm-profile facts count as materials too -- an insurance requirement
+    # is covered when the firm profile actually holds the insurance, not only
+    # when a company-profile document happens to have been uploaded.
+    flags.update(_firm_materials_flags())
     return flags
 
 
@@ -532,6 +536,15 @@ def _firm_profile_is_empty() -> bool:
     return firm_profile.is_empty(_firm_profile())
 
 
+def _firm_materials_flags() -> dict:
+    """Firm-profile facts the compliance matrix should treat as covered."""
+    profile = _firm_profile()
+    return {
+        "firm_profile_has_insurances": bool(firm_profile.insurances(profile)),
+        "firm_profile_has_certifications": bool(firm_profile.certifications(profile)),
+    }
+
+
 def _firm_export_context() -> dict:
     """The firm profile as the exporters want it (see
     firm_profile.export_context) -- one bundle rather than six new keyword
@@ -551,6 +564,11 @@ def _seed_project_from_firm_profile() -> None:
     for key, value in firm_profile.project_seed(profile).items():
         if not (st.session_state.get(key) or "").strip():
             st.session_state[key] = value
+    # A firm that has recorded its QA/Work Verification commitment has
+    # answered the methodology table's WVR question -- see Batch 2's honesty
+    # fix. Still only a seed: unticking it on a bid sticks for that bid.
+    if (getattr(profile, "qa_statement", "") or "").strip():
+        st.session_state.methodology_wvr_confirmed = True
 
 
 def _program_week_count() -> int:

@@ -153,9 +153,29 @@ def _status_for_text(text: str, mapped_section: str | None, company_materials: d
         return "Missing", "No project references or past proposals were uploaded. This cannot be addressed without user input."
 
     if any(kw in lowered for kw in _COMMERCIAL_KEYWORDS):
+        # The firm profile holds real insurances and certifications, so this
+        # requirement is genuinely covered rather than "must come from the
+        # user" -- which is what it said permanently, before there was
+        # anywhere in the app to put an insurance policy.
+        has_insurance = company_materials.get("firm_profile_has_insurances")
+        has_certs = company_materials.get("firm_profile_has_certifications")
+        if has_insurance or has_certs:
+            held = " and ".join(
+                part for part in (
+                    "insurances" if has_insurance else "",
+                    "certifications" if has_certs else "",
+                ) if part
+            )
+            return "Covered", (
+                f"Your firm profile holds {held} -- check they meet this requirement's stated "
+                f"limits and dates, then reference them here."
+            )
         if company_materials.get("has_company_profile"):
             return "Partially Covered", "Check the company profile for current certification/insurance detail and insert it here."
-        return "Missing", "No company profile was uploaded. Certification/insurance/accreditation detail must come from the user."
+        return "Missing", (
+            "Nothing on file. Add your insurances and certifications to the Firm profile "
+            "(sidebar) and they will fill this and your returnable schedules automatically."
+        )
 
     if mapped_section:
         return "Partially Covered", f"A proposal section ('{mapped_section}') exists for this -- first-pass draft content will need review and project-specific detail."
