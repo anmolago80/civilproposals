@@ -341,6 +341,98 @@ def main() -> int:
             if not blob:
                 failures.append(f"[methodology style] {style} produced no PPTX bytes")
 
+    # Trial upload limits + AI spend backstop (limits.py / db.py) -- unit-
+    # style checks against the modules directly rather than through AppTest.
+    # IS_SAAS_MODE is read once at import time by 00_init.py, so flipping
+    # SAAS_MODE mid-process for a single AppTest pass isn't practical here;
+    # these exercise the actual decision logic (limits.py's tier math, the
+    # rate limiter's in-memory fallback -- REDIS_URL is popped above, so
+    # this genuinely runs the fallback path, not just the Redis path) and
+    # db.py's cost aggregation directly, which is where the real behaviour
+    # lives regardless of which UI thread calls into it.
+    if not failures:
+        from modules import limits
+
+        TRIAL_ACCESS = {"unlimited": False, "subscribed": False, "past_due": False, "bid_credits": 0}
+        PAID_ACCESS = {"unlimited": False, "subscribed": True, "past_due": False, "bid_credits": 0}
+        UNLIMITED_ACCESS = {"unlimited": True, "subscribed": False, "past_due": False, "bid_credits": 0}
+
+        if limits.is_paid_tier(TRIAL_ACCESS):
+            failures.append("[limits] a plain trial access dict was classified as paid")
+        if not limits.is_paid_tier(PAID_ACCESS) or not limits.is_paid_tier(UNLIMITED_ACCESS):
+            failures.append("[limits] subscribed/unlimited access wasn't classified as paid")
+
+        for key, (trial_n, paid_n) in limits.UPLOAD_LIMITS.items():
+            if trial_n > paid_n:
+                failures.append(f"[limits] {key}: trial limit ({trial_n}) exceeds paid limit ({paid_n})")
+        _trial_map = limits.limits_for(None, TRIAL_ACCESS)
+        _paid_map = limits.limits_for(None, PAID_ACCESS)
+        if _trial_map["cv_library"] != 5 or _paid_map["cv_library"] != 25:
+            failures.append(f"[limits] cv_library limits wrong: trial={_trial_map['cv_library']}, paid={_paid_map['cv_library']}")
+
+        class _FakeFile:
+            def __init__(self, name):
+                self.name = name
+
+        six_cvs = [_FakeFile(f"cv_{i}.pdf") for i in range(6)]
+        kept, msg = limits.enforce_count_limit(six_cvs, "cv_library", TRIAL_ACCESS)
+        if len(kept) != 5 or not msg:
+            failures.append(f"[limits] 6th CV wasn't refused for a trial account: kept={len(kept)}, msg={msg!r}")
+        kept_paid, msg_paid = limits.enforce_count_limit(six_cvs, "cv_library", PAID_ACCESS)
+        if len(kept_paid) != 6 or msg_paid:
+            failures.append("[limits] a paid account's 6 CVs were incorrectly limited")
+        kept_unlimited, msg_unlimited = limits.enforce_count_limit(six_cvs, "cv_library", UNLIMITED_ACCESS)
+        if len(kept_unlimited) != 6 or msg_unlimited:
+            failures.append("[limits] an unlimited account's 6 CVs were incorrectly limited")
+
+        if limits.tender_page_cap_message(100, TRIAL_ACCESS) is not None:
+            failures.append("[limits] 100 pages (exactly the trial cap) was incorrectly blocked")
+        if limits.tender_page_cap_message(101, TRIAL_ACCESS) is None:
+            failures.append("[limits] 101st page didn't block analysis for a trial account")
+        if limits.tender_page_cap_message(500, PAID_ACCESS) is not None:
+            failures.append("[limits] a paid account's page count was incorrectly hard-blocked")
+
+        # AI-spend ceiling, backed by a real (SQLite fallback) AiCallLog row.
+        from modules import db
+        _test_user_id = "smoke-test-ai-spend-user"
+        with db.get_session() as _s:
+            _s.query(db.AiCallLog).filter(db.AiCallLog.user_id == _test_user_id).delete()
+            _s.add(db.AiCallLog(
+                id=db._uid(), user_id=_test_user_id, project_key="smoke-test-project",
+                project_name="Smoke Test Project", purpose="test", provider="anthropic",
+                model="test-model", input_tokens=1000, output_tokens=1000,
+                estimated_cost_usd=6.00,
+            ))
+            _s.commit()
+        _cost = db.account_ai_cost(_test_user_id)
+        if _cost < 6.00:
+            failures.append(f"[db] account_ai_cost didn't pick up the inserted row: {_cost}")
+        if limits.ai_spend_block_reason(_test_user_id, TRIAL_ACCESS, _cost) is None:
+            failures.append("[limits] a trial account $6 over the $5 ceiling wasn't blocked")
+        if limits.ai_spend_block_reason(_test_user_id, PAID_ACCESS, _cost) is not None:
+            failures.append("[limits] a paid account was blocked by the trial-only spend ceiling")
+        if limits.ai_spend_block_reason(None, TRIAL_ACCESS, _cost) is not None:
+            failures.append("[limits] a logged-out/no-user_id call was incorrectly blocked")
+        with db.get_session() as _s:
+            _s.query(db.AiCallLog).filter(db.AiCallLog.user_id == _test_user_id).delete()
+            _s.commit()
+
+        # Fair-use rate limit -- exercises the in-memory fallback directly
+        # (REDIS_URL is popped for this whole test run).
+        _rate_user = "smoke-test-rate-user"
+        _blocked_at = None
+        for i in range(limits.TRIAL_AI_CALLS_PER_5MIN + 3):
+            _msg = limits.record_ai_call(_rate_user, is_trial=True)
+            if _msg and _blocked_at is None:
+                _blocked_at = i + 1
+        if _blocked_at != limits.TRIAL_AI_CALLS_PER_5MIN + 1:
+            failures.append(
+                f"[limits] trial rate limit tripped at call {_blocked_at}, expected "
+                f"{limits.TRIAL_AI_CALLS_PER_5MIN + 1}"
+            )
+        if limits.record_ai_call(None, is_trial=True) is not None:
+            failures.append("[limits] a None user_id was incorrectly rate-limited")
+
     if failures:
         print("SMOKE TEST FAILED:")
         for f in failures:
