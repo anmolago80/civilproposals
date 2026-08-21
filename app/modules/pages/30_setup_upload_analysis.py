@@ -154,14 +154,50 @@ with tabs[1]:
         _package_rows = []      # classification summary rows for the UI
         _package_errors = []
         _package_schedules = {}
+
+        # Trial upload limit on brief + addenda FILE COUNT (Part 1 -- see
+        # modules/limits.py). Counted across BOTH plain document uploads
+        # and whatever a ZIP unpacks to a brief/addendum -- a ZIP is a
+        # container, not itself "one file" for this limit. UNLIMITED_ACCOUNTS
+        # bypass entirely (_files_budget stays None = unlimited). Classification
+        # still runs over EVERYTHING (the breakdown table below always lists
+        # every file in a ZIP); only INGESTION (what feeds the analysis) is
+        # capped, with each skipped file's own row saying so.
+        _files_budget = None
+        if IS_SAAS_MODE and current_user and not _access.get("unlimited"):
+            _files_budget = limits.limits_for(current_user, _access)["tender_files"]
+
         with st.spinner("Extracting text..." if len(tender_files) == 1 else f"Extracting text from {len(tender_files)} files..."):
-            per_file = [document_processor.extract_text_from_file(f) for f in _doc_uploads]
+            _doc_uploads_kept = _doc_uploads
+            if _files_budget is not None and len(_doc_uploads) > _files_budget:
+                _doc_uploads_kept, _docs_limit_msg = limits.enforce_count_limit(_doc_uploads, "tender_files", _access)
+                if _docs_limit_msg:
+                    _package_errors.append(_docs_limit_msg)
+            per_file = [document_processor.extract_text_from_file(f) for f in _doc_uploads_kept]
+            if _files_budget is not None:
+                _files_budget = max(0, _files_budget - len(_doc_uploads_kept))
+            _zip_skipped = 0
             for _zf in _zip_uploads:
                 _pkg = package_intake.process_zip(_zf.getvalue(), _zf.name)
                 if _pkg.fatal_error:
                     _package_errors.append(_pkg.fatal_error)
                     continue
-                per_file.extend(f.extracted for f in _pkg.briefs + _pkg.addenda if f.extracted)
+                for _cf in _pkg.briefs + _pkg.addenda:
+                    if not _cf.extracted:
+                        continue
+                    if _files_budget is None or _files_budget > 0:
+                        per_file.append(_cf.extracted)
+                        if _files_budget is not None:
+                            _files_budget -= 1
+                    else:
+                        _zip_skipped += 1
+                        _trial_limit, _paid_limit = limits.UPLOAD_LIMITS["tender_files"]
+                        _cf.reason = (
+                            f"**Not ingested -- trial limit.** The free trial analyses up to "
+                            f"{_trial_limit} brief/addendum file(s) per upload; this one wasn't "
+                            f"included in the analysis. Paid accounts go up to {_paid_limit}. "
+                            f"Original filing: {_cf.reason}"
+                        )
                 for _sched in _pkg.schedules:
                     if _sched.file_bytes:
                         _package_schedules[_sched.filename.rsplit("/", 1)[-1]] = _sched.file_bytes
@@ -173,6 +209,13 @@ with tabs[1]:
                         "_category": _cf.category,
                     })
                 _package_errors.extend(_pkg.warnings)
+            if _zip_skipped:
+                _trial_limit, _paid_limit = limits.UPLOAD_LIMITS["tender_files"]
+                _package_errors.append(
+                    f"{_zip_skipped} file(s) inside the uploaded package(s) weren't ingested -- "
+                    f"the free trial analyses up to {_trial_limit} brief/addendum files total "
+                    f"(see the breakdown below for which). Paid accounts go up to {_paid_limit}."
+                )
             extracted = document_processor.combine_extracted_documents(per_file)
         st.session_state._tender_files_sig = _files_signature(tender_files)
         st.session_state._package_intake_rows = _package_rows or None
@@ -313,6 +356,31 @@ with tabs[1]:
         )
         sig_key = f"_matsig_{key}"
         if files and _files_signature(files) != st.session_state.get(sig_key):
+            # Trial upload limit (Part 1) -- this category MERGES new files
+            # with whatever's already stored (see the migration/merge logic
+            # below), so the cap has to account for what's already there,
+            # not just this batch: enforce_count_limit() alone only knows
+            # about a single selection. UNLIMITED_ACCOUNTS bypass entirely.
+            if IS_SAAS_MODE and current_user and not _access.get("unlimited"):
+                _cat_limit = limits.limits_for(current_user, _access)[key]
+                _existing_count = len([
+                    f for f in st.session_state.company_material_files.get(key, {}) if f != LEGACY_MATERIAL_KEY
+                ])
+                _budget = max(0, _cat_limit - _existing_count)
+                if len(files) > _budget:
+                    _kept, _dropped = files[:_budget], files[_budget:]
+                    _dropped_names = ", ".join(getattr(f, "name", None) or "unnamed file" for f in _dropped[:5])
+                    if len(_dropped) > 5:
+                        _dropped_names += f", and {len(_dropped) - 5} more"
+                    _tier_word = "paid" if limits.is_paid_tier(_access) else "free trial"
+                    st.warning(
+                        f"The {_tier_word} plan handles up to {_cat_limit:,} {limits.UPLOAD_LABELS.get(key, key)} "
+                        f"for this project -- {_existing_count} already stored, so "
+                        + (f"{len(_kept)} of the {len(files)} newly selected file(s) were added"
+                           if _kept else "none of the newly selected file(s) were added")
+                        + f" and the rest left out: {_dropped_names}." + limits.upgrade_clause(key, _access)
+                    )
+                    files = _kept
             with st.spinner(f"Extracting {label}..."):
                 updates = {}
                 for f in files:
@@ -378,6 +446,10 @@ with tabs[1]:
         key=f"upload_photos_{st.session_state._photo_uploader_version}",
     )
     if photo_files and _files_signature(photo_files) != st.session_state.get("_photo_files_sig"):
+        if IS_SAAS_MODE and current_user and not _access.get("unlimited"):
+            photo_files, _photo_limit_msg = limits.enforce_count_limit(photo_files, "project_photos", _access)
+            if _photo_limit_msg:
+                st.warning(_photo_limit_msg)
         st.session_state.project_photo_bytes = [f.getvalue() for f in photo_files]
         st.session_state._photo_files_sig = _files_signature(photo_files)
     if st.session_state.project_photo_bytes:
@@ -399,6 +471,10 @@ with tabs[1]:
         key=f"upload_branding_{st.session_state._branding_uploader_version}",
     )
     if branding_files and _files_signature(branding_files) != st.session_state.get("_branding_files_sig"):
+        if IS_SAAS_MODE and current_user and not _access.get("unlimited"):
+            branding_files, _branding_limit_msg = limits.enforce_count_limit(branding_files, "branding_images", _access)
+            if _branding_limit_msg:
+                st.warning(_branding_limit_msg)
         st.session_state.branding_bytes = [f.getvalue() for f in branding_files]
         st.session_state._branding_files_sig = _files_signature(branding_files)
     if st.session_state.branding_bytes:
@@ -442,11 +518,12 @@ with tabs[1]:
     refs_ai_ready = bool(st.session_state.ai_config.get("api_key")) and bool(raw_refs_text) and _current_project_already_paid()
     if st.button("Draft reference projects from uploaded material", disabled=not refs_ai_ready,
                  help=None if refs_ai_ready else (
-                     _PROJECT_NOT_PAID_HINT if not _current_project_already_paid()
+                     _ai_block_reason() if not _current_project_already_paid()
                      else f"Upload 'Project references' material above and {_AI_HINT_CLAUSE}."
                  ), type="primary"):
         with st.spinner("Reading project reference material and drafting revised, relevance-led entries..."):
             try:
+                _record_ai_click()
                 analysis_for_context = st.session_state.analysis
                 drafted, warnings = reference_projects_module.draft_reference_projects(
                     raw_refs_text,
@@ -577,6 +654,17 @@ with tabs[2]:
             ).first() is not None
     _trial_blocked = IS_SAAS_MODE and current_user and not _access["allowed"] and not _already_counted
 
+    # Trial page-cap hard block (Part 1) and the account-level AI-spend
+    # ceiling / fair-use rate limit (Parts 2-3, see modules/limits.py and
+    # _ai_gate_msg computed once per script run in 00_init.py) -- both
+    # apply to Tender Analysis too, alongside the bid-count paywall above.
+    # UNLIMITED_ACCOUNTS bypass both (_ai_gate_msg is already None for them;
+    # tender_page_cap_message() returns None for any paid/unlimited tier).
+    _page_cap_msg = None
+    if IS_SAAS_MODE and current_user and st.session_state.tender_extracted and st.session_state.tender_extracted.page_count:
+        _page_cap_msg = limits.tender_page_cap_message(st.session_state.tender_extracted.page_count, _access)
+    _extra_blocked_msg = _page_cap_msg or _ai_gate_msg
+
     if _trial_blocked or (IS_SAAS_MODE and current_user and _access["limit_reached"] and not _already_counted):
         if _access["past_due"]:
             # Same monthly quota as an active subscriber (see
@@ -599,6 +687,17 @@ with tabs[2]:
             )
         _render_upgrade_buttons(current_user, key_prefix="_tab3",
                                  already_subscribed=_access["subscribed"] or _access["past_due"])
+    elif _extra_blocked_msg:
+        # A distinct reason from the bid-count paywall above (which doesn't
+        # apply here -- the account may have plenty of bid capacity left):
+        # too many pages for the trial, or the account-level AI-spend
+        # ceiling / fair-use rate limit. Never shown together with the
+        # paywall message above (that `elif`) since one blocked reason is
+        # already enough explanation.
+        st.warning(_extra_blocked_msg)
+        if _page_cap_msg:
+            _render_upgrade_buttons(current_user, key_prefix="_tab3_pagecap",
+                                     already_subscribed=_access["subscribed"] or _access["past_due"])
 
     # Tell people exactly what clicking the button below is about to spend --
     # previously nothing here said this consumes the account's one free
@@ -622,7 +721,7 @@ with tabs[2]:
         else:
             st.caption(f"This will use 1 pay-as-you-go bid credit (you have {_access['bid_credits']} left).")
 
-    if st.button("Run Tender Analysis", type="primary", disabled=not ready or _trial_blocked):
+    if st.button("Run Tender Analysis", type="primary", disabled=not ready or _trial_blocked or bool(_extra_blocked_msg)):
         extracted = st.session_state.tender_extracted
         progress = st.progress(0.0, text="Analysing...")
 
@@ -630,6 +729,7 @@ with tabs[2]:
             progress.progress((done + 1) / max(total, 1), text=f"Analysing part {done + 1}/{total}...")
 
         try:
+            _record_ai_click()
             # Runs on the background job worker for logged-in SaaS users
             # once REDIS_URL is configured (see modules/job_queue.py and
             # DEPLOY.md's "Background jobs" section) -- this is the

@@ -121,6 +121,7 @@ from modules import (
     billing,
     branding,
     job_queue,
+    limits,
 )
 
 AUTOSAVE_INTERVAL_SECONDS = 20
@@ -325,6 +326,11 @@ _access = {
     "allowed": True, "subscribed": True, "past_due": False, "trial_remaining": 999, "trial_limit": 999,
     "bid_credits": 0, "subscription_bids_remaining": 999, "subscription_bid_limit": 3,
 }
+# Trial upload limits (Part 1) + the AI-spend/rate-limit backstop (Parts
+# 2-3) -- see modules/limits.py. Non-SaaS/local use (this default) always
+# passes: no tiers, no limits, matching every other _access-based gate.
+_account_ai_cost = 0.0
+_ai_gate_msg = None
 
 if IS_SAAS_MODE:
     db.init_db()
@@ -417,6 +423,32 @@ if IS_SAAS_MODE:
         current_user = billing.refresh_subscription_status(current_user)
         st.session_state["_sub_refresh_ts"] = _now_ts
     _access = auth.get_access_status(current_user)
+
+    # Computed once per script run, same pattern as _access itself, so the
+    # dozen-plus downstream AI-feature gates (see _current_project_already_
+    # paid() and _ai_block_reason() in 10_state_helpers.py) don't each
+    # re-query the database / rate-limit store on every rerun. Trial-tier
+    # only: is_paid_tier() (unlimited/subscribed/past_due/bid_credits) is
+    # never blocked by either check. account_ai_cost() itself degrades to
+    # 0.0 on any DB hiccup (see its docstring) -- fails open, never locks a
+    # legitimate account out on a transient error.
+    _account_ai_cost = (
+        db.account_ai_cost(current_user.id)
+        if current_user and not limits.is_paid_tier(_access) else 0.0
+    )
+    _ai_spend_blocked_msg = limits.ai_spend_block_reason(
+        current_user.id if current_user else None, _access, _account_ai_cost,
+    )
+    # Read-only peek (doesn't consume a rate-limit slot) -- the actual
+    # per-click "this call counts" recording happens at each AI feature's
+    # own click handler via limits.record_ai_call(), not here (this file
+    # reruns on every interaction across the whole app, not just AI ones).
+    _ai_rate_blocked_msg = limits.ai_rate_limit_peek(
+        current_user.id if current_user else None, not limits.is_paid_tier(_access),
+    )
+    # Spend ceiling takes priority in the message (worth explaining --
+    # "upgrade"); the rate limit is purely transient ("try again shortly").
+    _ai_gate_msg = _ai_spend_blocked_msg or _ai_rate_blocked_msg
 
 
 def _lib_user_id() -> str:
