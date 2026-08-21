@@ -30,11 +30,14 @@ the companion deck is that it can be tidied up further in PowerPoint.
 
 Nothing here is invented. An unassigned slot is a dashed red TBC. A role the
 user removed is absent, with no TBC -- deliberate absence is not a gap. A
-missing qualification line is omitted rather than guessed. An assurance
-element appears only where the plan actually holds a reviewer slot; there is
-no longer a "Peer Review" checklist box listing every discipline against a
-red TBC, because a project that has confirmed no reviewers should not export
-a page of them.
+person's card shows exactly two lines, name and role/title -- qualifications
+never appear here (see the Word pack's Key Personnel profiles for those). An
+assurance element (a dedicated reviewer role) appears only where the plan
+actually holds one; the separate Peer Review element -- one row per
+discipline against its nominated reviewer, red TBC until one is entered --
+is unconditional, appearing in every style whenever the plan has at least
+one discipline, because every discipline's work needs a reviewer eventually,
+not only once one has been named.
 """
 
 from __future__ import annotations
@@ -226,12 +229,14 @@ def _stack(slide, x, y, w, h, lines, align=PP_ALIGN.LEFT):
 
 
 def _person_lines(person, role_colour: RGBColor):
-    """The (text, size, bold, colour) rows for one person. A missing quals
-    line is omitted, never guessed; an unfilled slot is red TBC throughout."""
+    """The (text, size, bold, colour) rows for one person -- ALWAYS exactly
+    two: name (or "TBC"), then role/title. Qualifications are deliberately
+    never drawn on the chart (see org_chart_render's module docstring); a
+    full CV sentence on a card overflowed the card and collided with
+    whatever sat above it."""
     if person.is_tbc:
         return [("TBC", 11, True, _RED_TBC),
-                (person.role or "", 8.5, True, _RED_TBC),
-                ("to be confirmed", 8, False, _GREY_TEXT)]
+                (person.role or "", 8.5, True, _RED_TBC)]
     lines = [(person.name, 11, True, _INK)]
     if person.role:
         if person.role_is_placeholder:
@@ -239,8 +244,6 @@ def _person_lines(person, role_colour: RGBColor):
         else:
             colour = role_colour if person.is_lead else _GREY_TEXT
         lines.append((person.role, 8.5, True, colour))
-    if person.quals:
-        lines.append((person.quals, 8, False, _GREY_TEXT))
     return lines
 
 
@@ -297,6 +300,38 @@ def _client_label(model) -> tuple[str, RGBColor]:
     return (name or "[CLIENT NAME]", _WHITE if name else _RED_TBC_ON_DARK)
 
 
+def _peer_review_panel(slide, x, y, w, model) -> int:
+    """A bordered "Peer Review" panel: one row per discipline against its
+    nominated reviewer (resourcing.ResourceAssignment.peer_reviewer, on the
+    discipline's lead row), red TBC until one is entered. Unconditional
+    whenever the plan has at least one discipline -- see
+    org_chart_render's module docstring for why this, unlike the assurance
+    strip, never depends on whether a reviewer has been named yet. Returns
+    the panel's bottom y (EMU) so callers can make sure whatever comes next
+    clears it rather than overlapping it."""
+    if not model.disciplines:
+        return int(y)
+    row_h = int(Inches(0.30))
+    title_h = int(Inches(0.26))
+    panel_h = title_h + row_h * len(model.disciplines)
+    _round(slide, Emu(int(x)), Emu(int(y)), Emu(int(w)), Emu(panel_h),
+           _ASSURANCE_FILL, line=_ASSURANCE_AMBER, radius=0.05)
+    _stack(slide, Emu(int(x)), Emu(int(y)), Emu(int(w)), Emu(title_h),
+           [("PEER REVIEW", 9, True, _ASSURANCE_AMBER)], align=PP_ALIGN.CENTER)
+    row_y = int(y) + title_h
+    pad = int(Inches(0.08))
+    for group in model.disciplines:
+        reviewer = (group.peer_reviewer or "").strip()
+        tbc = not reviewer
+        _stack(slide, Emu(int(x + pad)), Emu(row_y), Emu(int(w * 0.56 - pad)), Emu(row_h),
+               [(group.name, 8.5, True, _INK)], align=PP_ALIGN.LEFT)
+        _stack(slide, Emu(int(x + w * 0.56)), Emu(row_y), Emu(int(w * 0.44 - pad)), Emu(row_h),
+               [(reviewer or "TBC", 8.5, True, _RED_TBC if tbc else _ASSURANCE_AMBER)],
+               align=PP_ALIGN.RIGHT)
+        row_y += row_h
+    return int(y) + panel_h
+
+
 # --- A. Executive cards ----------------------------------------------------
 
 def _slide_cards(model, accent: RGBColor) -> bytes:
@@ -349,12 +384,30 @@ def _slide_cards(model, accent: RGBColor) -> bytes:
     if rank:
         y += int(Inches(0.28))
         _connector(slide, MSO_CONNECTOR.STRAIGHT, centre, y - Inches(0.28), centre, y)
-        total = len(rank) * card_w + (len(rank) - 1) * gap
-        x = centre - total / 2
-        for person, badge in rank:
-            card(x, y, card_w, person, badge=badge)
-            x += card_w + gap
-        y += int(card_h)
+        # Wrapped like the discipline columns below, rather than one
+        # fixed-width row -- several co-leads plus a reviewer could
+        # otherwise run the end cards off the slide's left/right edge.
+        available = int(_SLIDE_W - 2 * _STYLE_MARGIN)
+        per_row, rank_w = _wrap_columns(len(rank), available, int(Inches(2.15)), int(gap), int(card_w))
+        rank_chunks = [rank[i:i + per_row] for i in range(0, len(rank), per_row)]
+        for chunk in rank_chunks:
+            total = len(chunk) * rank_w + (len(chunk) - 1) * int(gap)
+            x = int(centre - total / 2)
+            for person, badge in chunk:
+                card(x, y, rank_w, person, badge=badge)
+                x += rank_w + int(gap)
+            y += int(card_h + Inches(0.12))
+        y -= int(Inches(0.12))  # undo the last row's trailing gap
+
+    # Peer Review panel, top-right -- unconditional whenever the plan has at
+    # least one discipline. Anchored under the title rather than the
+    # flowing cursor above, so it never depends on how tall the leadership
+    # rows happened to be -- but the discipline columns below still have to
+    # start below it, not underneath it.
+    panel_w = int(Inches(3.4))
+    panel_bottom = _peer_review_panel(
+        slide, int(_SLIDE_W - _STYLE_MARGIN - panel_w), int(Inches(0.95)), panel_w, model)
+    y = max(y, panel_bottom)
 
     if model.disciplines:
         available = int(_SLIDE_W - 2 * _STYLE_MARGIN)
@@ -416,7 +469,7 @@ def _slide_columns(model, accent: RGBColor) -> bytes:
         _round(slide, centre - width / 2, y, width, pill_h,
                _TBC_FILL if tbc else fill,
                line=_RED_TBC if tbc else None, dashed=tbc, radius=0.2)
-        sub = person.role + (f" · {person.quals}" if person.quals else "")
+        sub = person.role
         _stack(slide, centre - width / 2, y, width, pill_h,
                [(person.name or "TBC", 12, True, _RED_TBC if tbc else _text_on(fill)),
                 (sub, 9, True, _RED_TBC if tbc else _text_on(fill))],
@@ -461,13 +514,21 @@ def _slide_columns(model, accent: RGBColor) -> bytes:
         strip_w, strip_h = Inches(6.4), Inches(0.44)
         _round(slide, centre - strip_w / 2, y, strip_w, strip_h, _ASSURANCE_FILL,
                line=RGBColor(0xFB, 0xBF, 0x24), radius=0.2)
-        text = " · ".join(
-            f"{p.name or 'TBC'} — {p.role}" + (f" ({p.quals})" if p.quals else "")
-            for p in model.assurance)
+        text = " · ".join(f"{p.name or 'TBC'} — {p.role}" for p in model.assurance)
         _stack(slide, centre - strip_w / 2, y, strip_w, strip_h,
                [(f"★ Independent review: {text}", 10, True, _ASSURANCE_AMBER)],
                align=PP_ALIGN.CENTER)
         y += int(strip_h)
+
+    # A right-hand-panel equivalent, unconditional (see the module docstring):
+    # every discipline against its nominated peer reviewer, red TBC until one
+    # is entered -- separate from the amber strip above, which only exists
+    # for a dedicated reviewer role.
+    if model.disciplines:
+        y += int(Inches(0.2))
+        panel_w = Inches(6.4)
+        panel_bottom = _peer_review_panel(slide, int(centre - panel_w / 2), int(y), int(panel_w), model)
+        y = panel_bottom
 
     _grow(prs, y + Inches(0.3))
     return _save(prs)
@@ -516,24 +577,22 @@ def _slide_bands(model, accent: RGBColor) -> bytes:
         for row in rows:
             x = band_x + pad
             for index in row:
-                name, role, quals, tbc, role_colour = chips[index]
+                name, role, tbc, role_colour = chips[index]
                 width = widths[index]
                 _round(slide, x, chip_y, width, chip_h,
                        _TBC_FILL if tbc else _WHITE,
                        line=_RED_TBC if tbc else chip_edge, dashed=tbc, radius=0.1)
                 lines = [(name, 10.5, True, _RED_TBC if tbc else _INK),
                          (role, 8.5, True, _RED_TBC if tbc else role_colour)]
-                if quals:
-                    lines.append((quals, 8, False, _GREY_TEXT))
                 _stack(slide, x, chip_y, width, chip_h, [l for l in lines if l[0]])
                 x += width + chip_gap
             chip_y += int(chip_h + chip_gap)
         y += band_h + int(Inches(0.16))
 
-    band("Client", [(_client_label(model)[0], model.client_role, "", False, _MUTED)],
+    band("Client", [(_client_label(model)[0], model.client_role, False, _MUTED)],
          _CLIENT_DARK, chip_edge=_CLIENT_DARK)
     band("Leadership",
-         [(p.name or "TBC", p.role, p.quals, p.is_tbc, accent) for p in model.leadership],
+         [(p.name or "TBC", p.role, p.is_tbc, accent) for p in model.leadership],
          _tint(accent, 0.94))
     delivery = []
     for group in model.disciplines:
@@ -541,22 +600,27 @@ def _slide_bands(model, accent: RGBColor) -> bytes:
         for person in group.people:
             role = (person.role if person.role.startswith(group.name)
                     else f"{person.role} · {group.name}")
-            delivery.append((person.name or "TBC", role, person.quals, person.is_tbc,
+            delivery.append((person.name or "TBC", role, person.is_tbc,
                              colour if person.is_lead else _GREY_TEXT))
     from modules.org_chart_render import DISCIPLINE_COLOURS
 
     band("Delivery team", delivery, _tint(_hex(DISCIPLINE_COLOURS[1]), 0.95))
-    # No assurance band at all when the plan holds no reviewer -- an empty
-    # band labelled ASSURANCE reads as a missing answer rather than an absent
-    # role.
-    band("Assurance",
-         [(p.name or "TBC", p.role, p.quals, p.is_tbc, _ASSURANCE_AMBER)
-          for p in model.assurance],
-         _tint(_ASSURANCE_AMBER, 0.93))
+    # The Assurance band now ALWAYS carries the Peer Review element -- one
+    # row per discipline, red TBC until a reviewer is entered -- alongside
+    # any dedicated reviewer role the plan holds, so the band appears
+    # whenever there is at least one discipline rather than only once a
+    # reviewer slot exists.
+    assurance_chips = [(p.name or "TBC", p.role, p.is_tbc, _ASSURANCE_AMBER) for p in model.assurance]
+    assurance_chips += [
+        (group.peer_reviewer or "TBC", f"Peer review — {group.name}",
+         not bool((group.peer_reviewer or "").strip()), _ASSURANCE_AMBER)
+        for group in model.disciplines
+    ]
+    band("Assurance", assurance_chips, _tint(_ASSURANCE_AMBER, 0.93))
 
     _stack(slide, _STYLE_MARGIN, y, Emu(int(_SLIDE_W - 2 * _STYLE_MARGIN)), Inches(0.3),
            [(("Solid reporting lines run top-down; the assurance band reviews independently "
-              "of the delivery team.") if model.has_assurance else
+              "of the delivery team.") if (model.has_assurance or model.disciplines) else
              "Solid reporting lines run top-down.", 9, True, _MUTED)])
     _grow(prs, y + Inches(0.5))
     return _save(prs)
@@ -583,6 +647,12 @@ def _slide_tree(model, accent: RGBColor) -> bytes:
          (model.client_role, 9, True, _GREY_TEXT)])
     y += int(box_h)
 
+    # Tracks the rightmost edge reached by any box at the director level (the
+    # top-role box plus however many co-lead/assurance boxes end up in the
+    # rank row below it), so the Peer Review box placed beside it (see below)
+    # never has to guess how wide that level got and overlap it.
+    director_right = int(centre + box_w / 2)
+
     leadership = list(model.leadership)
     top_person = leadership.pop(0) if leadership else None
     if top_person is not None:
@@ -596,12 +666,37 @@ def _slide_tree(model, accent: RGBColor) -> bytes:
     if rank:
         y += int(Inches(0.28))
         _connector(slide, MSO_CONNECTOR.STRAIGHT, centre, y - Inches(0.28), centre, y)
-        total = len(rank) * box_w + (len(rank) - 1) * gap
-        x = int(centre - total / 2)
-        for person in rank:
-            box(x, y, box_w, _person_lines(person, _INK), tbc=person.is_tbc)
-            x += int(box_w) + gap
-        y += int(box_h)
+        # Wrapped rather than one fixed-width row -- several co-leads plus a
+        # reviewer could otherwise run the end boxes off the slide edge.
+        available = int(_SLIDE_W - 2 * _STYLE_MARGIN)
+        per_row, rank_w = _wrap_columns(len(rank), available, int(Inches(2.2)), gap, int(box_w))
+        rank_chunks = [rank[i:i + per_row] for i in range(0, len(rank), per_row)]
+        for chunk in rank_chunks:
+            total = len(chunk) * rank_w + (len(chunk) - 1) * gap
+            x = int(centre - total / 2)
+            for person in chunk:
+                box(x, y, rank_w, _person_lines(person, _INK), tbc=person.is_tbc)
+                x += int(rank_w) + gap
+            director_right = max(director_right, x - gap)
+            y += int(box_h + Inches(0.14))
+        y -= int(Inches(0.14))  # undo the last row's trailing gap
+
+    # Peer Review box, to the right of the director level -- unconditional
+    # whenever the plan has at least one discipline. Placed clear of
+    # whatever the director level actually drew (director_right, tracked
+    # above) rather than assuming a fixed width for it -- several co-leads
+    # can run wider than a single director box, and a fixed offset collided
+    # with them. Anchored to the director row rather than the flowing
+    # cursor, so it sits in the same place regardless of how tall the rank
+    # row ended up -- but the discipline columns below still have to clear
+    # its bottom edge.
+    if model.disciplines:
+        min_panel_w = int(Inches(2.0))
+        panel_x = min(int(_SLIDE_W - _STYLE_MARGIN - min_panel_w), director_right + int(Inches(0.25)))
+        panel_w = max(min_panel_w, int(_SLIDE_W - _STYLE_MARGIN - panel_x))
+        director_row_top = int(Inches(0.95)) + int(box_h) + int(Inches(0.26))
+        panel_bottom = _peer_review_panel(slide, panel_x, director_row_top, panel_w, model)
+        y = max(y, panel_bottom)
 
     if model.disciplines:
         available = int(_SLIDE_W - 2 * _STYLE_MARGIN)

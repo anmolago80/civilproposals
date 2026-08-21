@@ -1436,7 +1436,7 @@ def _org_signature(style: str) -> tuple:
     return (
         style,
         tuple((a.slot, a.slot_kind, a.person_name, a.is_lead, a.custom_title,
-               a.qualification, a.rpeq_status) for a in plan),
+               a.qualification, a.rpeq_status, a.peer_reviewer) for a in plan),
         st.session_state.get("client_name") or "",
         st.session_state.get("project_name") or "",
         st.session_state.get("tender_name") or "",
@@ -1609,6 +1609,20 @@ def _render_resource_rows(kind: str, known_names: list) -> None:
                     help="Remove this discipline (and anyone added under it)" if not is_support else "Remove this team member",
                  type="primary"):
                     remove_index = i
+            if not is_support:
+                # One optional peer-reviewer name per discipline -- the org
+                # chart's Peer Review element (all four styles) reads this
+                # straight off the lead row. Blank renders as a red TBC on
+                # the chart, never a guess or a silently-omitted row.
+                pr_col1, pr_col2 = st.columns([1, 4])
+                with pr_col1:
+                    st.caption(f"↳ {a.slot} peer reviewer")
+                with pr_col2:
+                    a.peer_reviewer = st.text_input(
+                        f"Peer reviewer for {a.slot} (optional)", value=a.peer_reviewer,
+                        key=f"res_peerrev_{kind}_{i}", label_visibility="collapsed",
+                        placeholder="Optional -- who peer-reviews this discipline's work. Blank shows a red TBC on the chart.",
+                    )
     if add_support_after is not None:
         lead = plan[add_support_after]
         # Insert right after the lead's existing block (the lead plus any

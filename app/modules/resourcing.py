@@ -145,6 +145,14 @@ class ResourceAssignment(BaseModel):
     # old name and simply stopped appearing in the export. Minted on first
     # sight (see _ensure_photo_ids) and never changed afterwards.
     photo_id: str = ""
+    # Who peer-reviews this discipline's work -- user-entered, optional, and
+    # ONLY meaningful on a discipline's LEAD row (a support row has no peer
+    # review slot of its own). Blank means "not yet confirmed", not "no
+    # review happens" -- the org chart's Peer Review element renders it as a
+    # red TBC rather than omitting the discipline entirely, since every
+    # discipline in the resourcing plan needs its work reviewed eventually,
+    # whether or not that reviewer has been decided yet.
+    peer_reviewer: str = ""
 
 
 # Keyword rules for canonicalisation, checked in order (first match wins). Each

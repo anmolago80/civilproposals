@@ -223,6 +223,56 @@ def main() -> int:
             if [b for b in at.button if b.key == f"res_del_management_{index}"]:
                 failures.append(f"[design manager] {role} became removable")
 
+        # Fix brief Part B: each discipline lead has an optional peer-reviewer
+        # field, and it round-trips onto the plan (which the org chart's
+        # unconditional Peer Review element then reads).
+        peer_inputs = [t for t in at.text_input if (t.key or "").startswith("res_peerrev_discipline_")]
+        if not peer_inputs:
+            failures.append("[peer reviewer] no peer-reviewer field rendered for any discipline lead")
+        else:
+            peer_inputs[0].set_value("Jordan Reviewer").run()
+            for exc in at.exception:
+                failures.append(f"[peer reviewer] exception after setting a reviewer: {exc.value}")
+            leads = [a for a in at.session_state["resource_plan"]
+                     if a.slot_kind == "discipline" and a.is_lead]
+            if not any(a.peer_reviewer == "Jordan Reviewer" for a in leads):
+                failures.append("[peer reviewer] the typed reviewer name did not round-trip onto the plan")
+
+        # Fix brief Part A: every org-chart card is exactly name + role, no
+        # qualifications text -- checked directly against the shared render
+        # model (the same model that feeds the PNG preview, the PPTX export,
+        # and the DOCX-embedded PNG) across 3/5/8 disciplines, and the quals
+        # data itself must still be collected (just not drawn).
+        from modules import org_chart_render as _ocr
+
+        for n_disc in (3, 5, 8):
+            names = [f"Discipline Number {k}" for k in range(1, n_disc + 1)]
+            plan = resourcing.build_resource_plan(names)
+            for idx, a in enumerate(plan):
+                if a.slot_kind == "discipline" and a.is_lead:
+                    a.person_name = f"Lead Person {idx}"
+                    a.qualification = "BEng (Civil), MIEAust CPEng RPEQ 12345"
+                    a.peer_reviewer = "Reviewer Person" if idx % 2 == 0 else ""
+            model = _ocr.build_model(plan)
+            for group in model.disciplines:
+                for person in [group.lead] + list(group.supports):
+                    if person is None:
+                        continue
+                    lines = _ocr._person_lines(person)
+                    if len(lines) > 2:
+                        failures.append(
+                            f"[org chart n={n_disc}] {person.name!r} rendered {len(lines)} "
+                            "lines, expected at most 2 (name + role)")
+                    if any("RPEQ" in text or "MIEAust" in text or "BEng" in text
+                           for text, *_ in lines):
+                        failures.append(
+                            f"[org chart n={n_disc}] qualifications text leaked onto the "
+                            f"card for {person.name!r}")
+                if group.lead is not None and not group.lead.quals:
+                    failures.append(
+                        f"[org chart n={n_disc}] {group.lead.name!r} lost its quals data "
+                        "-- Part A must stop rendering it, not stop collecting it")
+
     if failures:
         print("SMOKE TEST FAILED:")
         for f in failures:

@@ -27,6 +27,29 @@ A role the user REMOVED (see resourcing.OPTIONAL_MANAGEMENT_ROLES) is a
 different thing from a role left unfilled: it is absent from the plan, so it
 is absent from the chart, with no TBC. Deliberate absence is not a gap.
 
+WHAT A CARD SHOWS
+------------------
+Every person on the chart renders exactly two lines: their name, and their
+role/title. Nothing else -- in particular, qualifications (BEng, RPEQ, years
+of experience, ...) are never drawn here. That data still exists on the
+resourcing plan and still drives the Word pack's Key Personnel profiles; a
+chart is read at a glance from across a room, and a card carrying a full CV
+sentence overflowed its own box and collided with the caption above it. An
+unfilled slot is a red "TBC" plus its role -- also two lines, never a third
+"to be confirmed" line underneath.
+
+PEER REVIEW
+-----------
+Every one of the four styles carries a Peer Review element: one row per
+discipline in the plan, showing that discipline's nominated peer reviewer
+(ResourceAssignment.peer_reviewer, set on the discipline's lead row) or a red
+"TBC" where none has been entered yet. Unlike the assurance band above, this
+element is unconditional -- it appears whenever the plan has at least one
+discipline, whether or not any reviewer has been named, because every
+discipline's work needs a reviewer eventually and a chart that only shows the
+question once someone has answered it isn't useful during the time it's
+actually needed.
+
 STYLE VOCABULARY (shared by all four)
 -------------------------------------
 Rounded white cards on a near-white page. A near-black client box. Thin light
@@ -115,6 +138,10 @@ class DisciplineGroup:
     name: str
     lead: Person | None = None
     supports: list[Person] = field(default_factory=list)
+    # ResourceAssignment.peer_reviewer off this discipline's LEAD row -- "" means
+    # not yet confirmed, rendered as a red TBC by the Peer Review element, never
+    # invented or inferred from anywhere else.
+    peer_reviewer: str = ""
 
     @property
     def people(self) -> list[Person]:
@@ -231,6 +258,7 @@ def build_model(resource_plan: list | None, client_name: str = "", project_name:
         group = groups[slot]
         if is_lead and group.lead is None:
             group.lead = person
+            group.peer_reviewer = (getattr(assignment, "peer_reviewer", "") or "").strip()
         else:
             person.is_lead = False
             group.supports.append(person)
@@ -416,11 +444,13 @@ def _empty_figure(model: OrgModel):
 
 
 def _person_lines(person: Person, role_colour: str | None = None) -> list[tuple[str, float, bool, str]]:
-    """(text, size, bold, colour) for a person's stacked lines. The quals line
-    is dropped when unknown rather than printed empty or invented."""
+    """(text, size, bold, colour) for a person's stacked lines -- ALWAYS
+    exactly two: name (or "TBC"), then role/title. Qualifications are
+    deliberately never drawn here (see the module docstring) -- a chart is
+    read at a glance, and a full CV sentence on a card overflowed the card
+    and collided with whatever sits above it."""
     if person.is_tbc:
         lines = [("TBC", 7.6, True, TBC_RED), (person.role or "", 6.6, True, TBC_RED)]
-        lines.append(("to be confirmed", 6.0, False, MUTED))
     else:
         lines = [(person.name, 7.6, True, INK)]
         if person.role:
@@ -433,8 +463,6 @@ def _person_lines(person: Person, role_colour: str | None = None) -> list[tuple[
             else:
                 colour = (role_colour or INK) if person.is_lead else MUTED
             lines.append((person.role, 6.6, True, colour))
-        if person.quals:
-            lines.append((person.quals, 6.0, False, MUTED))
     return [line for line in lines if line[0]]
 
 
@@ -535,14 +563,54 @@ def _render_cards(model: OrgModel, accent: str):
     if rank:
         _line(axes, centre, y, centre, y - 0.024)
         y -= 0.024
-        total = len(rank) * _CARD_W + (len(rank) - 1) * _CARD_GAP
-        x = centre - total / 2
-        for person, badge in rank:
-            labels += _avatar_card(figure, axes, x, y - card_h, _CARD_W, card_h,
-                                   person, ASSURANCE_AMBER if badge else accent,
-                                   badge=badge)
-            x += _CARD_W + _CARD_GAP
-        y -= card_h
+        # Wrapped like the discipline columns below rather than laid out in
+        # one fixed-width row -- a job with several co-leads plus a reviewer
+        # could otherwise run its end cards off the left/right edge of the
+        # canvas, which bbox_inches="tight" then either clips or silently
+        # grows the export around, neither of which reads as a chart.
+        per_row, rank_w = _wrap_columns(len(rank), 0.165, _CARD_GAP, _CARD_W)
+        rank_chunks = [rank[i:i + per_row] for i in range(0, len(rank), per_row)]
+        for chunk in rank_chunks:
+            total = len(chunk) * rank_w + (len(chunk) - 1) * _CARD_GAP
+            x = max(0.0, centre - total / 2)
+            for person, badge in chunk:
+                labels += _avatar_card(figure, axes, x, y - card_h, rank_w, card_h,
+                                       person, ASSURANCE_AMBER if badge else accent,
+                                       badge=badge)
+                x += rank_w + _CARD_GAP
+            y -= card_h + 0.010
+        y += 0.010  # undo the last row's trailing gap
+
+    # Peer Review panel, top-right -- unconditional whenever the plan has at
+    # least one discipline (see the module docstring): one row per
+    # discipline against its nominated reviewer, red TBC until one is
+    # entered. Anchored to the top of the canvas rather than the flowing
+    # cursor above, so it never depends on how tall the leadership rows
+    # happened to be -- but the discipline columns below still have to start
+    # BELOW it, not underneath it, so its bottom edge is folded into `y`.
+    if model.disciplines:
+        panel_w = 0.30
+        panel_x = 1.0 - panel_w
+        panel_row_h = 0.024
+        panel_h = 0.036 + panel_row_h * len(model.disciplines)
+        panel_top = 0.90
+        _card(axes, panel_x, panel_top - panel_h, panel_w, panel_h,
+              facecolor=ASSURANCE_FILL, edgecolor=ASSURANCE_AMBER, radius=0.010, linewidth=1.0)
+        axes.text(panel_x + panel_w / 2, panel_top - 0.017, "PEER REVIEW", fontsize=6.2,
+                  fontweight="bold", color=ASSURANCE_AMBER, ha="center", va="center", zorder=4)
+        row_y = panel_top - 0.036
+        for group in model.disciplines:
+            reviewer = (group.peer_reviewer or "").strip()
+            tbc = not reviewer
+            labels.append((axes.text(panel_x + 0.016, row_y - panel_row_h / 2, group.name,
+                                     fontsize=5.8, fontweight="bold", color=INK,
+                                     ha="left", va="center", zorder=4), panel_w * 0.52))
+            labels.append((axes.text(panel_x + panel_w - 0.016, row_y - panel_row_h / 2,
+                                     reviewer or "TBC", fontsize=5.8, fontweight="bold",
+                                     color=TBC_RED if tbc else ASSURANCE_AMBER,
+                                     ha="right", va="center", zorder=4), panel_w * 0.42))
+            row_y -= panel_row_h
+        y = min(y, panel_top - panel_h)
 
     # Discipline columns, each with an uppercase caption and its lead plus
     # however many support members the plan carries.
@@ -628,11 +696,11 @@ def _render_columns(model: OrgModel, accent: str):
     for index, person in enumerate(model.leadership):
         _line(axes, centre, y, centre, y - 0.020)
         y -= 0.020
-        # The first leadership pill carries the quals line, the rest sit
-        # slightly narrower beneath it -- the reference look's tapering chain.
+        # The first leadership pill is slightly wider than the rest --
+        # the reference look's tapering chain.
         width = 0.24 if index == 0 else 0.19
         label = person.name or "TBC"
-        sub = person.role + (f" · {person.quals}" if person.quals else "")
+        sub = person.role
         colour = accent if index == 0 else _rgb_hex(_tint(accent, 0.18))
         labels.append((_pill(axes, centre - width / 2, y - pill_h, width, pill_h,
                              colour if not person.is_tbc else TBC_FILL, label, sub,
@@ -693,13 +761,53 @@ def _render_columns(model: OrgModel, accent: str):
         strip_w = 0.44
         _card(axes, centre - strip_w / 2, y - strip_h, strip_w, strip_h,
               facecolor=ASSURANCE_FILL, edgecolor="#FBBF24", radius=0.010)
-        text = " · ".join(
-            f"{p.name or 'TBC'} — {p.role}" + (f" ({p.quals})" if p.quals else "")
-            for p in model.assurance)
+        text = " · ".join(f"{p.name or 'TBC'} — {p.role}" for p in model.assurance)
         labels.append((axes.text(centre, y - strip_h / 2, f"★ Independent review: {text}",
                                  fontsize=6.6, fontweight="bold", color=ASSURANCE_AMBER,
                                  ha="center", va="center", zorder=4), strip_w - 0.02))
         y -= strip_h
+
+    # A right-hand-panel equivalent of the amber strip above, but
+    # unconditional (see the module docstring): one small chip per
+    # discipline against its nominated peer reviewer, red TBC until one is
+    # entered. Chips wrap across rows rather than squeezing, the same
+    # convention as every other multi-item row in this style.
+    if model.disciplines:
+        y -= 0.026
+        gap = 0.012
+        chip_w = 0.235
+        per_row = max(1, int((1.0 + gap) // (chip_w + gap)))
+        rows = -(-len(model.disciplines) // per_row)
+        per_row = -(-len(model.disciplines) // rows)
+        chip_h = 0.034
+        panel_h = 0.030 + rows * chip_h + (rows - 1) * 0.008
+        panel_w = min(1.0, per_row * chip_w + (per_row - 1) * gap) + 0.03
+        _card(axes, centre - panel_w / 2, y - panel_h, panel_w, panel_h,
+              facecolor=ASSURANCE_FILL, edgecolor="#FBBF24", radius=0.010)
+        axes.text(centre, y - 0.016, "PEER REVIEW", fontsize=6.2, fontweight="bold",
+                  color=ASSURANCE_AMBER, ha="center", va="center", zorder=4)
+        row_y = y - 0.030
+        for row_index in range(rows):
+            row_groups = model.disciplines[row_index * per_row:(row_index + 1) * per_row]
+            total = len(row_groups) * chip_w + (len(row_groups) - 1) * gap
+            x = centre - total / 2
+            for group in row_groups:
+                reviewer = (group.peer_reviewer or "").strip()
+                tbc = not reviewer
+                _card(axes, x, row_y - chip_h, chip_w, chip_h,
+                      facecolor=TBC_FILL if tbc else CARD_WHITE,
+                      edgecolor=TBC_RED if tbc else "#FBBF24",
+                      linestyle=(0, (2.2, 1.6)) if tbc else "solid", radius=0.008)
+                labels.append((axes.text(x + chip_w / 2, row_y - chip_h * 0.34, group.name,
+                                         fontsize=5.8, fontweight="bold", color=INK,
+                                         ha="center", va="center", zorder=4), chip_w - 0.016))
+                labels.append((axes.text(x + chip_w / 2, row_y - chip_h * 0.70,
+                                         reviewer or "TBC", fontsize=5.8, fontweight="bold",
+                                         color=TBC_RED if tbc else ASSURANCE_AMBER,
+                                         ha="center", va="center", zorder=4), chip_w - 0.016))
+                x += chip_w + gap
+            row_y -= chip_h + 0.008
+        y -= panel_h
 
     figure = _finalise(figure, axes, y - 0.02)
     for artist, max_frac in labels:
@@ -728,9 +836,9 @@ def _render_bands(model: OrgModel, accent: str):
     chip_h = 0.050
     chip_gap = 0.010
 
-    def band(title: str, chips: list[tuple[str, str, str, bool, str]], fill,
+    def band(title: str, chips: list[tuple[str, str, bool, str]], fill,
              chip_edge=CARD_EDGE):
-        """chips: (name, role, quals, is_tbc, role_colour)."""
+        """chips: (name, role, is_tbc, role_colour)."""
         nonlocal y
         if not chips:
             return
@@ -756,7 +864,7 @@ def _render_bands(model: OrgModel, accent: str):
         for row in rows:
             x = band_x + pad
             for index in row:
-                name, role, quals, tbc, role_colour = chips[index]
+                name, role, tbc, role_colour = chips[index]
                 width = widths[index]
                 _card(axes, x, chip_y - chip_h, width, chip_h,
                       facecolor=TBC_FILL if tbc else CARD_WHITE,
@@ -764,8 +872,6 @@ def _render_bands(model: OrgModel, accent: str):
                       linestyle=(0, (2.4, 1.8)) if tbc else "solid", radius=0.008, zorder=2)
                 lines = [(name, 7.2, True, TBC_RED if tbc else INK),
                          (role, 6.4, True, TBC_RED if tbc else role_colour)]
-                if quals:
-                    lines.append((quals, 6.0, False, MUTED))
                 lines = [line for line in lines if line[0]]
                 step = 0.0135
                 first = chip_y - chip_h / 2 + (len(lines) - 1) * step / 2
@@ -780,10 +886,10 @@ def _render_bands(model: OrgModel, accent: str):
         y -= band_h + 0.014
 
     band("Client",
-         [(model.client_name or "[CLIENT NAME]", model.client_role, "", False, MUTED)],
+         [(model.client_name or "[CLIENT NAME]", model.client_role, False, MUTED)],
          CLIENT_DARK, chip_edge=CLIENT_DARK)
     band("Leadership",
-         [(p.name or "TBC", p.role, p.quals, p.is_tbc, accent) for p in model.leadership],
+         [(p.name or "TBC", p.role, p.is_tbc, accent) for p in model.leadership],
          _tint(accent, 0.94))
     delivery = []
     for group in model.disciplines:
@@ -791,20 +897,26 @@ def _render_bands(model: OrgModel, accent: str):
         for person in group.people:
             role = (person.role if person.role.startswith(group.name)
                     else f"{person.role} · {group.name}")
-            delivery.append((person.name or "TBC", role, person.quals, person.is_tbc,
+            delivery.append((person.name or "TBC", role, person.is_tbc,
                              colour if person.is_lead else MUTED))
     band("Delivery team", delivery, _tint(DISCIPLINE_COLOURS[1], 0.95))
-    # No assurance band at all when the plan holds no reviewer -- an empty
-    # band labelled ASSURANCE reads as a missing answer rather than an
-    # absent role.
-    band("Assurance",
-         [(p.name or "TBC", p.role, p.quals, p.is_tbc, ASSURANCE_AMBER)
-          for p in model.assurance],
-         _tint(ASSURANCE_AMBER, 0.93))
+    # The Assurance band now ALWAYS carries the Peer Review element -- one
+    # row per discipline, red TBC until a reviewer is entered -- alongside
+    # any dedicated reviewer role the plan holds. Unlike the old "only when
+    # a reviewer slot exists" rule, this means the band appears whenever
+    # there is at least one discipline, because every discipline needs a
+    # peer reviewer eventually, not only once one has been named.
+    assurance_chips = [(p.name or "TBC", p.role, p.is_tbc, ASSURANCE_AMBER) for p in model.assurance]
+    assurance_chips += [
+        (group.peer_reviewer or "TBC", f"Peer review — {group.name}",
+         not bool((group.peer_reviewer or "").strip()), ASSURANCE_AMBER)
+        for group in model.disciplines
+    ]
+    band("Assurance", assurance_chips, _tint(ASSURANCE_AMBER, 0.93))
 
     axes.text(0.0, y - 0.006,
               "Solid reporting lines run top-down; the assurance band reviews independently "
-              "of the delivery team." if model.has_assurance else
+              "of the delivery team." if (model.has_assurance or model.disciplines) else
               "Solid reporting lines run top-down.",
               fontsize=6.2, fontweight="bold", color=SUBTLE, ha="left", va="top")
 
@@ -852,6 +964,12 @@ def _render_tree(model: OrgModel, accent: str):
     ])
     y -= box_h
 
+    # Tracks the rightmost edge reached by any box at the director level (the
+    # top-role box plus however many co-lead/assurance boxes end up in the
+    # rank row below it), so the Peer Review box placed beside it (see below)
+    # never has to guess how wide that level got and overlap it.
+    director_right = centre + box_w / 2
+
     lead_people = list(model.leadership)
     top_person = lead_people.pop(0) if lead_people else None
     if top_person is not None:
@@ -867,14 +985,55 @@ def _render_tree(model: OrgModel, accent: str):
         _line(axes, centre, y, centre, y - 0.026, colour=INK, width=1.0)
         y -= 0.026
         gap = 0.024
-        total = len(rank) * box_w + (len(rank) - 1) * gap
-        x = centre - total / 2
-        for person in rank:
-            labels += _tree_box(axes, x, y - box_h, box_w, box_h,
-                                _person_lines(person, role_colour=INK),
-                                tbc=person.is_tbc)
-            x += box_w + gap
-        y -= box_h
+        # Wrapped rather than one fixed-width row -- several co-leads plus a
+        # reviewer could otherwise run the end boxes off the canvas edge.
+        per_row, rank_w = _wrap_columns(len(rank), 0.165, gap, box_w)
+        rank_chunks = [rank[i:i + per_row] for i in range(0, len(rank), per_row)]
+        for chunk in rank_chunks:
+            total = len(chunk) * rank_w + (len(chunk) - 1) * gap
+            x = max(0.0, centre - total / 2)
+            for person in chunk:
+                labels += _tree_box(axes, x, y - box_h, rank_w, box_h,
+                                    _person_lines(person, role_colour=INK),
+                                    tbc=person.is_tbc)
+                x += rank_w + gap
+            director_right = max(director_right, x - gap)
+            y -= box_h + 0.012
+        y += 0.012  # undo the last row's trailing gap
+
+    # Peer Review box, to the right of the director level -- unconditional
+    # whenever the plan has at least one discipline (see the module
+    # docstring): one row per discipline against its nominated reviewer, red
+    # TBC until one is entered. Placed clear of whatever the director level
+    # actually drew (director_right, tracked above) rather than assuming a
+    # fixed width for it -- several co-leads can run wider than a single
+    # director box, and a fixed offset collided with them. Anchored to the
+    # director row rather than the flowing cursor, so it sits in the same
+    # place regardless of how tall the rank row ended up -- but the
+    # discipline columns below still have to clear its bottom edge.
+    if model.disciplines:
+        panel_x = min(0.98, director_right + 0.03)
+        panel_w = max(0.16, min(0.28, 1.0 - panel_x - 0.02))
+        panel_row_h = 0.022
+        panel_h = 0.032 + panel_row_h * len(model.disciplines)
+        panel_top = 0.90 - box_h - 0.024
+        _card(axes, panel_x, panel_top - panel_h, panel_w, panel_h, facecolor=CARD_WHITE,
+              edgecolor=ASSURANCE_AMBER, radius=0.006, linewidth=1.2)
+        axes.text(panel_x + panel_w / 2, panel_top - 0.015, "PEER REVIEW", fontsize=6.0,
+                  fontweight="bold", color=ASSURANCE_AMBER, ha="center", va="center", zorder=4)
+        row_y = panel_top - 0.032
+        for group in model.disciplines:
+            reviewer = (group.peer_reviewer or "").strip()
+            tbc = not reviewer
+            labels.append((axes.text(panel_x + 0.012, row_y - panel_row_h / 2, group.name,
+                                     fontsize=5.4, fontweight="bold", color=INK, ha="left",
+                                     va="center", zorder=4), panel_w * 0.5))
+            labels.append((axes.text(panel_x + panel_w - 0.012, row_y - panel_row_h / 2,
+                                     reviewer or "TBC", fontsize=5.4, fontweight="bold",
+                                     color=TBC_RED if tbc else ASSURANCE_AMBER, ha="right",
+                                     va="center", zorder=4), panel_w * 0.42))
+            row_y -= panel_row_h
+        y = min(y, panel_top - panel_h)
 
     if model.disciplines:
         gap = 0.020
