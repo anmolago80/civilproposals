@@ -620,6 +620,76 @@ def project_ai_cost(project_key: str) -> dict:
     }
 
 
+# A NULL AiCallLog.estimated_cost_usd means an unpriced model was used, not
+# a free one (see the AiCallLog model's own comment) -- account_ai_cost()
+# and accounts_ai_cost_summary() below treat it at this conservative flat
+# estimate so an unpriced provider can't quietly let a trial account bypass
+# limits.TRIAL_AI_SPEND_CEILING_USD.
+UNPRICED_CALL_COST_USD = 0.02
+
+
+def account_ai_cost(user_id: str | None) -> float:
+    """Summed estimated AI cost for ONE account, across every project --
+    the figure the trial AI-spend ceiling (limits.TRIAL_AI_SPEND_CEILING_USD)
+    checks before every AI feature runs. Returns 0.0 for no user_id, no
+    calls logged, or any query failure -- degrades to "not over the
+    ceiling" rather than risk blocking a legitimate account on a transient
+    DB hiccup, same philosophy as the rest of this app's gates."""
+    if not user_id:
+        return 0.0
+    try:
+        with get_session() as s:
+            total = (
+                s.query(func.coalesce(
+                    func.sum(func.coalesce(AiCallLog.estimated_cost_usd, UNPRICED_CALL_COST_USD)), 0.0,
+                ))
+                .filter(AiCallLog.user_id == user_id)
+                .scalar()
+            )
+        return float(total or 0.0)
+    except Exception:
+        return 0.0
+
+
+def accounts_ai_cost_summary(min_cost_usd: float = 0.0, limit: int = 50) -> list[dict]:
+    """Per-account AI cost rollup across ALL users with at least one logged
+    call, highest spend first -- backs the admin stats panel's "trial
+    accounts near/over the spend ceiling" and "top accounts by estimated
+    spend" figures. Returns [{"user_id", "email", "subscription_status",
+    "bid_credits", "cost_usd", "calls"}, ...]. Deliberately returns raw
+    account fields rather than a trial/paid verdict: classifying a row
+    (auth.get_access_status / limits.is_paid_tier, including the
+    auth.UNLIMITED_ACCOUNTS bypass) is the caller's job, to avoid this
+    module importing auth (auth already imports db)."""
+    with get_session() as s:
+        cost_expr = func.coalesce(
+            func.sum(func.coalesce(AiCallLog.estimated_cost_usd, UNPRICED_CALL_COST_USD)), 0.0,
+        )
+        rows = (
+            s.query(
+                User.id, User.email, User.subscription_status, User.bid_credits,
+                cost_expr, func.count(AiCallLog.id),
+            )
+            .join(AiCallLog, AiCallLog.user_id == User.id)
+            .group_by(User.id, User.email, User.subscription_status, User.bid_credits)
+            .having(cost_expr >= min_cost_usd)
+            .order_by(cost_expr.desc())
+            .limit(limit)
+            .all()
+        )
+    return [
+        {
+            "user_id": r[0],
+            "email": r[1] or "",
+            "subscription_status": r[2] or "trial",
+            "bid_credits": int(r[3] or 0),
+            "cost_usd": float(r[4] or 0.0),
+            "calls": int(r[5] or 0),
+        }
+        for r in rows
+    ]
+
+
 def init_db() -> None:
     """Creates all tables if they don't exist yet. Safe to call on every
     app startup -- idempotent. Call this once near the top of app.py."""

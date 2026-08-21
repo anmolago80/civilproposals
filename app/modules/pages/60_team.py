@@ -79,11 +79,12 @@ with tabs[7]:
         with ncol1:
             if st.button("Load names from CV library", disabled=not ai_ready,
                          help=None if ai_ready else (
-                             _PROJECT_NOT_PAID_HINT if not _current_project_already_paid()
+                             _ai_block_reason() if not _current_project_already_paid()
                              else f"Upload a CV library (Upload Docs) and {_AI_HINT_CLAUSE}."
                          ), type="primary"):
                 with st.spinner("Reading the whole CV library for names (a few seconds per batch)..."):
                     try:
+                        _record_ai_click()
                         names, warns = team_bios.extract_person_names(cv_text, st.session_state.ai_config)
                         st.session_state.cv_extracted_names = resourcing.dedupe_names(names)
                         if st.session_state.cv_extracted_names:
@@ -165,11 +166,12 @@ with tabs[7]:
         with rcol1:
             if st.button("Re-scan brief for disciplines", disabled=not rescan_ready,
                          help=None if rescan_ready else (
-                             _PROJECT_NOT_PAID_HINT if not _current_project_already_paid()
+                             _ai_block_reason() if not _current_project_already_paid()
                              else f"Needs the tender brief (Upload Docs) and {_AI_HINT_CLAUSE}."
                          ), type="primary"):
                 with st.spinner("Re-reading the brief for every discipline the scope implies..."):
                     try:
+                        _record_ai_click()
                         detected, _detect_warnings = tender_analyser.detect_disciplines_from_text(
                             brief_text, st.session_state.ai_config,
                         )
@@ -271,12 +273,13 @@ with tabs[7]:
             if st.button(
                 "Fill profile fields from CVs", disabled=not _profile_fill_ready,
                 help=None if _profile_fill_ready else (
-                    _PROJECT_NOT_PAID_HINT if not _current_project_already_paid()
+                    _ai_block_reason() if not _current_project_already_paid()
                     else f"Assign people to roles above, upload a CV library (Upload Docs), and {_AI_HINT_CLAUSE}."
                 ),
              type="primary"):
                 with st.spinner("Reading each person's CV for registration status, experience and relevance (a few seconds per batch)..."):
                     try:
+                        _record_ai_click()
                         cv_profiles, warns = team_bios.extract_personnel_profile_fields(
                             cv_text, _assigned_profile_names, st.session_state.ai_config,
                             cv_files=st.session_state.company_material_files.get("cv_library"),
@@ -362,12 +365,13 @@ with tabs[7]:
         if st.button(
             "Suggest which personnel to include (AI)", disabled=not _suggest_ready,
             help=None if _suggest_ready else (
-                _PROJECT_NOT_PAID_HINT if not _current_project_already_paid()
+                _ai_block_reason() if not _current_project_already_paid()
                 else f"Assign roles above and {_AI_HINT_CLAUSE}."
             ),
          type="primary"):
             with st.spinner("Reading this project's scope to judge which discipline profiles are worth including..."):
                 try:
+                    _record_ai_click()
                     suggestions = resourcing.suggest_proposal_inclusion(
                         st.session_state.resource_plan, st.session_state.analysis, st.session_state.ai_config,
                     )
@@ -437,13 +441,14 @@ with tabs[7]:
                 if st.button(
                     "Refresh from CV", key=f"prof_refresh_{ekey}", disabled=not refresh_ready,
                     help=None if refresh_ready else (
-                        _PROJECT_NOT_PAID_HINT if not _current_project_already_paid()
+                        _ai_block_reason() if not _current_project_already_paid()
                         else f"Assign a name, upload a CV library (Upload Docs), and {_AI_HINT_CLAUSE}."
                     ),
                  type="primary"):
                     messages = []  # [(level, text), ...] -- rendered after the rerun, see result_key above
                     with st.spinner(f"Re-reading {name}'s CV..."):
                         try:
+                            _record_ai_click()
                             cv_profiles, warns = team_bios.extract_personnel_profile_fields(
                                 cv_text, [name], st.session_state.ai_config,
                                 cv_files=st.session_state.company_material_files.get("cv_library"),

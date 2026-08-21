@@ -223,6 +223,68 @@ with st.sidebar:
                     use_container_width=True, hide_index=True,
                 )
 
+            # Part 2 of the trial-limits/AI-spend-backstop fix brief: the two
+            # account-level figures that go with it. accounts_ai_cost_summary()
+            # returns raw account fields (subscription_status/bid_credits), not
+            # a trial/paid verdict -- classified here (mirroring
+            # limits.is_paid_tier) rather than in db.py, so db.py doesn't need
+            # to import auth (auth already imports db) just for the
+            # UNLIMITED_ACCOUNTS exclusion.
+            try:
+                _account_costs = db.accounts_ai_cost_summary(min_cost_usd=0.0, limit=200)
+            except Exception as _exc:
+                _account_costs = []
+                st.caption(f"Per-account AI cost unavailable right now: {_exc}")
+
+            def _is_trial_row(row: dict) -> bool:
+                if row["email"].strip().lower() in {e.lower() for e in auth.UNLIMITED_ACCOUNTS}:
+                    return False
+                return row["subscription_status"] not in ("active", "past_due") and row["bid_credits"] <= 0
+
+            _trial_rows = [r for r in _account_costs if _is_trial_row(r)]
+            _near_or_over = [
+                r for r in _trial_rows
+                if r["cost_usd"] >= limits.TRIAL_AI_SPEND_CEILING_USD * 0.8
+            ]
+            st.markdown("#### Trial accounts near/over the AI-spend ceiling")
+            st.caption(
+                f"Ceiling is ${limits.TRIAL_AI_SPEND_CEILING_USD:.2f} (see modules/limits.py) -- "
+                f"shown once a trial account reaches 80% of it."
+            )
+            if _near_or_over:
+                st.dataframe(
+                    [
+                        {
+                            "Account": r["email"],
+                            "Est. cost (USD)": round(r["cost_usd"], 2),
+                            "Status": "Over ceiling -- AI features blocked" if r["cost_usd"] >= limits.TRIAL_AI_SPEND_CEILING_USD else "Near ceiling",
+                            "AI calls": r["calls"],
+                        }
+                        for r in sorted(_near_or_over, key=lambda r: r["cost_usd"], reverse=True)
+                    ],
+                    use_container_width=True, hide_index=True,
+                )
+            else:
+                st.caption("No trial accounts are near the ceiling right now.")
+
+            st.markdown("#### Top accounts by estimated AI spend")
+            if _account_costs:
+                st.dataframe(
+                    [
+                        {
+                            "Account": r["email"],
+                            "Est. cost (USD)": round(r["cost_usd"], 2),
+                            "Plan": ("Unlimited" if r["email"].strip().lower() in {e.lower() for e in auth.UNLIMITED_ACCOUNTS}
+                                     else "Trial" if _is_trial_row(r) else "Paid"),
+                            "AI calls": r["calls"],
+                        }
+                        for r in _account_costs[:15]
+                    ],
+                    use_container_width=True, hide_index=True,
+                )
+            else:
+                st.caption("No AI calls logged for any account yet.")
+
         if st.button("📊 Admin stats", key="_admin_stats_btn", use_container_width=True):
             _admin_stats_dialog()
 

@@ -133,9 +133,10 @@ def _record_usage(provider: str, model: str,
     try:
         from modules import db
         ctx = _usage_context.get() or {}
+        _project_key = ctx.get("project_key", "")
         db.log_ai_call(
             user_id=ctx.get("user_id"),
-            project_key=ctx.get("project_key", ""),
+            project_key=_project_key,
             project_name=ctx.get("project_name", ""),
             purpose=ctx.get("purpose", ""),
             provider=provider,
@@ -144,6 +145,18 @@ def _record_usage(provider: str, model: str,
             output_tokens=output_tokens,
             estimated_cost_usd=estimate_cost_usd(model, input_tokens, output_tokens),
         )
+        # Non-trial/unlimited accounts are never blocked by AI spend (see
+        # limits.ai_spend_block_reason) -- but a single project running
+        # unusually high is still worth a server-side line in the logs.
+        # Never shown to any customer; best-effort, same as the logging
+        # above (a failure here must never affect the AI call that just
+        # succeeded).
+        if _project_key:
+            from modules import limits
+            _project_cost = db.project_ai_cost(_project_key)
+            limits.maybe_alert_admin_on_project_cost(
+                _project_key, ctx.get("project_name", ""), _project_cost.get("cost_usd", 0.0),
+            )
     except Exception as exc:
         print(f"[ai_interface] cost logging failed (ignored): {exc}", file=sys.stderr)
 

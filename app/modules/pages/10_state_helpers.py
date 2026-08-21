@@ -424,11 +424,24 @@ def _current_project_already_paid() -> bool:
     for yet is.
 
     Unlimited accounts (auth.UNLIMITED_ACCOUNTS) and non-SaaS/local use
-    always pass -- same as everywhere else that checks _access."""
+    always pass -- same as everywhere else that checks _access.
+
+    Also folds in the account-level AI-spend ceiling and fair-use rate
+    limit (see modules/limits.py, and _ai_gate_msg computed once per
+    script run in 00_init.py) -- both are checked here rather than added
+    as a separate condition at each of the dozen-plus call sites, so a
+    project that WAS paid for can still correctly go back to "AI not
+    available right now" once the account's trial spend ceiling is hit,
+    without touching every button's `ready` boolean individually. Use
+    _ai_block_reason() below for the matching help/caption text -- it
+    gives the specific reason (spend ceiling / rate limit / not-yet-paid)
+    this function collapses into a single bool."""
     if not IS_SAAS_MODE or not current_user:
         return True
     if _access.get("unlimited"):
         return True
+    if _ai_gate_msg:
+        return False
     _key = _current_project_key()
     if not _key:
         return False
@@ -437,6 +450,42 @@ def _current_project_already_paid() -> bool:
             db.ProposalUsage.user_id == current_user.id,
             db.ProposalUsage.project_key == _key.lower(),
         ).first() is not None
+
+
+def _ai_block_reason() -> str | None:
+    """Matching help/caption text for _current_project_already_paid()'s
+    account-level checks (see that function's docstring) -- highest
+    priority first: the AI-spend ceiling or fair-use rate limit message
+    (account-wide, applies no matter what project this is), else
+    _PROJECT_NOT_PAID_HINT once neither of those is the reason. Returns
+    None when _current_project_already_paid() is actually True (nothing to
+    explain). Every AI-feature help/caption site that used to write
+    `_PROJECT_NOT_PAID_HINT if not _current_project_already_paid() else
+    "<feature-specific hint>"` should use `_ai_block_reason() if not
+    _current_project_already_paid() else "<feature-specific hint>"`
+    instead, so the ceiling/rate-limit message actually gets seen instead
+    of a stale 'run Tender Analysis first' hint that no longer applies."""
+    if _ai_gate_msg:
+        return _ai_gate_msg
+    return _PROJECT_NOT_PAID_HINT
+
+
+def _record_ai_click() -> None:
+    """Call once, right when an AI-feature button's own click-handler
+    begins real work -- the first line inside its `try:`/spinner block, not
+    inside the `ready`/disabled computation (which reruns on every
+    interaction across the whole app, not just AI-feature clicks). Advances
+    the fair-use rate limit's rolling-window counter (modules/limits.py) for
+    this account; the `ready` boolean already refused the click if the
+    account was over its cap (see _ai_gate_msg, a read-only peek computed
+    once per script run in 00_init.py), so this never needs to abort
+    anything itself -- it only affects whether the NEXT click is allowed.
+    Fire-and-forget; never raises; a no-op outside SaaS mode."""
+    if IS_SAAS_MODE and current_user:
+        try:
+            limits.record_ai_call(current_user.id, not limits.is_paid_tier(_access))
+        except Exception:
+            pass
 
 
 def _company_materials_flags() -> dict:

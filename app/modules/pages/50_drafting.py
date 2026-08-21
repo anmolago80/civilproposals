@@ -36,7 +36,7 @@ with tabs[5]:
     )
     if not ready:
         if st.session_state.sections is not None and not _current_project_already_paid():
-            st.info(_PROJECT_NOT_PAID_HINT)
+            st.info(_ai_block_reason())
         else:
             st.info(f"Generate the Proposal Structure and {_AI_HINT_CLAUSE}.")
 
@@ -69,6 +69,7 @@ with tabs[5]:
             progress.progress(done / max(total, 1), text=f"Drafted '{title}' ({done}/{total})...")
 
         try:
+            _record_ai_click()
             # Keep excluded personnel (unticked via "Include in proposal" on the
             # Team & Resourcing tab -- e.g. because their CV wasn't provided)
             # out of the material fed to the AI, not just the nominated-team
@@ -172,7 +173,7 @@ with tabs[5]:
         if not st.session_state.ai_config.get("api_key"):
             st.caption(_AI_HINT_SENTENCE)
         elif not _current_project_already_paid():
-            st.caption(_PROJECT_NOT_PAID_HINT)
+            st.caption(_ai_block_reason())
         elif st.session_state.analysis is None:
             st.caption("Run Tender Analysis first -- the register is built from the brief's own risks.")
 
@@ -183,6 +184,7 @@ with tabs[5]:
             st.session_state._confirm_rerisk = False
             with st.spinner("Structuring the risk register..."):
                 try:
+                    _record_ai_click()
                     st.session_state.risk_register = risk_register.draft_risk_register(
                         st.session_state.analysis,
                         st.session_state.gap_items or [],
@@ -269,7 +271,7 @@ with tabs[5]:
         if not st.session_state.ai_config.get("api_key"):
             st.caption(_AI_HINT_SENTENCE)
         elif not _current_project_already_paid():
-            st.caption(_PROJECT_NOT_PAID_HINT)
+            st.caption(_ai_block_reason())
         elif st.session_state.analysis is None:
             st.caption("Run Tender Analysis first -- the stages are built from the brief's own scope and deliverables.")
 
@@ -282,6 +284,7 @@ with tabs[5]:
             st.session_state._confirm_restage = False
             with st.spinner("Drafting methodology stages..."):
                 try:
+                    _record_ai_click()
                     _methodology_draft = (st.session_state.drafts or {}).get("Methodology and Deliverables")
                     st.session_state.methodology_stages = methodology_stages.draft_methodology_stages(
                         st.session_state.analysis,
@@ -435,6 +438,7 @@ with tabs[5]:
     if st.button("Review with AI", disabled=not _pitch_ready, key="review_pitch_btn", type="primary"):
         with st.spinner("Reviewing differentiator & sales pitch..."):
             try:
+                _record_ai_click()
                 st.session_state.pitch_review = pitch_review_module.review_pitch(
                     st.session_state.project_differentiator, st.session_state.project_sales_pitch,
                     st.session_state.analysis, _project_info(), st.session_state.ai_config,
@@ -445,7 +449,7 @@ with tabs[5]:
     if not st.session_state.ai_config.get("api_key"):
         st.caption(_AI_HINT_SENTENCE)
     elif not _current_project_already_paid():
-        st.caption(_PROJECT_NOT_PAID_HINT)
+        st.caption(_ai_block_reason())
 
     st.markdown("**Sharpen further with follow-up questions**")
     st.caption(
@@ -457,6 +461,7 @@ with tabs[5]:
     if st.button("Get sharpening questions", disabled=not _pitch_ready, key="get_pitch_questions_btn"):
         with st.spinner("Coming up with follow-up questions..."):
             try:
+                _record_ai_click()
                 for i in range(4):
                     st.session_state.pop(f"diff_qa_{i}", None)
                     st.session_state.pop(f"pitch_qa_{i}", None)
@@ -488,6 +493,7 @@ with tabs[5]:
                          disabled=not _current_project_already_paid()):
                 with st.spinner("Sharpening with your answers..."):
                     try:
+                        _record_ai_click()
                         _diff_qa = [
                             (q, st.session_state.get(f"diff_qa_{i}", ""))
                             for i, q in enumerate(pq.differentiator_questions)
@@ -556,6 +562,7 @@ with tabs[5]:
     if st.button("Generate Executive Summary (AI)", disabled=not ready, type="primary"):
         with st.spinner("Drafting executive summary..."):
             try:
+                _record_ai_click()
                 _excluded_names = resourcing.excluded_personnel_names(st.session_state.resource_plan)
                 _team_context = draft_generator.format_team_context(st.session_state.resource_plan)
                 st.session_state.executive_summary = executive_summary_module.draft_executive_summary(
@@ -606,6 +613,7 @@ with tabs[5]:
         if st.button("Generate Team Introduction (AI)", disabled=not _team_ready, type="primary"):
             with st.spinner("Drafting team introduction..."):
                 try:
+                    _record_ai_click()
                     _included_people = [
                         e for e in resourcing.personnel_profiles_deduped(st.session_state.resource_plan)
                         if (e.get("name") or "").strip()
@@ -653,6 +661,7 @@ with tabs[5]:
                      help=None if _experience_ready else "Needs at least one drafted reference project -- see below.", type="primary"):
             with st.spinner("Drafting project experience introduction..."):
                 try:
+                    _record_ai_click()
                     st.session_state.experience_intro = experience_intro_module.draft_experience_intro(
                         st.session_state.reference_projects, st.session_state.analysis,
                         _project_info(), st.session_state.ai_config,

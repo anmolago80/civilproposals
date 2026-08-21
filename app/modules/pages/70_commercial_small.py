@@ -508,11 +508,12 @@ with tabs[8]:
                     refresh_ready = bool(st.session_state.ai_config.get("api_key")) and _current_project_already_paid()
                     if st.button(fee_estimation_engine.AI_BENCHMARK_LABEL, disabled=not refresh_ready,
                                  help=None if refresh_ready else (
-                                     _PROJECT_NOT_PAID_HINT if not _current_project_already_paid()
+                                     _ai_block_reason() if not _current_project_already_paid()
                                      else _AI_HINT_SENTENCE
                                  ), key="letter_refresh_btn", type="primary"):
                         fee_cap = st.session_state.analysis.fee_cap if st.session_state.analysis else None
                         with st.spinner("Asking the AI how a fee like this typically divides..."):
+                            _record_ai_click()
                             estimates, _refresh_error = _fee_ai_refresh(letter_buildup_discs, fee_cap)
                         if _refresh_error:
                             # The table is left EXACTLY as it was -- see the
