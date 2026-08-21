@@ -107,6 +107,7 @@ from modules import (
     org_chart_pptx,
     org_chart_render,
     methodology_pptx,
+    methodology_render,
     methodology_stages,
     firm_profile,
     risk_register,

@@ -209,6 +209,11 @@ def _init_state():
         # list). None means "the stage drafter has never been run" -- distinct
         # from [] which would mean "run, and produced nothing".
         "methodology_stages": None,
+        # Which of the four methodology presentation styles (see
+        # methodology_render.STYLES) drives the exported PowerPoint and its
+        # live preview -- same selector pattern as program_style and
+        # org_chart_style below.
+        "methodology_style": methodology_render.DEFAULT_STYLE,
         # First-pass risk/impact/mitigation table (risk_register.RiskRegister).
         # None means the step has never been run.
         "risk_register": None,
@@ -1498,6 +1503,76 @@ def _org_chart_style_control() -> None:
         format_func=lambda s: org_chart_render.STYLE_LABELS.get(s, s),
     )
     st.caption(org_chart_render.STYLE_DESCRIPTIONS.get(st.session_state.org_chart_style, ""))
+
+
+def _methodology_signature() -> tuple:
+    """Everything the drawn methodology preview depends on -- the reviewed
+    stage grid (or, before that exists, the brief's scope items via
+    `analysis`), the program's week labels (the date chevrons), and the
+    client/project names shown in the title. Anything missing here is
+    something a change to could leave a stale preview on screen."""
+    stages = st.session_state.get("methodology_stages") or []
+    return (
+        tuple((s.name, tuple(s.key_tasks), tuple(s.engagement_activities), s.outcome,
+              tuple(s.deliverables), s.week_start, s.week_end) for s in stages),
+        tuple(st.session_state.get("program_week_labels") or []),
+        st.session_state.get("client_name") or "",
+        st.session_state.get("project_name") or "",
+    )
+
+
+_METHODOLOGY_PNG_CACHE_SIZE = 8
+
+
+def _methodology_png(style: str | None = None) -> bytes | None:
+    """The current methodology, drawn in `style`, cached on its content
+    signature -- same pattern as _org_png/_program_png. None only if the
+    renderer itself fails; every caller handles that."""
+    style = style or st.session_state.get("methodology_style") or methodology_render.DEFAULT_STYLE
+    signature = (style,) + _methodology_signature()
+    cache = st.session_state.setdefault("_methodology_png_cache", {})
+    if signature in cache:
+        return cache[signature]
+    png = None
+    try:
+        png = methodology_render.render_png(
+            st.session_state.get("analysis"), style=style,
+            stages=st.session_state.get("methodology_stages"),
+            week_labels=st.session_state.get("program_week_labels"),
+            client_name=st.session_state.get("client_name") or "",
+            project_name=st.session_state.get("project_name") or "",
+        )
+    except Exception as exc:  # noqa: BLE001 -- a preview is never worth a traceback
+        print(f"[methodology preview] {exc}", file=sys.stderr)
+    if len(cache) >= _METHODOLOGY_PNG_CACHE_SIZE:
+        cache.pop(next(iter(cache)))
+    cache[signature] = png
+    return png
+
+
+def _methodology_style_control() -> None:
+    """The four-way methodology presentation style picker, with a live
+    preview drawn from this project's own reviewed stage grid (or the
+    pre-stages boilerplate when the stage drafter hasn't been run yet)."""
+    st.markdown("**Methodology presentation style**")
+    st.caption(
+        "How the methodology table is drawn in the companion PowerPoint. Purely "
+        "presentational -- it never changes the tasks, activities, outcomes or "
+        "deliverables themselves."
+    )
+    st.radio(
+        "Methodology presentation style", methodology_render.STYLES,
+        key="methodology_style", horizontal=True, label_visibility="collapsed",
+        format_func=lambda s: methodology_render.STYLE_LABELS.get(s, s),
+    )
+    st.caption(methodology_render.STYLE_DESCRIPTIONS.get(st.session_state.methodology_style, ""))
+    _preview = _methodology_png()
+    if _preview:
+        st.image(_preview, use_container_width=True)
+    else:
+        st.caption(
+            "Couldn't draw the preview just now -- your methodology content is unaffected."
+        )
 
 
 def _management_insert_index(plan: list, role: str) -> int:

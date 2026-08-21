@@ -273,6 +273,74 @@ def main() -> int:
                         f"[org chart n={n_disc}] {group.lead.name!r} lost its quals data "
                         "-- Part A must stop rendering it, not stop collecting it")
 
+    # Fix brief Part D: the methodology style picker and its live preview
+    # live on the Draft Responses tab, next to the Design stages grid, and
+    # are only reachable once that grid holds at least one stage.
+    if not failures:
+        from modules import methodology_render
+        from modules.methodology_stages import MethodologyStage
+        from modules.tender_analyser import ScopeItem, TenderAnalysis
+
+        at = AppTest.from_file("app.py", default_timeout=180)
+        at.session_state["analysis"] = TenderAnalysis(
+            project_scope="Example scope",
+            scope_items=[ScopeItem(title="Concept design", tasks=["Sketch options"])],
+        )
+        at.session_state["methodology_stages"] = [
+            MethodologyStage(
+                name="Concept design", week_start=1, week_end=3,
+                key_tasks=["Sketch options", "Cost plan"],
+                engagement_activities=["TBC"], outcome="TBC", deliverables=["TBC"],
+            ),
+        ]
+        at.run()
+        for exc in at.exception:
+            failures.append(f"[methodology style] exception: {exc.value}")
+
+        style_radios = [r for r in at.radio if r.key == "methodology_style"]
+        if not style_radios:
+            failures.append("[methodology style] the style picker never rendered")
+        elif at.session_state["methodology_style"] not in methodology_render.STYLES:
+            failures.append(
+                f"[methodology style] default is not a real style: "
+                f"{at.session_state['methodology_style']!r}")
+        else:
+            if not at.image:
+                failures.append("[methodology style] no live preview image rendered")
+            style_radios[0].set_value("spine").run()
+            for exc in at.exception:
+                failures.append(f"[methodology style] exception after picking: {exc.value}")
+            if at.session_state["methodology_style"] != "spine":
+                failures.append("[methodology style] the chosen style did not round-trip")
+            if not at.image:
+                failures.append("[methodology style] the preview disappeared after picking a style")
+
+        # Every style must render a PPTX for a real 6-stage/8-task grid with
+        # no exception -- the actual export the picker drives.
+        from modules import methodology_pptx
+
+        fat_stages = [
+            MethodologyStage(
+                name=f"Stage {i + 1}", week_start=i * 3 + 1, week_end=i * 3 + 3,
+                key_tasks=[f"Task {j + 1} for stage {i + 1} covering a fairly long scope description"
+                          for j in range(8)],
+                engagement_activities=["Client workshop", "Hold point sign-off review"] if i == 1 else ["TBC"],
+                outcome="Outcome achieved." if i % 2 == 0 else "TBC",
+                deliverables=[f"Deliverable {j + 1}" for j in range(6)],
+            )
+            for i in range(6)
+        ]
+        for style in methodology_render.STYLES:
+            try:
+                blob = methodology_pptx.populate_methodology(
+                    at.session_state["analysis"], client_name="Client", project_name="Project",
+                    stages=fat_stages, week_labels=[f"Wk {i + 1}" for i in range(20)], style=style)
+            except Exception as exc:  # noqa: BLE001
+                failures.append(f"[methodology style] {style} raised at 6 stages/8 tasks: {exc}")
+                continue
+            if not blob:
+                failures.append(f"[methodology style] {style} produced no PPTX bytes")
+
     if failures:
         print("SMOKE TEST FAILED:")
         for f in failures:

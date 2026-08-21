@@ -329,6 +329,7 @@ with tabs[9]:
                     methodology_bytes = _cached_pptx(
                         "methodology",
                         (
+                            st.session_state.methodology_style,
                             _methodology_stage_signature(),
                             tuple((i.title, tuple(i.tasks))
                                   for i in (getattr(st.session_state.analysis, "scope_items", None) or [])),
@@ -345,6 +346,7 @@ with tabs[9]:
                             stages=st.session_state.methodology_stages,
                             week_labels=st.session_state.program_week_labels,
                             wvr_confirmed=bool(st.session_state.methodology_wvr_confirmed),
+                            style=st.session_state.methodology_style,
                         ),
                     )
                     st.download_button(
@@ -357,8 +359,8 @@ with tabs[9]:
                         "Built from the design stages you reviewed on the Draft Responses step -- "
                         "every column is real content, with red TBC where the brief didn't support a "
                         "cell. Without a reviewed grid it falls back to the generic four-stage layout. "
-                        "Fill in any TBCs, then paste the finished table over the first-pass image in "
-                        "the DOCX."
+                        "Paste the finished table into the proposal where the red placeholder note "
+                        "marks its place."
                         if st.session_state.methodology_stages else
                         "No design stages reviewed yet, so this is the generic four-stage fallback: "
                         "column 2 from your real scope items, the rest red placeholders. Run **Draft "

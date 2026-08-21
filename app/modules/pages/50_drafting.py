@@ -407,6 +407,9 @@ with tabs[5]:
                  "[CONFIRM WVR / QA STATEMENT] instead.",
         )
 
+        st.markdown("")
+        _methodology_style_control()
+
     st.markdown("---")
     st.caption(
         "**Differentiator & sales pitch** -- write these in your own words: what sets this "

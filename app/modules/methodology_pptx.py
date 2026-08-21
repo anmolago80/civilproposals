@@ -6,25 +6,48 @@ project's tender analysis -- no template file to edit or keep in sync
 (same approach as org_chart_pptx.py, for the same reasons: nothing to
 delete, nothing to leave dangling).
 
-Structure is fixed and generic across every proposal this app produces:
-four stage columns (Project Initiation, then three progressively-developed
-design stages) against four standard rows (Key tasks, Key engagement
-activities, Outcome, Deliverables). Column 1 is always the same
-boilerplate; column 2's Key tasks are the REAL scope items/tasks from the
-brief (tender_analyser.ScopeItem) -- never invented. Columns 3 and 4 cover
-stages the brief doesn't describe (future/contingent work), so their cells
-stay explicit "[CONFIRM ...]" placeholders rather than guessed content,
-same no-invention rule as everywhere else in this tool.
+FOUR PRESENTATION STYLES
+-------------------------
+populate_methodology(..., style=...) dispatches to one of four independent
+slide builders (methodology_render.STYLES: "matrix" | "chevrons" |
+"programme" | "spine" -- see that module's docstring for what each looks
+like and why a separate matplotlib renderer draws the same content for the
+UI's live preview). All four read the SAME column list -- one dict per
+stage, built once by methodology_render.build_columns() -- so a style
+picked in the UI and the exported deck can never describe different
+content, only a different layout of it.
 
-The client name in the top-right legend is the one piece of real,
-project-specific data this chart needs beyond the scope items -- pulled
-straight from Project Setup (client_name), never invented; shows a red
-placeholder if not entered yet, matching every other missing-field
-convention in this app.
+Column content, regardless of style: when the reviewed
+methodology_stages.MethodologyStage grid exists, every column's name, key
+tasks, engagement activities, outcome, deliverables and date chevron come
+from it, real content only, with the literal "TBC" wherever the brief
+didn't support a cell. Before that grid has been generated/filled in, the
+table falls back to exactly what it always produced: one column of
+standard Project Initiation boilerplate, one built from the brief's real
+scope items (tender_analyser.ScopeItem) -- never invented, and two (or,
+with a real stage grid, as many as the brief needs) of explicit
+"[CONFIRM ...]" placeholders rather than guessed content.
 
-Colours are pulled from the SAME theme palette the rest of the proposal
-uses (divider_designer.THEME_COLOURS), so this chart never looks like a
-foreign template dropped into an otherwise-themed document.
+Every style guards against overflow the same way: text shrinks first
+(_fit_size), and only once it hits a legible floor does a cell drop items,
+always with an honest "+N more -- see full methodology" line -- silent
+truncation is never allowed to look like a complete table.
+
+The client name (only shown by the "matrix" style's legend) and the
+project name (every style's title) are the pieces of real, project-specific
+data these slides need beyond the stage content -- pulled straight from
+Project Setup, never invented; shown red if not entered yet, matching
+every other missing-field convention in this app.
+
+Colours: the "matrix" style is pulled from the SAME theme palette the rest
+of the proposal uses (divider_designer.THEME_COLOURS), so it never looks
+like a foreign template dropped into an otherwise-themed document. The
+other three styles use the fixed, colourblind-validated stage-colour order
+(methodology_render.STAGE_COLOURS) instead -- the same four hues the org
+chart and delivery program use -- since their whole visual structure is
+built around telling stages apart by colour, and stage identity has to
+stay consistent with the rest of the pack, not with whichever theme this
+particular proposal happens to use.
 """
 
 from __future__ import annotations
@@ -35,7 +58,7 @@ import math
 from PIL import Image, ImageDraw
 from pptx import Presentation
 from pptx.dml.color import RGBColor
-from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Emu, Inches, Pt
 
@@ -50,36 +73,10 @@ _FONT = "Calibri"
 _SLIDE_W = Inches(11.6929)
 _SLIDE_H = Inches(8.2677)
 
-_STAGE_HEADERS = [
-    "Project Initiation",
-    "15% design stage",
-    "15% developed to 50% design stage",
-    "50% developed to Final stage",
-]
-
-_PROJECT_INITIATION_TASKS = [
-    "Liaison with the client",
-    "",
-    ("Including:", True),  # (text, no_bullet)
-    "Inception (prestart) meeting",
-    "Site inspection",
-    "Confirmation of delivery program and team availability",
-    "Establishing communication protocols",
-    "Initial progress reporting setup",
-    "Draft Quality Plan for discussion",
-]
-_PROJECT_INITIATION_ENGAGEMENT = ["Inception meeting", "Site inspection walkover"]
-_PROJECT_INITIATION_OUTCOME = "Project governance, scope, and collaboration framework established."
-_PROJECT_INITIATION_DELIVERABLES = ["Inception meeting minutes", "Communication protocols document"]
-
-_NO_SCOPE_PLACEHOLDER = (
-    "[DESCRIBE APPROACH FOR THIS STAGE -- analyse the brief (Tender Analysis tab) "
-    "to prefill this from the brief's real scope items]"
-)
-_CONFIRM_ENGAGEMENT = "[CONFIRM ENGAGEMENT / WORKSHOP ACTIVITIES FOR THIS STAGE]"
-_CONFIRM_OUTCOME = "[CONFIRM OUTCOME FOR THIS STAGE]"
-_CONFIRM_DELIVERABLES = "[CONFIRM DELIVERABLE(S) FOR THIS STAGE]"
-_CONFIRM_TASKS = "[CONFIRM TASKS FOR THIS STAGE]"
+# The reviewed-stages/legacy-fallback column content itself now lives in
+# methodology_render.py (build_columns() and friends) so every style here
+# and every live-preview PNG there read the identical data -- this is just
+# the one fallback label still needed directly in this module.
 _CONFIRM_DATE_RANGE = "[Date range]"
 
 
@@ -268,27 +265,99 @@ def _chevron(slide, x, y, w, h, fill_color, text, size_pt):
     return shape
 
 
+def _round_rect(slide, x, y, w, h, fill_color=None, line_color=None, line_w=None, radius=0.08):
+    """A rounded-rectangle panel -- used by the chevrons/programme/spine
+    styles for cards, chips and bands. `fill_color`/`line_color` of None
+    leaves that side unset (transparent fill, or no border)."""
+    shape = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x, y, w, h)
+    try:
+        shape.adjustments[0] = radius
+    except Exception:
+        pass
+    if fill_color is not None:
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = fill_color
+    else:
+        shape.fill.background()
+    if line_color is not None:
+        shape.line.color.rgb = line_color
+        shape.line.width = line_w or Pt(1)
+    else:
+        shape.line.fill.background()
+    shape.shadow.inherit = False
+    return shape
+
+
+def _chip(slide, x, y, w, h, text, fill_color, text_color, size_pt=7.0):
+    """One small rounded "pill" with centred bold text -- the
+    deliverable-as-chip look the chevrons/programme/spine styles use."""
+    shape = _round_rect(slide, x, y, w, h, fill_color=fill_color, radius=0.5)
+    tf = shape.text_frame
+    tf.word_wrap = True
+    tf.margin_left = Pt(3)
+    tf.margin_right = Pt(3)
+    tf.margin_top = Pt(1)
+    tf.margin_bottom = Pt(1)
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    p = tf.paragraphs[0]
+    p.alignment = PP_ALIGN.CENTER
+    run = p.add_run()
+    run.text = text
+    run.font.size = Pt(size_pt)
+    run.font.bold = True
+    run.font.name = _FONT
+    run.font.color.rgb = text_color
+    return shape
+
+
+def _diamond(slide, cx, cy, r, fill_color, text=None, text_size=6.0):
+    """A small filled diamond -- the Programme-matched style's hold-point
+    gate marker, with an optional label centred beneath it."""
+    shape = slide.shapes.add_shape(MSO_SHAPE.DIAMOND, Emu(int(cx - r)), Emu(int(cy - r)), Emu(int(2 * r)), Emu(int(2 * r)))
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = fill_color
+    shape.line.color.rgb = _WHITE
+    shape.line.width = Pt(1)
+    shape.shadow.inherit = False
+    if text:
+        _centered_text(slide, Emu(int(cx - r * 1.8)), Emu(int(cy + r * 1.1)), Emu(int(r * 3.6)), Emu(int(r * 1.8)),
+                        text, text_size, fill_color, bold=True)
+    return shape
+
+
+def _stage_colour_rgb(index: int) -> "RGBColor":
+    return _hex_to_rgb(stage_colour(index))
+
+
+def _hex_to_rgb(hex_colour: str) -> "RGBColor":
+    hex_colour = hex_colour.lstrip("#")
+    return RGBColor(int(hex_colour[0:2], 16), int(hex_colour[2:4], 16), int(hex_colour[4:6], 16))
+
+
 # ---------------------------------------------------------------------------
-# Content assembly -- the only part that touches real project data
+# Content assembly -- the shared column model lives in methodology_render.py
+# now (build_columns() etc.), so this module's four style builders and that
+# module's four PNG previews can never describe a different table. See that
+# module's docstring for the full "why one model, two renderers" reasoning.
 # ---------------------------------------------------------------------------
 
-def _stage2_tasks(scope_items: list) -> list:
-    if not scope_items:
-        return [_NO_SCOPE_PLACEHOLDER]
-    lines = []
-    for item in scope_items:
-        title = (getattr(item, "title", "") or "[UNTITLED SCOPE ITEM]").strip()
-        tasks = getattr(item, "tasks", None) or []
-        lines.append(f"{title}: {'; '.join(tasks)}" if tasks else title)
-    return lines
+from modules.methodology_render import (  # noqa: E402
+    DEFAULT_STYLE,
+    STYLES,
+    _cap_items,
+    build_columns,
+    is_placeholder as _is_placeholder,
+    stage_carries_hold_point,
+    stage_colour,
+)
 
 
-def _is_placeholder(text) -> bool:
-    """A cell the reader must act on: either an explicit [BRACKETED] note
-    from the legacy content below, or the literal TBC the stage drafter
-    emits when the brief doesn't support a cell."""
-    text = str(text or "").strip()
-    return text.startswith("[") or text.upper() == "TBC"
+def _natural_lines(texts: list[str], width_emu, size_pt: float) -> int:
+    """How many wrapped lines `texts` need at `size_pt` in a box `width_emu`
+    wide, with NO shrinking or dropping -- the "how tall does this content
+    actually want to be" half of the two-pass layout _row_heights() does."""
+    chars_per_line = max(8, int((width_emu / 914400) * (1.85 / (size_pt / 72))))
+    return sum(max(1, -(-len(str(t)) // chars_per_line)) for t in texts)
 
 
 def _fit_size(lines, width_emu, height_emu, start_pt: float, min_pt: float = 4.2):
@@ -304,9 +373,8 @@ def _fit_size(lines, width_emu, height_emu, start_pt: float, min_pt: float = 4.2
     texts = [t if not isinstance(t, tuple) else t[0] for t in lines]
     size = start_pt
     while size > min_pt:
-        chars_per_line = max(8, int((width_emu / 914400) * (1.85 / (size / 72))))
         line_h = (size * 1.28) / 72 * 914400
-        needed = sum(max(1, -(-len(str(t)) // chars_per_line)) for t in texts)
+        needed = _natural_lines(texts, width_emu, size)
         if needed * line_h <= height_emu:
             return size, lines
         size -= 0.2
@@ -323,59 +391,21 @@ def _fit_size(lines, width_emu, height_emu, start_pt: float, min_pt: float = 4.2
         used += cost
     dropped = len(lines) - len(kept)
     if dropped:
-        kept.append((f"(+{dropped} more -- see the written methodology section)", True))
+        kept.append((f"+{dropped} more — see full methodology", True))
     return min_pt, kept
 
 
-def _columns_from_stages(stages, week_labels) -> list[dict]:
-    """The reviewed stage grid, as render-ready columns."""
-    from modules.methodology_stages import stage_week_label
-
-    columns = []
-    for stage in stages:
-        columns.append({
-            "name": (getattr(stage, "name", "") or "TBC"),
-            "tasks": list(getattr(stage, "key_tasks", None) or ["TBC"]),
-            "engagement": list(getattr(stage, "engagement_activities", None) or ["TBC"]),
-            "outcome": (getattr(stage, "outcome", "") or "TBC"),
-            "deliverables": list(getattr(stage, "deliverables", None) or ["TBC"]),
-            "chevron": stage_week_label(stage, week_labels),
-        })
-    return columns
-
-
-def _legacy_columns(analysis) -> list[dict]:
-    """The pre-stages content: one real column built from scope items, and
-    three columns of placeholders. Kept so a project that has not run the
-    stage drafter exports exactly what it did before."""
-    return [
-        {
-            "name": _STAGE_HEADERS[0],
-            "tasks": list(_PROJECT_INITIATION_TASKS),
-            "engagement": list(_PROJECT_INITIATION_ENGAGEMENT),
-            "outcome": _PROJECT_INITIATION_OUTCOME,
-            "deliverables": list(_PROJECT_INITIATION_DELIVERABLES),
-            "chevron": _CONFIRM_DATE_RANGE,
-        },
-        {
-            "name": _STAGE_HEADERS[1],
-            "tasks": _stage2_tasks(getattr(analysis, "scope_items", None) or []),
-            "engagement": [_CONFIRM_ENGAGEMENT],
-            "outcome": _CONFIRM_OUTCOME,
-            "deliverables": [_CONFIRM_DELIVERABLES],
-            "chevron": _CONFIRM_DATE_RANGE,
-        },
-    ] + [
-        {
-            "name": header,
-            "tasks": [_CONFIRM_TASKS],
-            "engagement": [_CONFIRM_ENGAGEMENT],
-            "outcome": _CONFIRM_OUTCOME,
-            "deliverables": [_CONFIRM_DELIVERABLES],
-            "chevron": _CONFIRM_DATE_RANGE,
-        }
-        for header in _STAGE_HEADERS[2:]
-    ]
+def _fit_single(text: str, width_emu, height_emu, start_pt: float, min_pt: float = 4.5) -> float:
+    """Same shrink-to-fit as _fit_size, for a single centred text cell
+    (OUTCOME) rather than a bulleted list -- there is nothing sensible to
+    drop from one sentence, so this only ever shrinks, never truncates."""
+    size = start_pt
+    while size > min_pt:
+        line_h = (size * 1.28) / 72 * 914400
+        if _natural_lines([text], width_emu, size) * line_h <= height_emu:
+            return size
+        size -= 0.2
+    return min_pt
 
 
 def _render_cell_lines(slide, tf, lines, size_pt):
@@ -403,50 +433,17 @@ WVR_STATEMENT = "All design deliverables will be issued with completed Work Veri
 WVR_CONFIRM_PLACEHOLDER = "[CONFIRM WVR / QA STATEMENT FOR THIS FIRM]"
 
 
-def populate_methodology(
-    analysis, client_name: str = "", project_name: str = "", theme_name: str | None = None,
-    stages: list | None = None, week_labels: list | None = None,
-    wvr_confirmed: bool = False,
-) -> bytes:
-    """
-    Builds a fresh A4-landscape .pptx (returned as bytes) of the delivery
-    methodology table, coloured to match `theme_name` (see
-    divider_designer.THEME_COLOURS).
-
-    `stages`: the reviewed methodology_stages.MethodologyStage list from the
-    Draft Responses tab. When supplied, every column -- name, key tasks,
-    engagement activities, outcome, deliverables and the date chevron --
-    comes from it, and cells the brief didn't support render as red TBC.
-    When it is empty (the stage drafter hasn't been run), the table falls
-    back to exactly what it produced before: one column of standard
-    initiation boilerplate, one built from the brief's scope items, and two
-    of placeholders.
-
-    `week_labels`: the delivery program's own week labels, used for the date
-    chevrons -- so they read "Wk 1 - Wk 3" normally and "6 Oct - 20 Oct"
-    once a program start date is set, with no regeneration needed.
-
-    `wvr_confirmed`: whether the user has confirmed their firm actually
-    issues Work Verification Records. This statement used to be printed as
-    fact in every export -- the one line in this module that asserted
-    something about the bidder that the app had never been told.
-
-    `client_name` fills the legend's hold-point label and `project_name` the
-    title -- both shown in red if not yet entered, same convention as every
-    other missing field here.
-    """
-    P = _resolve_palette(theme_name)
-    hold_icon = _render_icon_png("hold_point")
-    eng_icon = _render_icon_png("engagement")
-
-    columns_data = _columns_from_stages(stages, week_labels) if stages else _legacy_columns(analysis)
-    from_stages = bool(stages)
+def _slide_matrix(slide, columns_data, from_stages, P, hold_icon, eng_icon,
+                  project_name, client_name, wvr_confirmed) -> None:
+    """Boardroom matrix -- the original/default style: navy stage headers,
+    LEFT row labels (KEY TASKS / ENGAGEMENT / OUTCOME / DELIVERABLES), one
+    grid row per cell type. Row heights are CONTENT-sized: each row's real
+    height is measured from what its busiest column actually needs, and
+    only rescaled (proportionally, never below a legible floor) if all four
+    rows together would otherwise overflow the slide -- so a thin
+    ENGAGEMENT row no longer reserves the same fixed height as a busy
+    DELIVERABLES row, and a busy row is never silently clipped."""
     n = len(columns_data)
-
-    prs = Presentation()
-    prs.slide_width = _SLIDE_W
-    prs.slide_height = _SLIDE_H
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
 
     M = Inches(0.14)
     row_label_x, row_label_w = M, Inches(0.17)
@@ -477,17 +474,59 @@ def populate_methodology(
     h_title = Inches(0.40)
     y_header = Emu(int(y_top + h_title + Inches(0.04)))
     h_header = Inches(0.46)
-
-    y_tasks = Emu(int(y_header + h_header))
-    h_tasks = Inches(3.35)
-    y_eng = Emu(int(y_tasks + h_tasks))
-    h_eng = Inches(0.70)
-    y_outcome = Emu(int(y_eng + h_eng))
-    h_outcome = Inches(0.50)
-    y_deliv = Emu(int(y_outcome + h_outcome))
-    h_deliv = Inches(2.30)
-    y_timeline = Emu(int(y_deliv + h_deliv + Inches(0.03)))
     h_timeline = Inches(0.30)
+
+    # ---- content-sized row heights -----------------------------------
+    # Measure what each row's busiest column actually needs (at the row's
+    # preferred font size, nothing dropped yet), then either use those
+    # natural heights directly -- if all four fit in the space a fixed
+    # layout used to reserve -- or scale every row down proportionally
+    # (never below a legible floor) so the table still ends inside the
+    # slide. _fit_size (called per-cell below, with the ALLOCATED height)
+    # is what guarantees no individual cell overflows even after scaling.
+    note_h = Inches(0.2)  # the WVR confirm/assert line under deliverables
+    available_h = Inches(3.35 + 0.70 + 0.50 + 2.30)  # same total budget the old fixed layout used
+    row_specs = [("tasks", 5.6, Inches(0.08)), ("engagement", 5.4, Inches(0.06)),
+                ("outcome", 5.6, Inches(0.04)), ("deliverables", 5.0, Inches(0.03) + note_h + Inches(0.06))]
+    floors = {"tasks": Inches(0.55), "engagement": Inches(0.35), "outcome": Inches(0.32), "deliverables": Inches(0.75)}
+
+    natural = {}
+    for key, start_pt, pad in row_specs:
+        tallest = 0
+        for (cx, cw), column in zip(cols, columns_data):
+            box_w = Emu(int(cw - Inches(0.1)))
+            value = column[key]
+            texts = [str(value)] if key == "outcome" else [
+                t if not isinstance(t, tuple) else t[0] for t in value]
+            line_h = (start_pt * 1.28) / 72 * 914400
+            tallest = max(tallest, _natural_lines(texts, box_w, start_pt) * line_h)
+        natural[key] = int(tallest + pad)
+
+    # The floor isn't just "don't get illegibly short" -- each row's own
+    # rotated side-label (e.g. two-line "KEY ENGAGEMENT\nACTIVITIES" at
+    # 5.2pt) needs a minimum height to render inside without spilling
+    # outside its box once rotated. A row with very thin cell content (a
+    # single short engagement line) previously fell straight through to
+    # that tiny natural height on the "everything fits" path below, which
+    # only applied floors on the scale-down branch -- so the label text
+    # overflowed sideways into the next row's column. Applying the floor
+    # here, before summing, means both branches respect it.
+    natural = {k: max(floors[k], v) for k, v in natural.items()}
+
+    total_natural = sum(natural.values())
+    if total_natural <= available_h:
+        row_h = natural
+    else:
+        scale = available_h / total_natural
+        row_h = {k: max(floors[k], int(v * scale)) for k, v in natural.items()}
+
+    h_tasks, h_eng, h_outcome, h_deliv = (
+        Emu(row_h["tasks"]), Emu(row_h["engagement"]), Emu(row_h["outcome"]), Emu(row_h["deliverables"]))
+    y_tasks = Emu(int(y_header + h_header))
+    y_eng = Emu(int(y_tasks + h_tasks))
+    y_outcome = Emu(int(y_eng + h_eng))
+    y_deliv = Emu(int(y_outcome + h_outcome))
+    y_timeline = Emu(int(y_deliv + h_deliv + Inches(0.03)))
 
     # ---- title + KEY legend --------------------------------------------
     # Heading plus the project name, in ONE box so the two lines can't
@@ -582,14 +621,16 @@ def populate_methodology(
         _rect(slide, cx, y_outcome, cw, h_outcome, P["outcome_deliv_bg"])
         text = column["outcome"]
         placeholder = _is_placeholder(text)
-        _centered_text(slide, Emu(int(cx + Inches(0.05))), Emu(int(y_outcome + Inches(0.02))), Emu(int(cw - Inches(0.1))), Emu(int(h_outcome - Inches(0.04))),
-                        text, 5.2 if len(str(text)) > 90 else 5.6,
+        box_w = Emu(int(cw - Inches(0.1)))
+        box_h = Emu(int(h_outcome - Inches(0.04)))
+        fitted_size = _fit_single(str(text), box_w, box_h, 5.6)
+        _centered_text(slide, Emu(int(cx + Inches(0.05))), Emu(int(y_outcome + Inches(0.02))), box_w, box_h,
+                        text, fitted_size,
                         _RED if placeholder else _DARK_TEXT, bold=not placeholder, italic=placeholder)
     _rotated_label(slide, Emu(int(row_label_x + row_label_w / 2)), Emu(int(y_outcome + h_outcome / 2)), Emu(int(h_outcome - Inches(0.05))), row_label_w, "OUTCOME", 5.6, _DARK_TEXT)
 
     # ---- DELIVERABLES ---------------------------------------------------------
     _rect(slide, row_label_x, y_deliv, row_label_w, h_deliv, P["outcome_deliv_bg"])
-    note_h = Inches(0.2)
     list_h = Emu(int(h_deliv - note_h - Inches(0.06)))
     for (cx, cw), column in zip(cols, columns_data):
         _rect(slide, cx, y_deliv, cw, h_deliv, P["outcome_deliv_bg"])
@@ -623,6 +664,412 @@ def populate_methodology(
         _icon(slide, hold_icon, Emu(int(col3_x - gap / 2)), Emu(int(y_timeline + h_timeline / 2)), Inches(0.16))
     if n > 3:
         _icon(slide, hold_icon, Emu(int(col4_x - gap / 2)), Emu(int(y_timeline + h_timeline / 2)), Inches(0.16))
+
+
+def _simple_title(slide, project_name: str) -> None:
+    """The compact title the three new styles use -- just the heading and
+    project name, no KEY legend (the matrix style's hold-point/engagement
+    icon legend doesn't apply to these layouts, which show hold points and
+    engagement inline instead)."""
+    M = Inches(0.14)
+    box, tf = _textbox(slide, M, M, Inches(9.0), Inches(0.32))
+    p = tf.paragraphs[0]
+    p.alignment = PP_ALIGN.LEFT
+    r = p.add_run()
+    r.text = "Our proposed methodology"
+    if (project_name or "").strip():
+        r.text += f" — {project_name.strip()}"
+    r.font.size = Pt(14)
+    r.font.bold = True
+    r.font.name = _FONT
+    r.font.color.rgb = _DARK_TEXT
+
+
+def _deliverable_chips(slide, x, w, y, avail_h, items, fill, text_fill, size_pt=6.5) -> None:
+    """Deliverables as flowing rounded chips within a fixed box, capped
+    (with an honest "+N more" line) rather than silently overflowing --
+    same convention _fit_size uses for bulleted cells."""
+    row_h = Inches(0.22)
+    max_rows = max(1, int(avail_h / row_h))
+    chip_w_estimate = Inches(1.1)
+    chips_per_row = max(1, int(w / (chip_w_estimate + Inches(0.06))))
+    max_items = max(1, max_rows * chips_per_row)
+    kept, dropped = _cap_items(items, max_items)
+
+    cx, row_top, used_rows = x, y, 0
+    for item in kept:
+        chip_w = Emu(int(min(w, Inches(0.12) + Pt(size_pt) * len(str(item)) * 9525 * 0.62)))
+        if cx + chip_w > x + w and cx > x:
+            cx = x
+            row_top = Emu(int(row_top + row_h + Inches(0.03)))
+            used_rows += 1
+            if used_rows >= max_rows:
+                break
+        _chip(slide, Emu(int(cx)), Emu(int(row_top)), chip_w, row_h, str(item), fill, text_fill, size_pt)
+        cx = Emu(int(cx + chip_w + Inches(0.06)))
+    if dropped:
+        note_y = Emu(int(row_top + row_h + Inches(0.02)))
+        box, tf = _textbox(slide, x, note_y, w, Inches(0.16))
+        p = tf.paragraphs[0]
+        r = p.add_run()
+        r.text = f"+{dropped} more — see full methodology"
+        r.font.size = Pt(5.6)
+        r.font.italic = True
+        r.font.name = _FONT
+        r.font.color.rgb = RGBColor(0x5B, 0x64, 0x72)
+
+
+def _slide_chevrons(slide, columns_data, from_stages, P, hold_icon, eng_icon,
+                    project_name, client_name, wvr_confirmed) -> None:
+    """Stage chevrons -- an arrowed banner per stage (stage colour, name +
+    weeks), a bordered card below with coloured section labels and
+    deliverables as tinted chips. See the module docstring and
+    methodology_render.py's for the shared reasoning."""
+    n = max(len(columns_data), 1)
+    _simple_title(slide, project_name)
+
+    M = Inches(0.14)
+    gap = Inches(0.12)
+    content_top = Emu(int(M + Inches(0.4)))
+    col_w = Emu(int((_SLIDE_W - 2 * M - (n - 1) * gap) / n))
+
+    chevron_h = Inches(0.55)
+    card_top = Emu(int(content_top + chevron_h + Inches(0.06)))
+    card_h = Emu(int(_SLIDE_H - card_top - Inches(0.12)))
+
+    # Key tasks is nearly always the busiest cell (the brief's own scope
+    # items land there), so it gets the majority share; the rest split what
+    # is normally much shorter content.
+    tasks_h = Emu(int(card_h * 0.58))
+    eng_h = Emu(int(card_h * 0.14))
+    outcome_h = Emu(int(card_h * 0.10))
+    deliv_h = Emu(int(card_h - tasks_h - eng_h - outcome_h - Inches(0.16)))
+
+    for i, column in enumerate(columns_data):
+        cx = Emu(int(M + i * (col_w + gap)))
+        colour = _hex_to_rgb(stage_colour(i))
+
+        label = column["name"]
+        if column.get("chevron") and not _is_placeholder(column["chevron"]):
+            label = f"{label}   ({column['chevron']})"
+        _chevron(slide, cx, content_top, col_w, chevron_h, colour, label, 7.5)
+
+        _round_rect(slide, cx, card_top, col_w, card_h, fill_color=None, line_color=colour, line_w=Pt(1))
+
+        pad = Inches(0.06)
+        y = Emu(int(card_top + Inches(0.05)))
+        box_w = Emu(int(col_w - 2 * pad))
+
+        for label_text, key, h in (
+            ("KEY TASKS", "tasks", tasks_h), ("ENGAGEMENT", "engagement", eng_h),
+        ):
+            lb, lbtf = _textbox(slide, Emu(int(cx + pad)), y, box_w, Inches(0.14))
+            lr = lbtf.paragraphs[0].add_run()
+            lr.text = label_text
+            lr.font.size = Pt(6.2)
+            lr.font.bold = True
+            lr.font.name = _FONT
+            lr.font.color.rgb = colour
+            list_top = Emu(int(y + Inches(0.15)))
+            list_h = Emu(int(h - Inches(0.15)))
+            box, tf = _textbox(slide, Emu(int(cx + pad)), list_top, box_w, list_h)
+            # No pre-cap: _fit_size shrinks first and only drops items (with
+            # an honest "+N more" line) if the ALLOCATED box genuinely can't
+            # hold them all -- same as the matrix style, so a stage with 8
+            # tasks isn't truncated to a smaller fixed number when it would
+            # actually have fit.
+            size, lines = _fit_size(list(column[key]), box_w, list_h, 6.0, min_pt=4.4)
+            _render_cell_lines(slide, tf, lines, size)
+            y = Emu(int(y + h))
+
+        # OUTCOME -- single sentence, shrink-only.
+        lb, lbtf = _textbox(slide, Emu(int(cx + pad)), y, box_w, Inches(0.14))
+        lr = lbtf.paragraphs[0].add_run()
+        lr.text = "OUTCOME"
+        lr.font.size = Pt(6.2)
+        lr.font.bold = True
+        lr.font.name = _FONT
+        lr.font.color.rgb = colour
+        outcome_top = Emu(int(y + Inches(0.15)))
+        outcome_box_h = Emu(int(outcome_h - Inches(0.15)))
+        placeholder = _is_placeholder(column["outcome"])
+        fitted = _fit_single(str(column["outcome"]), box_w, outcome_box_h, 6.0, min_pt=4.5)
+        obox, otf = _textbox(slide, Emu(int(cx + pad)), outcome_top, box_w, outcome_box_h)
+        op = otf.paragraphs[0]
+        orun = op.add_run()
+        orun.text = column["outcome"]
+        orun.font.size = Pt(fitted)
+        orun.font.italic = placeholder
+        orun.font.name = _FONT
+        orun.font.color.rgb = _RED if placeholder else _DARK_TEXT
+        y = Emu(int(y + outcome_h))
+
+        # DELIVERABLES -- chips.
+        lb, lbtf = _textbox(slide, Emu(int(cx + pad)), y, box_w, Inches(0.14))
+        lr = lbtf.paragraphs[0].add_run()
+        lr.text = "DELIVERABLES"
+        lr.font.size = Pt(6.2)
+        lr.font.bold = True
+        lr.font.name = _FONT
+        lr.font.color.rgb = colour
+        chips_top = Emu(int(y + Inches(0.16)))
+        chips_h = Emu(int(card_top + card_h - chips_top - Inches(0.04)))
+        deliverables = column["deliverables"]
+        placeholder_deliv = any(_is_placeholder(d) for d in deliverables)
+        _deliverable_chips(slide, Emu(int(cx + pad)), box_w, chips_top, chips_h, deliverables,
+                           RGBColor(0xFC, 0xE8, 0xE8) if placeholder_deliv else colour,
+                           _RED if placeholder_deliv else _WHITE)
+
+
+def _slide_programme(slide, columns_data, from_stages, P, hold_icon, eng_icon,
+                     project_name, client_name, wvr_confirmed) -> None:
+    """Programme-matched columns -- stage-coloured column cards (WHAT WE DO
+    / WITH YOU / YOU RECEIVE, deliverables as white chips), with orange
+    HOLD POINT diamonds between columns wherever a stage actually carries
+    one (see methodology_render.stage_carries_hold_point -- derived from
+    the stage's own content, never asserted)."""
+    n = max(len(columns_data), 1)
+    _simple_title(slide, project_name)
+
+    M = Inches(0.14)
+    gap = Inches(0.42)  # room for hold-point diamonds between columns
+    content_top = Emu(int(M + Inches(0.4)))
+    col_w = Emu(int((_SLIDE_W - 2 * M - (n - 1) * gap) / n))
+
+    header_h = Inches(0.55)
+    card_h = Emu(int(_SLIDE_H - content_top - header_h - Inches(0.14)))
+    do_h = Emu(int(card_h * 0.60))
+    with_h = Emu(int(card_h * 0.16))
+    recv_h = Emu(int(card_h - do_h - with_h - Inches(0.1)))
+
+    for i, column in enumerate(columns_data):
+        cx = Emu(int(M + i * (col_w + gap)))
+        colour = _hex_to_rgb(stage_colour(i))
+
+        _rect(slide, cx, content_top, col_w, header_h, colour)
+        header_text = column["name"]
+        _centered_text(slide, cx, content_top, col_w, Emu(int(header_h * 0.62)), header_text, 8.5,
+                       RGBColor(0xFF, 0xE8, 0xE8) if _is_placeholder(header_text) else _WHITE)
+        if column.get("chevron") and not _is_placeholder(column["chevron"]):
+            _centered_text(slide, cx, Emu(int(content_top + header_h * 0.6)), col_w, Emu(int(header_h * 0.4)),
+                           column["chevron"], 6.5, _WHITE, bold=False)
+
+        card_top = Emu(int(content_top + header_h + Inches(0.05)))
+        _round_rect(slide, cx, card_top, col_w, card_h, fill_color=None, line_color=RGBColor(0xE4, 0xE8, 0xEE), line_w=Pt(0.75))
+
+        pad = Inches(0.06)
+        y = Emu(int(card_top + Inches(0.05)))
+        box_w = Emu(int(col_w - 2 * pad))
+        for label_text, key, h in (("WHAT WE DO", "tasks", do_h), ("WITH YOU", "engagement", with_h)):
+            lb, lbtf = _textbox(slide, Emu(int(cx + pad)), y, box_w, Inches(0.14))
+            lr = lbtf.paragraphs[0].add_run()
+            lr.text = label_text
+            lr.font.size = Pt(6.0)
+            lr.font.bold = True
+            lr.font.name = _FONT
+            lr.font.color.rgb = colour
+            list_top = Emu(int(y + Inches(0.15)))
+            list_h = Emu(int(h - Inches(0.15)))
+            box, tf = _textbox(slide, Emu(int(cx + pad)), list_top, box_w, list_h)
+            # No pre-cap -- see _slide_chevrons's identical comment.
+            size, lines = _fit_size(list(column[key]), box_w, list_h, 5.8, min_pt=4.4)
+            _render_cell_lines(slide, tf, lines, size)
+            y = Emu(int(y + h))
+
+        lb, lbtf = _textbox(slide, Emu(int(cx + pad)), y, box_w, Inches(0.14))
+        lr = lbtf.paragraphs[0].add_run()
+        lr.text = "YOU RECEIVE"
+        lr.font.size = Pt(6.0)
+        lr.font.bold = True
+        lr.font.name = _FONT
+        lr.font.color.rgb = colour
+        chips_top = Emu(int(y + Inches(0.16)))
+        chips_h = Emu(int(card_top + card_h - chips_top - Inches(0.04)))
+        deliverables = column["deliverables"]
+        placeholder_deliv = any(_is_placeholder(d) for d in deliverables)
+        _deliverable_chips(slide, Emu(int(cx + pad)), box_w, chips_top, chips_h, deliverables,
+                           RGBColor(0xFC, 0xE8, 0xE8) if placeholder_deliv else _tint(colour, 0.15),
+                           _RED if placeholder_deliv else _WHITE)
+
+        # Hold-point diamond after this stage, only if it actually carries
+        # one -- positioned clear of the header band, in the gap column.
+        if i < n - 1 and stage_carries_hold_point(column):
+            gx = Emu(int(cx + col_w + gap / 2))
+            gy = Emu(int(content_top + header_h + Inches(0.28)))
+            _diamond(slide, gx, gy, Emu(int(Inches(0.11))), RGBColor(0xF9, 0x73, 0x16),
+                    text="HOLD\nPOINT", text_size=5.2)
+
+
+def _slide_spine(slide, columns_data, from_stages, P, hold_icon, eng_icon,
+                 project_name, client_name, wvr_confirmed) -> None:
+    """Timeline spine -- a coloured node per stage on a vertical spine at
+    the left, a full-width band per stage (tinted left cell with
+    name/weeks/outcome, then What we do / What you receive columns)."""
+    n = max(len(columns_data), 1)
+    _simple_title(slide, project_name)
+
+    M = Inches(0.14)
+    spine_x = Emu(int(M + Inches(0.08)))
+    band_x = Emu(int(M + Inches(0.32)))
+    band_right = Emu(int(_SLIDE_W - M))
+    content_top = Emu(int(M + Inches(0.4)))
+    available_h = Emu(int(_SLIDE_H - content_top - Inches(0.1)))
+    band_gap = Inches(0.06)
+    band_h = Emu(int((available_h - (n - 1) * band_gap) / max(n, 1)))
+
+    label_w = Emu(int((band_right - band_x) * 0.22))
+    tasks_x = Emu(int(band_x + label_w + Inches(0.08)))
+    tasks_w = Emu(int((band_right - tasks_x) * 0.5))
+    deliv_x = Emu(int(tasks_x + tasks_w + Inches(0.1)))
+    deliv_w = Emu(int(band_right - deliv_x))
+
+    # The spine line is drawn first so every stage's node (drawn later, in
+    # the loop below) naturally lands on top of it -- no z-order surgery
+    # needed the way drawing it last, over already-placed nodes, would.
+    spine_bottom = Emu(int(content_top + n * band_h + max(0, n - 1) * band_gap))
+    if n > 1:
+        line = slide.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, spine_x, content_top, spine_x, spine_bottom)
+        line.line.color.rgb = RGBColor(0xE4, 0xE8, 0xEE)
+        line.line.width = Pt(1.5)
+        line.shadow.inherit = False
+
+    y = content_top
+    for i, column in enumerate(columns_data):
+        colour = _hex_to_rgb(stage_colour(i))
+
+        _rect(slide, band_x, y, label_w, band_h, _tint(colour, 0.85))
+        _round_rect(slide, band_x, y, band_right - band_x, band_h, fill_color=None,
+                   line_color=RGBColor(0xE4, 0xE8, 0xEE), line_w=Pt(0.75), radius=0.02)
+
+        pad = Inches(0.05)
+        placeholder_name = _is_placeholder(column["name"])
+        lbox, ltf = _textbox(slide, Emu(int(band_x + pad)), Emu(int(y + Inches(0.03))), Emu(int(label_w - 2 * pad)), Emu(int(band_h - Inches(0.06))))
+        lp = ltf.paragraphs[0]
+        lr = lp.add_run()
+        lr.text = column["name"]
+        lr.font.size = Pt(8.5)
+        lr.font.bold = True
+        lr.font.name = _FONT
+        lr.font.color.rgb = _RED if placeholder_name else _DARK_TEXT
+        if column.get("chevron") and not _is_placeholder(column["chevron"]):
+            wp = ltf.add_paragraph()
+            wr = wp.add_run()
+            wr.text = column["chevron"]
+            wr.font.size = Pt(6.5)
+            wr.font.name = _FONT
+            wr.font.color.rgb = RGBColor(0x5B, 0x64, 0x72)
+        placeholder_outcome = _is_placeholder(column["outcome"])
+        op = ltf.add_paragraph()
+        orun = op.add_run()
+        orun.text = column["outcome"]
+        orun.font.size = Pt(6.3)
+        orun.font.italic = placeholder_outcome
+        orun.font.name = _FONT
+        orun.font.color.rgb = _RED if placeholder_outcome else RGBColor(0x5B, 0x64, 0x72)
+
+        # WHAT WE DO
+        tlb, tltf = _textbox(slide, tasks_x, Emu(int(y + Inches(0.03))), tasks_w, Inches(0.14))
+        tlr = tltf.paragraphs[0].add_run()
+        tlr.text = "WHAT WE DO"
+        tlr.font.size = Pt(6.0)
+        tlr.font.bold = True
+        tlr.font.name = _FONT
+        tlr.font.color.rgb = colour
+        tbody_top = Emu(int(y + Inches(0.18)))
+        tbody_h = Emu(int(band_h - Inches(0.21)))
+        tbox, ttf = _textbox(slide, tasks_x, tbody_top, tasks_w, tbody_h)
+        # No pre-cap -- see _slide_chevrons's identical comment.
+        size, tlines = _fit_size(list(column["tasks"]), tasks_w, tbody_h, 6.0, min_pt=4.4)
+        _render_cell_lines(slide, ttf, tlines, size)
+
+        # WHAT YOU RECEIVE -- chips.
+        dlb, dltf = _textbox(slide, deliv_x, Emu(int(y + Inches(0.03))), deliv_w, Inches(0.14))
+        dlr = dltf.paragraphs[0].add_run()
+        dlr.text = "WHAT YOU RECEIVE"
+        dlr.font.size = Pt(6.0)
+        dlr.font.bold = True
+        dlr.font.name = _FONT
+        dlr.font.color.rgb = colour
+        deliverables = column["deliverables"]
+        placeholder_deliv = any(_is_placeholder(d) for d in deliverables)
+        chips_top = Emu(int(y + Inches(0.19)))
+        chips_h = Emu(int(band_h - Inches(0.22)))
+        _deliverable_chips(slide, deliv_x, deliv_w, chips_top, chips_h, deliverables,
+                           RGBColor(0xFC, 0xE8, 0xE8) if placeholder_deliv else _tint(colour, 0.8),
+                           _RED if placeholder_deliv else _DARK_TEXT, size_pt=6.0)
+
+        node_r = Emu(int(Inches(0.045)))
+        node_cy = Emu(int(y + band_h / 2))
+        shape = slide.shapes.add_shape(MSO_SHAPE.OVAL, Emu(int(spine_x - node_r)), Emu(int(node_cy - node_r)),
+                                       Emu(int(2 * node_r)), Emu(int(2 * node_r)))
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = colour
+        shape.line.color.rgb = _WHITE
+        shape.line.width = Pt(1)
+        shape.shadow.inherit = False
+
+        y = Emu(int(y + band_h + band_gap))
+
+
+_RENDERERS = {
+    "matrix": _slide_matrix,
+    "chevrons": _slide_chevrons,
+    "programme": _slide_programme,
+    "spine": _slide_spine,
+}
+
+
+def populate_methodology(
+    analysis, client_name: str = "", project_name: str = "", theme_name: str | None = None,
+    stages: list | None = None, week_labels: list | None = None,
+    wvr_confirmed: bool = False, style: str | None = None,
+) -> bytes:
+    """
+    Builds a fresh A4-landscape .pptx (returned as bytes) of the delivery
+    methodology, in the requested presentation `style` -- one of
+    methodology_render.STYLES ("matrix" | "chevrons" | "programme" |
+    "spine"); anything else, including None, falls back to
+    methodology_render.DEFAULT_STYLE, same convention org_chart_pptx.py and
+    program_pptx.py use for their own style pickers.
+
+    `stages`: the reviewed methodology_stages.MethodologyStage list from the
+    Draft Responses tab. When supplied, every column -- name, key tasks,
+    engagement activities, outcome, deliverables and the date chevron --
+    comes from it, and cells the brief didn't support render as red TBC.
+    When it is empty (the stage drafter hasn't been run), the table falls
+    back to exactly what it produced before: one column of standard
+    initiation boilerplate, one built from the brief's scope items, and two
+    of placeholders. See methodology_render.build_columns().
+
+    `week_labels`: the delivery program's own week labels, used for the date
+    chevrons -- so they read "Wk 1 - Wk 3" normally and "6 Oct - 20 Oct"
+    once a program start date is set, with no regeneration needed.
+
+    `wvr_confirmed`: whether the user has confirmed their firm actually
+    issues Work Verification Records. Only the "matrix" style prints this
+    line (it always has); the three new styles have no equivalent fixed
+    slot for it and do not assert it either way.
+
+    `client_name` fills the "matrix" style's legend hold-point label and
+    `project_name` every style's title -- both shown in red if not yet
+    entered, same convention as every other missing field here.
+    """
+    resolved = style if style in STYLES else DEFAULT_STYLE
+
+    P = _resolve_palette(theme_name)
+    hold_icon = _render_icon_png("hold_point")
+    eng_icon = _render_icon_png("engagement")
+
+    columns_data = build_columns(analysis, stages, week_labels)
+    from_stages = bool(stages)
+
+    prs = Presentation()
+    prs.slide_width = _SLIDE_W
+    prs.slide_height = _SLIDE_H
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+
+    _RENDERERS[resolved](slide, columns_data, from_stages, P, hold_icon, eng_icon,
+                         project_name, client_name, wvr_confirmed)
 
     buffer = io.BytesIO()
     prs.save(buffer)
