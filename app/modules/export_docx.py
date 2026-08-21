@@ -89,7 +89,6 @@ def build_docx(
     ocr_note: str | None = None,
     program_schedule: dict[str, list[bool]] | None = None,
     program_week_labels: list[str] | None = None,
-    methodology_stages_png: bytes | None = None,
     firm: dict | None = None,
     fee_sections_included: dict | None = None,
     scope_item_fees: list | None = None,
@@ -135,7 +134,6 @@ def build_docx(
                              sales_pitch_text=sales_pitch_text,
                              program_schedule=program_schedule,
                              program_week_labels=program_week_labels,
-                             methodology_stages_png=methodology_stages_png,
                              firm=firm,
                              fee_sections_included=_fee_included,
                              scope_item_fees=scope_item_fees)
@@ -1199,7 +1197,6 @@ def _build_proposal_response(
     sales_pitch_text: str | None = None,
     program_schedule: dict[str, list[bool]] | None = None,
     program_week_labels: list[str] | None = None,
-    methodology_stages_png: bytes | None = None,
     firm: dict | None = None,
     fee_sections_included: dict | None = None,
     scope_item_fees: list | None = None,
@@ -1294,7 +1291,7 @@ def _build_proposal_response(
             )
             _build_personnel_project_matrix(doc, resource_plan, reference_projects, theme)
         if _is_methodology_section(section.title) and analysis is not None:
-            _build_methodology_table(doc, analysis, theme, stages_png=methodology_stages_png)
+            _build_methodology_table(doc, analysis, theme)
         if _is_relationship_section(section.title):
             _build_relationship_management(doc, project_info, theme, firm)
         if _is_commercial_section(section.title):
@@ -1764,46 +1761,25 @@ def _add_photo_placeholder_box(cell) -> None:
     r2.italic = True
 
 
-def _build_methodology_table(doc: Document, analysis, theme: dict | None,
-                             stages_png: bytes | None = None):
-    """Deliberately NOT auto-building a one-column-per-scope-item methodology table
-    here any more. That table used to grow one column per scope item (DD01, DD02,
-    DD03, ... -- easily 20-30 columns on a real brief), which made every cell so
-    narrow it became unreadable at A4 width -- the table looked broken regardless
-    of how good the underlying task text was.
+METHODOLOGY_PLACEHOLDER_NOTE = (
+    "[INSERT METHODOLOGY TABLE -- generate it in the app and paste the finished "
+    "PowerPoint table here]"
+)
 
-    The finished methodology table is now built and finished in PowerPoint (see
-    modules/methodology_pptx.py, exported alongside this document from the Export
-    tab) and pasted in by hand, exactly matching the org chart's pattern above
-    (_build_personnel_block). It's a fixed, generic four-stage layout (Project
-    Initiation, then three progressively-developed design stages) against Key
-    tasks / Key engagement activities / Outcome / Deliverables rows, themed to
-    match this proposal's chosen colours. Column 2's Key tasks are populated
-    from this project's real scope items; later-stage columns the brief doesn't
-    describe stay explicit red placeholders rather than invented content, same
-    rule as everywhere else in this tool. This placeholder marks exactly where
-    that finished table goes."""
+
+def _build_methodology_table(doc: Document, analysis, theme: dict | None):
+    """Deliberately NOT auto-building a one-column-per-scope-item methodology table
+    here, and -- as of this revision -- deliberately NOT embedding a first-pass
+    image of the reviewed stage grid either. That image used to sit above this
+    note, but the owner wants the Word pack's body to stay clean: the finished
+    methodology table belongs in PowerPoint (see modules/methodology_pptx.py,
+    exported alongside this document from the Export tab -- four presentation
+    styles, all built from the same reviewed stage grid the preview shows) and
+    is pasted in by hand once finished. This function now does exactly one
+    thing: leave the single red placeholder note marking where it goes."""
     theme = theme or _theme_colours(None)
     doc.add_heading("Methodology summary", level=2)
-    # Same pattern as the org chart: when the user has reviewed a stage grid
-    # (Draft Responses tab), its first-pass image goes in above the note, and
-    # the note tells them to replace it with the finished PowerPoint. Without
-    # a grid, the original placeholder is what renders -- unchanged.
-    if stages_png:
-        try:
-            _add_full_width_image(doc, stages_png)
-        except Exception:
-            pass
-    _add_placeholder_paragraph(
-        doc,
-        ("[FIRST-PASS TABLE ABOVE, from the design stages you reviewed in Draft "
-         "Responses -- replace it with the finished table. A companion PowerPoint "
-         "methodology table is exported alongside this document; finish it there, "
-         "then paste it over the image above.]") if stages_png else
-        ("[INSERT METHODOLOGY TABLE HERE -- paste in the finished table image. A "
-         "companion PowerPoint methodology table template is exported alongside "
-         "this document; build the table there, then paste it into this space.]"),
-    )
+    _add_placeholder_paragraph(doc, METHODOLOGY_PLACEHOLDER_NOTE)
 
 
 def _build_experience_intro(doc: Document, experience_intro, theme: dict | None):

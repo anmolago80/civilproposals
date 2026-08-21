@@ -308,10 +308,6 @@ def generate_all(project: dict) -> dict:
         discipline_fee_lines=project["discipline_fee_lines"],
         program_schedule=project["program_schedule"],
         program_week_labels=project["program_week_labels"],
-        methodology_stages_png=methodology_stages.render_stages_png(
-            project["methodology_stages"], project["program_week_labels"],
-            info["proposal_theme"], wvr_confirmed=False,
-        ),
     ).getvalue()
 
     out["Tender_Summary.docx"] = export_docx.build_tender_summary_docx(
@@ -434,7 +430,10 @@ def check(files: dict, failures: list[str]) -> None:
 
     # 1(c): the generated org chart must actually be in the pack, and the
     # "replace me with the finished chart" note must survive alongside it.
-    if docx_image_count(files["Proposal_LargeScope.docx"]) < 3:
+    # (Was < 3 when the methodology grid image was also embedded here; Part C
+    # removed that embed in favour of a red placeholder note, so the pack now
+    # carries one fewer image -- the cover banner and the org chart.)
+    if docx_image_count(files["Proposal_LargeScope.docx"]) < 2:
         failures.append("[1c] the Large Scope pack lost an image -- org chart not embedded")
     if "FIRST-PASS CHART ABOVE" not in large:
         failures.append("[1c] the org chart's replace-me note is missing")
@@ -492,7 +491,7 @@ def check(files: dict, failures: list[str]) -> None:
 def check_methodology_stages(failures: list[str], files: dict) -> None:
     """Batch 2: every column of the methodology table comes from the reviewed
     stage grid, TBC survives as TBC, and the WVR line is not asserted."""
-    from modules import methodology_pptx, methodology_stages
+    from modules import export_docx, methodology_pptx, methodology_stages
 
     meth = pptx_text(files["Methodology_Table.pptx"])
     for expected in ("Project inception", "Concept design", "Detailed design",
@@ -525,10 +524,14 @@ def check_methodology_stages(failures: list[str], files: dict) -> None:
     if "15% design stage" not in legacy:
         failures.append("[2c] the no-stages fallback lost its original layout")
 
-    # 2(d): the DOCX carries the first-pass grid image.
+    # 2(d): the DOCX no longer embeds the methodology grid image -- it carries
+    # exactly the red "paste the finished table here" placeholder note instead
+    # (Part C: the methodology summary lives only in the PPTX export now).
     large = docx_text(files["Proposal_LargeScope.docx"])
-    if "FIRST-PASS TABLE ABOVE" not in large:
-        failures.append("[2d] the methodology grid image is not embedded in the DOCX")
+    if "FIRST-PASS TABLE ABOVE" in large:
+        failures.append("[2d] the old methodology grid image note is still in the DOCX")
+    if export_docx.METHODOLOGY_PLACEHOLDER_NOTE not in large:
+        failures.append("[2d] the methodology red placeholder note is missing from the DOCX")
 
     # Overflow: a stage with many long tasks must stay inside the slide.
     import io as _io

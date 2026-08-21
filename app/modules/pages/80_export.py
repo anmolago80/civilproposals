@@ -189,21 +189,14 @@ with tabs[9]:
                     # spread over the weeks this program actually has work in.
                     program_schedule=st.session_state.program_schedule,
                     program_week_labels=st.session_state.program_week_labels,
-                    # First-pass image of the reviewed design stages, placed
-                    # above the "paste the finished table here" note -- same
-                    # pattern as the org chart. None when no grid exists, in
-                    # which case the note renders alone, as before.
                     firm=_firm_export_context(),
                     # Which fee presentations reach the proposal is the
                     # user's choice (Fee Estimate tab), not the pack format's.
                     fee_sections_included=st.session_state.fee_sections_included,
                     scope_item_fees=st.session_state.scope_item_fees,
-                    methodology_stages_png=methodology_stages.render_stages_png(
-                        st.session_state.methodology_stages,
-                        st.session_state.program_week_labels,
-                        st.session_state.proposal_theme,
-                        bool(st.session_state.methodology_wvr_confirmed),
-                    ),
+                    # The methodology body content is now just the red
+                    # "paste the finished table here" placeholder note --
+                    # build_docx no longer takes a stages image to embed.
                 )
                 st.session_state.docx_buffer = buffer
                 _mark_export_generated()
