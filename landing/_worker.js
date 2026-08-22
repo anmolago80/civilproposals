@@ -45,18 +45,22 @@
 //   6. /es, /es/, /es/index.html -> the same blog-cards splice as above,
 //      but serving the static index.es.html (Spanish homepage) instead.
 //      /es/security.html, /es/privacy-policy.html, /es/terms-of-service.html,
-//      /es/cookie-policy.html -> the matching static *.es.html file. These
-//      give the hreflang="es" URLs (https://civilproposals.com/es/, .../es/
-//      security.html, etc.) a real route rather than relying on the
-//      .es.html filenames directly, mirroring how "/" already resolves to
-//      a specific static file above -- the whole Spanish site now lives
-//      under one /es/... URL scheme (Audit Round 2, Part 7).
+//      /es/cookie-policy.html, /es/about.html,
+//      /es/why-we-built-civilproposals.html, /es/contact.html -> the
+//      matching static *.es.html file. These give the hreflang="es" URLs
+//      (https://civilproposals.com/es/, .../es/security.html, etc.) a real
+//      route rather than relying on the .es.html filenames directly,
+//      mirroring how "/" already resolves to a specific static file above
+//      -- the whole Spanish site now lives under one /es/... URL scheme
+//      (Audit Round 2, Part 7).
 //   7. The bare *.es.html paths (/index.es.html, /security.es.html,
 //      /privacy-policy.es.html, /terms-of-service.es.html,
-//      /cookie-policy.es.html) 301-redirect to their canonical /es/... form
-//      above, instead of serving directly -- so the raw filename can't end
-//      up indexed or linked as a second address for the same page (a
-//      leftover from before the /es/ scheme existed; the static files
+//      /cookie-policy.es.html, /about.es.html,
+//      /why-we-built-civilproposals.es.html, /contact.es.html) 301-redirect
+//      to their canonical /es/... form above, instead of serving directly
+//      -- so the raw filename can't end up indexed or linked as a second
+//      address for the same page (a leftover from before the /es/ scheme
+//      existed; the static files
 //      still have to exist under these names for Cloudflare's ASSETS
 //      binding to find them, they just aren't the address anything should
 //      point at any more).
@@ -159,10 +163,18 @@ async function handleLeadCapture(request, env) {
   }
 
   const email = (body && typeof body.email === "string" ? body.email : "").trim();
-  // Honeypot: index.html's form includes a hidden "company" field real
-  // users never fill in; the client already skips the request when it's
-  // non-empty, but check again server-side since a bot may skip the JS.
+  // Honeypot: both index.html's newsletter form and contact.html's message
+  // form include a hidden "company" field real users never fill in; the
+  // client already skips the request when it's non-empty, but check again
+  // server-side since a bot may skip the JS.
   const honeypot = body && typeof body.company === "string" ? body.company.trim() : "";
+  // contact.html's form is the only caller that ever sends these two --
+  // the homepage newsletter signup never does. Their presence (specifically
+  // "message") is what tells this handler which of the two emails below to
+  // send, rather than adding a second endpoint for what is otherwise the
+  // same rate-limited, honeypot-checked capture path.
+  const name = (body && typeof body.name === "string" ? body.name.trim() : "").slice(0, 200);
+  const message = (body && typeof body.message === "string" ? body.message.trim() : "").slice(0, 5000);
 
   if (honeypot) {
     // Pretend success so the bot doesn't learn anything -- don't actually
@@ -193,51 +205,81 @@ async function handleLeadCapture(request, env) {
   const notifyTo = env.LEAD_NOTIFY_EMAIL || "hello@civilproposals.com";
 
   // Notify the team first -- if this fails, surface an error so the person
-  // doesn't get a false "you're on the list" with no one ever actually
-  // seeing the lead.
-  await sendResendEmail(env, {
-    to: notifyTo,
-    subject: "New CivilProposals landing page lead",
-    html: `<p>New lead signup from the landing page: <strong>${escapeHtml(email)}</strong></p>`,
-  });
+  // doesn't get a false "you're on the list" (or false "we got your
+  // message") with no one ever actually seeing it.
+  if (message) {
+    const fromLine = name ? `${escapeHtml(name)} &lt;${escapeHtml(email)}&gt;` : escapeHtml(email);
+    await sendResendEmail(env, {
+      to: notifyTo,
+      subject: "New message from the CivilProposals contact form",
+      html:
+        `<p>New contact form message from <strong>${fromLine}</strong>:</p>` +
+        `<p style="white-space:pre-wrap;">${escapeHtml(message)}</p>`,
+    });
+  } else {
+    await sendResendEmail(env, {
+      to: notifyTo,
+      subject: "New CivilProposals landing page lead",
+      html: `<p>New lead signup from the landing page: <strong>${escapeHtml(email)}</strong></p>`,
+    });
+  }
 
   // Confirmation to the person -- best-effort, doesn't fail the request if
-  // it errors, since the lead is already captured via the notification
-  // above.
+  // it errors, since the lead/message is already captured via the
+  // notification above.
+  //
+  // A contact-form message isn't a marketing send -- it's a one-off reply
+  // to something the person just asked -- so it skips the newsletter copy
+  // and the List-Unsubscribe headers below entirely; those only make sense
+  // on the opt-in confirmation.
   //
   // List-Unsubscribe (RFC 2369) + List-Unsubscribe-Post (RFC 8058) below
-  // give this a real one-click "Unsubscribe" action in the major mail
-  // clients (Gmail, Outlook, Apple Mail all render one when both headers
-  // are present) without needing a hosted unsubscribe page or a Resend
-  // Audience set up -- neither of which this code change can provision on
-  // its own. It's a mailto: fallback, not automated: any opt-out email
-  // hello@ receives has to be manually kept off future sends today, since
-  // there's no actual recurring-send/list infrastructure behind this form
-  // yet (this confirmation is the only email that goes out right now) --
-  // see this file's module docstring / DEPLOY.md if a real Resend Audience
-  // + campaign system gets built later, which would replace this with
-  // Resend's own hosted unsubscribe link instead.
+  // give the newsletter confirmation a real one-click "Unsubscribe" action
+  // in the major mail clients (Gmail, Outlook, Apple Mail all render one
+  // when both headers are present) without needing a hosted unsubscribe
+  // page or a Resend Audience set up -- neither of which this code change
+  // can provision on its own. It's a mailto: fallback, not automated: any
+  // opt-out email hello@ receives has to be manually kept off future sends
+  // today, since there's no actual recurring-send/list infrastructure
+  // behind this form yet (this confirmation is the only email that goes
+  // out right now) -- see this file's module docstring / DEPLOY.md if a
+  // real Resend Audience + campaign system gets built later, which would
+  // replace this with Resend's own hosted unsubscribe link instead.
   try {
-    await sendResendEmail(env, {
-      to: email,
-      subject: "Thanks for your interest in CivilProposals",
-      headers: {
-        "List-Unsubscribe": "<mailto:hello@civilproposals.com?subject=unsubscribe>",
-        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-      },
-      html:
-        '<div style="font-family:sans-serif;font-size:15px;color:#0F172A;line-height:1.6;">' +
-        "<p>Thanks for signing up -- we'll send occasional proposal-writing tips and " +
-        "a heads-up whenever we ship something new.</p>" +
-        "<p>In the meantime, your first tender analysis is free, no card required.</p>" +
-        '<p><a href="https://app.civilproposals.com" style="background:#1D4ED8;color:#fff;' +
-        'padding:10px 20px;border-radius:8px;text-decoration:none;display:inline-block;">' +
-        "Try CivilProposals</a></p>" +
-        '<p style="color:#5A6B7A;font-size:12px;margin-top:24px;">Don\'t want these? Reply to this ' +
-        'email or write to <a href="mailto:hello@civilproposals.com">hello@civilproposals.com</a> ' +
-        "and we'll take you off the list.</p>" +
-        "</div>",
-    });
+    if (message) {
+      await sendResendEmail(env, {
+        to: email,
+        subject: "We've got your message",
+        html:
+          '<div style="font-family:sans-serif;font-size:15px;color:#0F172A;line-height:1.6;">' +
+          "<p>Thanks for reaching out -- we've got your message and we usually reply within " +
+          "one business day.</p>" +
+          '<p style="color:#5A6B7A;font-size:12px;margin-top:24px;">This is an automatic ' +
+          "confirmation; a person on the team will follow up at this address.</p>" +
+          "</div>",
+      });
+    } else {
+      await sendResendEmail(env, {
+        to: email,
+        subject: "Thanks for your interest in CivilProposals",
+        headers: {
+          "List-Unsubscribe": "<mailto:hello@civilproposals.com?subject=unsubscribe>",
+          "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        },
+        html:
+          '<div style="font-family:sans-serif;font-size:15px;color:#0F172A;line-height:1.6;">' +
+          "<p>Thanks for signing up -- we'll send occasional proposal-writing tips and " +
+          "a heads-up whenever we ship something new.</p>" +
+          "<p>In the meantime, your first tender analysis is free, no card required.</p>" +
+          '<p><a href="https://app.civilproposals.com" style="background:#1D4ED8;color:#fff;' +
+          'padding:10px 20px;border-radius:8px;text-decoration:none;display:inline-block;">' +
+          "Try CivilProposals</a></p>" +
+          '<p style="color:#5A6B7A;font-size:12px;margin-top:24px;">Don\'t want these? Reply to this ' +
+          'email or write to <a href="mailto:hello@civilproposals.com">hello@civilproposals.com</a> ' +
+          "and we'll take you off the list.</p>" +
+          "</div>",
+      });
+    }
   } catch (err) {
     console.error("[lead confirmation email] failed:", err);
   }
@@ -679,6 +721,9 @@ export default {
       "/es/privacy-policy.html": "/privacy-policy.es.html",
       "/es/terms-of-service.html": "/terms-of-service.es.html",
       "/es/cookie-policy.html": "/cookie-policy.es.html",
+      "/es/about.html": "/about.es.html",
+      "/es/why-we-built-civilproposals.html": "/why-we-built-civilproposals.es.html",
+      "/es/contact.html": "/contact.es.html",
     };
     if (Object.prototype.hasOwnProperty.call(ES_STATIC_PAGE_ROUTES, url.pathname)) {
       const assetUrl = new URL(request.url);
@@ -697,6 +742,9 @@ export default {
       "/privacy-policy.es.html": "/es/privacy-policy.html",
       "/terms-of-service.es.html": "/es/terms-of-service.html",
       "/cookie-policy.es.html": "/es/cookie-policy.html",
+      "/about.es.html": "/es/about.html",
+      "/why-we-built-civilproposals.es.html": "/es/why-we-built-civilproposals.html",
+      "/contact.es.html": "/es/contact.html",
     };
     if (Object.prototype.hasOwnProperty.call(ES_BARE_FILENAME_REDIRECTS, url.pathname)) {
       const target = new URL(request.url);

@@ -989,6 +989,48 @@ def render_sitemap_xml(posts: list["db.BlogPost"]) -> str:
     <loc>{SITE_ORIGIN}/es/security.html</loc>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>{SITE_ORIGIN}/about.html</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/about.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+    <xhtml:link rel="alternate" hreflang="es" href="{SITE_ORIGIN}/es/about.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+  </url>
+  <url>
+    <loc>{SITE_ORIGIN}/es/about.html</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/about.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+    <xhtml:link rel="alternate" hreflang="es" href="{SITE_ORIGIN}/es/about.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+  </url>
+  <url>
+    <loc>{SITE_ORIGIN}/why-we-built-civilproposals.html</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/why-we-built-civilproposals.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+    <xhtml:link rel="alternate" hreflang="es" href="{SITE_ORIGIN}/es/why-we-built-civilproposals.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+  </url>
+  <url>
+    <loc>{SITE_ORIGIN}/es/why-we-built-civilproposals.html</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/why-we-built-civilproposals.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+    <xhtml:link rel="alternate" hreflang="es" href="{SITE_ORIGIN}/es/why-we-built-civilproposals.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+  </url>
+  <url>
+    <loc>{SITE_ORIGIN}/contact.html</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/contact.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+    <xhtml:link rel="alternate" hreflang="es" href="{SITE_ORIGIN}/es/contact.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+  </url>
+  <url>
+    <loc>{SITE_ORIGIN}/es/contact.html</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/contact.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+    <xhtml:link rel="alternate" hreflang="es" href="{SITE_ORIGIN}/es/contact.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
   </url>"""
     ]
     used_categories = {p.category for p in posts if p.category}

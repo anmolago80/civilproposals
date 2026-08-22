@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Contacto - CivilProposals</title>
+<meta name="description" content="Ponte en contacto con CivilProposals -- escribe a hello@civilproposals.com o envíanos un mensaje. Solemos responder en un día hábil.">
+<link rel="canonical" href="https://civilproposals.com/es/contact.html">
+<link rel="alternate" hreflang="en" href="https://civilproposals.com/contact.html">
+<link rel="alternate" hreflang="es" href="https://civilproposals.com/es/contact.html">
+<link rel="alternate" hreflang="x-default" href="https://civilproposals.com/contact.html">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CivilProposals">
+<meta property="og:title" content="Contacto - CivilProposals">
+<meta property="og:description" content="Ponte en contacto con CivilProposals -- escribe a hello@civilproposals.com o envíanos un mensaje. Solemos responder en un día hábil.">
+<meta property="og:url" content="https://civilproposals.com/es/contact.html">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Contacto - CivilProposals">
+<meta name="twitter:description" content="Ponte en contacto con CivilProposals -- escribe a hello@civilproposals.com o envíanos un mensaje. Solemos responder en un día hábil.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#111827;
+    --blue:#1D4ED8;
+    --blue-dark:#1E3A8A;
+    --blue-tint:#EFF4FF;
+    --accent:#F97316;
+    --surface:#F6F6F4;
+    --border:#E4E4E0;
+    --text-muted:#5B6472;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{
+    font-family:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink);line-height:1.6;background:#fff;font-weight:500;
+  }
+  a{color:var(--blue);}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 24px;}
+  h1,h2,h3,h4{font-weight:800;letter-spacing:-0.02em;}
+
+  nav{display:flex;align-items:center;justify-content:space-between;padding:20px 0;}
+  .logo{font-weight:800;font-size:1.25rem;display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink);}
+  .logo img{width:32px;height:32px;border-radius:8px;}
+  .beta-tag{
+    font-size:.64rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase;
+    background:#FFF3E0;color:#B8600A;border:1px solid #F3D9AE;padding:3px 9px;border-radius:20px;
+  }
+  .nav-cta{
+    background:var(--blue);color:#fff;padding:11px 22px;border-radius:10px;
+    text-decoration:none;font-weight:700;font-size:.92rem;
+  }
+  .nav-cta:hover{background:var(--blue-dark);}
+  .nav-actions{display:flex;align-items:center;gap:22px;}
+
+  .lang-switch{display:flex;align-items:center;gap:6px;font-weight:700;font-size:.92rem;color:var(--text-muted);}
+  .lang-switch .lang-link{color:var(--text-muted);text-decoration:none;transition:color .15s;}
+  .lang-switch .lang-link:hover{color:var(--blue);}
+  .lang-switch .lang-current{color:var(--blue);}
+  .lang-switch .lang-sep{color:var(--border);}
+
+  main{padding:48px 0 80px;}
+  .back-link{display:inline-block;margin-bottom:20px;color:var(--text-muted);text-decoration:none;font-size:.9rem;font-weight:700;}
+  .back-link:hover{color:var(--blue);}
+  .legal-page{max-width:800px;}
+  .legal-page h1{font-size:2.1rem;margin-bottom:8px;}
+  .legal-updated{color:var(--text-muted);font-size:.9rem;margin-bottom:28px;}
+  .legal-page h2{font-size:1.25rem;margin:34px 0 12px;}
+  .legal-page p{color:var(--text-muted);margin-bottom:14px;}
+  .legal-page strong{color:var(--ink);}
+  .contact-email{font-size:1.15rem;font-weight:700;}
+  .contact-email a{color:var(--blue);}
+
+  .contact-form{max-width:520px;margin-top:12px;}
+  .form-field{margin-bottom:18px;}
+  .form-field label{display:block;font-weight:700;font-size:.88rem;margin-bottom:6px;color:var(--ink);}
+  .form-field input,.form-field textarea{
+    width:100%;padding:12px 14px;border-radius:10px;border:1.5px solid var(--border);
+    font-family:inherit;font-size:.95rem;color:var(--ink);background:#fff;
+  }
+  .form-field input:focus,.form-field textarea:focus{outline:none;border-color:var(--blue);}
+  .form-field textarea{resize:vertical;}
+  .btn-primary{
+    background:var(--blue);color:#fff;border:none;padding:12px 26px;border-radius:10px;
+    font-weight:700;font-size:.95rem;cursor:pointer;font-family:inherit;
+  }
+  .btn-primary:hover{background:var(--blue-dark);}
+  .btn-primary:disabled{opacity:.6;cursor:default;}
+  #contact-status{margin-top:14px;font-size:.88rem;color:var(--text-muted);}
+
+  .site-footer{background:var(--ink);color:#fff;}
+  .footer-top{display:flex;flex-wrap:wrap;gap:40px;justify-content:space-between;padding:56px 0 40px;}
+  .footer-brand{max-width:340px;}
+  .footer-brand .logo{color:#fff;font-weight:800;font-size:1.15rem;display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+  .footer-brand .logo img{width:28px;height:28px;border-radius:7px;}
+  .footer-tagline{color:#9CA3AF;font-size:.92rem;line-height:1.6;}
+  .footer-col .footer-col-title{font-size:.76rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#9CA3AF;margin-bottom:14px;}
+  .footer-col a{color:#fff;text-decoration:none;font-size:.92rem;display:block;margin-bottom:8px;}
+  .footer-col a:hover{color:#93C5FD;}
+  .footer-bottom{
+    border-top:1px solid rgba(255,255,255,.12);padding:22px 0;
+    display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:center;
+  }
+  .footer-links{display:flex;gap:22px;flex-wrap:wrap;}
+  .footer-links a{color:#D1D5DB;text-decoration:none;font-size:.85rem;font-weight:700;}
+  .footer-links a:hover{color:#fff;}
+  .footer-copyright{color:#9CA3AF;font-size:.82rem;}
+</style>
+<script defer data-domain="civilproposals.com" src="https://plausible.io/js/script.js"></script>
+</head>
+<body>
+
+<nav class="wrap">
+  <a class="logo" href="/es/"><img src="/assets/logo_mark.png" alt="CivilProposals"> CivilProposals <span class="beta-tag">Beta</span></a>
+  <div class="nav-actions">
+    <span class="lang-switch" aria-label="Idioma">
+      <a class="lang-link" href="/contact.html" title="English" aria-label="English" onclick="try{localStorage.setItem('cp_lang','en');localStorage.setItem('cp_lang_redirect_done','1');}catch(e){}">🇬🇧</a><span class="lang-sep" aria-hidden="true">|</span><span class="lang-current" title="Español" aria-label="Español">🇪🇸</span>
+    </span>
+    <a class="nav-cta" href="https://app.civilproposals.com">Empezar</a>
+  </div>
+</nav>
+
+<main class="wrap">
+  <div class="legal-page">
+    <a class="back-link" href="/es/">&larr; Volver al inicio</a>
+    <h1>Contacto</h1>
+    <p class="legal-updated">Última actualización: agosto de 2026</p>
+
+    <p>
+      ¿Tienes una pregunta sobre CivilProposals, quieres ver una demostración, o encontraste algo
+      que no funciona como debería? Escríbenos directamente, o envíanos un mensaje con el
+      formulario de abajo.
+    </p>
+
+    <p class="contact-email"><a href="mailto:hello@civilproposals.com">hello@civilproposals.com</a></p>
+
+    <p>Solemos responder en un día hábil.</p>
+
+    <h2>Envíanos un mensaje</h2>
+    <form id="contact-form" class="contact-form">
+      <input type="text" name="company" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;" aria-hidden="true">
+      <div class="form-field">
+        <label for="contact-name">Nombre</label>
+        <input type="text" id="contact-name" name="name" required>
+      </div>
+      <div class="form-field">
+        <label for="contact-email">Correo electrónico</label>
+        <input type="email" id="contact-email" name="email" required placeholder="tu@empresa.com">
+      </div>
+      <div class="form-field">
+        <label for="contact-message">Mensaje</label>
+        <textarea id="contact-message" name="message" rows="5" required></textarea>
+      </div>
+      <button type="submit" class="btn-primary">Enviar mensaje</button>
+      <p id="contact-status" role="status"></p>
+    </form>
+
+    <p style="margin-top:34px;">
+      También puedes seguir a CivilProposals en
+      <a href="https://www.linkedin.com/company/civil-proposals" target="_blank" rel="noopener">LinkedIn</a>.
+    </p>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-top">
+    <div class="footer-brand">
+      <a class="logo" href="/es/" style="color:#fff;"><img src="/assets/logo_mark.png" alt="CivilProposals"> CivilProposals</a>
+      <p class="footer-tagline">Preparación de licitaciones y propuestas asistida por IA, creada para empresas de ingeniería civil.</p>
+    </div>
+    <div class="footer-col">
+      <div class="footer-col-title">Contacto</div>
+      <a href="mailto:hello@civilproposals.com">hello@civilproposals.com</a>
+    </div>
+    <div class="footer-col">
+      <div class="footer-col-title">Síguenos</div>
+      <a href="https://www.linkedin.com/company/civil-proposals" target="_blank" rel="noopener">LinkedIn</a>
+    </div>
+  </div>
+  <div class="wrap footer-bottom">
+    <div class="footer-links">
+      <a href="/es/privacy-policy.html">Política de Privacidad</a>
+      <a href="/es/terms-of-service.html">Términos de Servicio</a>
+      <a href="/es/cookie-policy.html">Política de Cookies</a>
+    </div>
+    <div class="footer-copyright">Copyright &copy; 2026 CivilProposals. Todos los derechos reservados.</div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  var form = document.getElementById('contact-form');
+  if(!form) return;
+  form.addEventListener('submit', function(e){
+    e.preventDefault();
+    var status = document.getElementById('contact-status');
+    var name = form.name.value.trim();
+    var email = form.email.value.trim();
+    var message = form.message.value.trim();
+    var company = form.company.value; // honeypot -- los usuarios reales nunca completan esto
+    if(company){ return; }
+    var btn = form.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    status.textContent = 'Enviando...';
+    fetch('/api/lead', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name, email: email, message: message})
+    }).then(function(r){
+      if(!r.ok) throw new Error('request failed');
+      return r.json();
+    }).then(function(){
+      status.textContent = "Gracias -- te responderemos en un día hábil.";
+      form.reset();
+    }).catch(function(){
+      status.textContent = "Algo salió mal -- inténtalo de nuevo, o escribe directamente a hello@civilproposals.com.";
+    }).finally(function(){
+      btn.disabled = false;
+    });
+  });
+})();
+</script>
+
+</body>
+</html>

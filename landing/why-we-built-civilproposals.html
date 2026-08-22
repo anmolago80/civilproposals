@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Why we built CivilProposals</title>
+<meta name="description" content="CivilProposals came out of years spent preparing engineering proposals. Why we built software that assists proposal preparation rather than replacing engineering judgement.">
+<link rel="canonical" href="https://civilproposals.com/why-we-built-civilproposals.html">
+<link rel="alternate" hreflang="en" href="https://civilproposals.com/why-we-built-civilproposals.html">
+<link rel="alternate" hreflang="es" href="https://civilproposals.com/es/why-we-built-civilproposals.html">
+<link rel="alternate" hreflang="x-default" href="https://civilproposals.com/why-we-built-civilproposals.html">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CivilProposals">
+<meta property="og:title" content="Why we built CivilProposals">
+<meta property="og:description" content="CivilProposals came out of years spent preparing engineering proposals. Why we built software that assists proposal preparation rather than replacing engineering judgement.">
+<meta property="og:url" content="https://civilproposals.com/why-we-built-civilproposals.html">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Why we built CivilProposals">
+<meta name="twitter:description" content="CivilProposals came out of years spent preparing engineering proposals. Why we built software that assists proposal preparation rather than replacing engineering judgement.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#111827;
+    --blue:#1D4ED8;
+    --blue-dark:#1E3A8A;
+    --blue-tint:#EFF4FF;
+    --accent:#F97316;
+    --surface:#F6F6F4;
+    --border:#E4E4E0;
+    --text-muted:#5B6472;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{
+    font-family:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink);line-height:1.6;background:#fff;font-weight:500;
+  }
+  a{color:var(--blue);}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 24px;}
+  h1,h2,h3,h4{font-weight:800;letter-spacing:-0.02em;}
+
+  nav{display:flex;align-items:center;justify-content:space-between;padding:20px 0;}
+  .logo{font-weight:800;font-size:1.25rem;display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink);}
+  .logo img{width:32px;height:32px;border-radius:8px;}
+  .beta-tag{
+    font-size:.64rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase;
+    background:#FFF3E0;color:#B8600A;border:1px solid #F3D9AE;padding:3px 9px;border-radius:20px;
+  }
+  .nav-cta{
+    background:var(--blue);color:#fff;padding:11px 22px;border-radius:10px;
+    text-decoration:none;font-weight:700;font-size:.92rem;
+  }
+  .nav-cta:hover{background:var(--blue-dark);}
+  .nav-actions{display:flex;align-items:center;gap:22px;}
+
+  .lang-switch{display:flex;align-items:center;gap:6px;font-weight:700;font-size:.92rem;color:var(--text-muted);}
+  .lang-switch .lang-link{color:var(--text-muted);text-decoration:none;transition:color .15s;}
+  .lang-switch .lang-link:hover{color:var(--blue);}
+  .lang-switch .lang-current{color:var(--blue);}
+  .lang-switch .lang-sep{color:var(--border);}
+
+  main{padding:48px 0 80px;}
+  .back-link{display:inline-block;margin-bottom:20px;color:var(--text-muted);text-decoration:none;font-size:.9rem;font-weight:700;}
+  .back-link:hover{color:var(--blue);}
+  .legal-page{max-width:800px;}
+  .legal-page h1{font-size:2.1rem;margin-bottom:8px;}
+  .legal-updated{color:var(--text-muted);font-size:.9rem;margin-bottom:28px;}
+  .legal-page h2{font-size:1.25rem;margin:34px 0 12px;}
+  .legal-page p{color:var(--text-muted);margin-bottom:14px;}
+  .legal-page ul{color:var(--text-muted);margin:0 0 14px 22px;}
+  .legal-page li{margin-bottom:8px;}
+  .legal-page strong{color:var(--ink);}
+  .pull-quote{
+    background:var(--blue-tint);border-radius:12px;padding:20px 24px;margin:26px 0;
+    font-size:1.05rem;font-weight:700;font-style:italic;color:var(--blue-dark);line-height:1.5;
+  }
+
+  .site-footer{background:var(--ink);color:#fff;}
+  .footer-top{display:flex;flex-wrap:wrap;gap:40px;justify-content:space-between;padding:56px 0 40px;}
+  .footer-brand{max-width:340px;}
+  .footer-brand .logo{color:#fff;font-weight:800;font-size:1.15rem;display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+  .footer-brand .logo img{width:28px;height:28px;border-radius:7px;}
+  .footer-tagline{color:#9CA3AF;font-size:.92rem;line-height:1.6;}
+  .footer-col .footer-col-title{font-size:.76rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#9CA3AF;margin-bottom:14px;}
+  .footer-col a{color:#fff;text-decoration:none;font-size:.92rem;display:block;margin-bottom:8px;}
+  .footer-col a:hover{color:#93C5FD;}
+  .footer-bottom{
+    border-top:1px solid rgba(255,255,255,.12);padding:22px 0;
+    display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:center;
+  }
+  .footer-links{display:flex;gap:22px;flex-wrap:wrap;}
+  .footer-links a{color:#D1D5DB;text-decoration:none;font-size:.85rem;font-weight:700;}
+  .footer-links a:hover{color:#fff;}
+  .footer-copyright{color:#9CA3AF;font-size:.82rem;}
+</style>
+<script defer data-domain="civilproposals.com" src="https://plausible.io/js/script.js"></script>
+</head>
+<body>
+
+<nav class="wrap">
+  <a class="logo" href="index.html"><img src="assets/logo_mark.png" alt="CivilProposals"> CivilProposals <span class="beta-tag">Beta</span></a>
+  <div class="nav-actions">
+    <span class="lang-switch" aria-label="Language">
+      <span class="lang-current" title="English" aria-label="English">🇬🇧</span><span class="lang-sep" aria-hidden="true">|</span><a class="lang-link" href="/es/why-we-built-civilproposals.html" title="Español" aria-label="Español" onclick="try{localStorage.setItem('cp_lang','es');localStorage.setItem('cp_lang_redirect_done','1');}catch(e){}">🇪🇸</a>
+    </span>
+    <a class="nav-cta" href="https://app.civilproposals.com">Get Started</a>
+  </div>
+</nav>
+
+<main class="wrap">
+  <div class="legal-page">
+    <a class="back-link" href="index.html">&larr; Back to home</a>
+    <h1>Why we built CivilProposals</h1>
+    <p class="legal-updated">Last updated: August 2026</p>
+
+    <p>
+      CivilProposals came out of years spent preparing engineering proposals, fee proposals and
+      tender submissions.
+    </p>
+
+    <p>
+      Too much of that time went into repetitive administrative work -- reformatting the same
+      content for a different template, rebuilding the same compliance tables from scratch,
+      chasing down the same boilerplate paragraphs project after project.
+    </p>
+
+    <p>
+      We think engineers should spend more of their week solving engineering problems, and less
+      of it formatting documents.
+    </p>
+
+    <div class="pull-quote">
+      Our goal is simple: help engineering teams spend less time preparing documents and more
+      time delivering engineering value.
+    </div>
+
+    <p>
+      Proposal preparation should be assisted by software, not handed over to it. Engineering
+      judgement stays with the engineer -- CivilProposals drafts and organises, it doesn't
+      decide.
+    </p>
+
+    <div class="pull-quote">
+      This platform does not replace professional judgement. All AI-generated content requires
+      human review and approval.
+    </div>
+
+    <p>
+      That isn't boilerplate. Where CivilProposals can't substantiate something -- a figure, a
+      claim, a fact it wasn't given -- it flags it in red rather than inventing it, and leaves
+      the decision to you.
+    </p>
+
+    <p>
+      Generic AI writing tools don't understand how a tender is actually structured, so we built
+      something that does.
+    </p>
+
+    <p style="margin-top:34px;">
+      Want to see it? <a href="https://app.civilproposals.com">Get started</a>, or read more
+      <a href="about.html">About CivilProposals</a>.
+    </p>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-top">
+    <div class="footer-brand">
+      <a class="logo" href="index.html" style="color:#fff;"><img src="assets/logo_mark.png" alt="CivilProposals"> CivilProposals</a>
+      <p class="footer-tagline">AI-assisted tender & proposal preparation, built for civil engineering firms.</p>
+    </div>
+    <div class="footer-col">
+      <div class="footer-col-title">Contact</div>
+      <a href="mailto:hello@civilproposals.com">hello@civilproposals.com</a>
+    </div>
+    <div class="footer-col">
+      <div class="footer-col-title">Follow us</div>
+      <a href="https://www.linkedin.com/company/civil-proposals" target="_blank" rel="noopener">LinkedIn</a>
+    </div>
+  </div>
+  <div class="wrap footer-bottom">
+    <div class="footer-links">
+      <a href="privacy-policy.html">Privacy Policy</a>
+      <a href="terms-of-service.html">Terms of Service</a>
+      <a href="cookie-policy.html">Cookie Policy</a>
+    </div>
+    <div class="footer-copyright">Copyright &copy; 2026 CivilProposals. All rights reserved.</div>
+  </div>
+</footer>
+
+</body>
+</html>
