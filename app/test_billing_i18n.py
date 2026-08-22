@@ -399,6 +399,82 @@ def test_free_tier_rename_bypass_closed(failures: list[str]) -> None:
         _cleanup_test_user(db, user.id)
 
 
+def test_artifact_download_gate_real_flow(failures: list[str]) -> None:
+    """Round 3, Part 5c: test_free_tier_rename_bypass_closed() above only
+    ever exercised the raw db.ArtifactEvent insert/query -- never the actual
+    gating functions a download button calls (modules/pages/
+    10_state_helpers.py's _free_artifact_already_downloaded() /
+    _mark_free_artifact_downloaded() / _free_artifact_download_blocked()),
+    which read current_user/_access/IS_SAAS_MODE as globals shared through
+    app.py's exec-composition and so couldn't be called from a plain test.
+    Those three are now thin wrappers over modules/artifact_download_gate.py
+    (see its docstring), whose functions take the live-session values as
+    explicit parameters instead -- this calls the REAL functions a download
+    button calls, with is_free_tier passed the same way
+    _project_is_free_tier() would supply it, and checks the actual
+    mark-then-serve-gate flow end to end: first download of a free-tier
+    artifact allowed, second blocked, an unrelated user's own first download
+    of the SAME artifact_type unaffected, and a paid (is_free_tier=False)
+    project never blocked or written to at all."""
+    from modules import artifact_download_gate, auth, db
+
+    user = _fresh_test_user(auth, db)
+    other_user = _fresh_test_user(auth, db)
+    try:
+        artifact_type = "proposal_docx"  # one of FREE_TIER_ARTIFACTS
+
+        # Free-tier project, first download: not blocked, nothing recorded yet.
+        already = artifact_download_gate.already_downloaded(db, user.id, artifact_type, True)
+        if already:
+            failures.append("test_artifact_download_gate_real_flow: a fresh account already read as downloaded")
+        if artifact_download_gate.blocked(True, artifact_type, already):
+            failures.append("test_artifact_download_gate_real_flow: a free-tier project's FIRST download was blocked")
+
+        # The download "happens" -- mark it, the same call
+        # _mark_free_artifact_downloaded() makes on a real click.
+        had_error = artifact_download_gate.mark_downloaded(db, user.id, artifact_type, True)
+        if had_error:
+            failures.append("test_artifact_download_gate_real_flow: mark_downloaded() reported an unexpected error on a fresh insert")
+
+        # Re-check the gate exactly as a second download attempt would --
+        # this is the actual mark-THEN-serve-gate interaction the old test
+        # never exercised.
+        already_now = artifact_download_gate.already_downloaded(db, user.id, artifact_type, True)
+        if not already_now:
+            failures.append("test_artifact_download_gate_real_flow: already_downloaded() didn't see the mark that was just made")
+        if not artifact_download_gate.blocked(True, artifact_type, already_now):
+            failures.append("test_artifact_download_gate_real_flow: a free-tier project's SECOND download of the same artifact wasn't blocked")
+
+        # A different account's own first download of the SAME artifact_type
+        # must be entirely unaffected -- the gate is per-account, not global.
+        other_already = artifact_download_gate.already_downloaded(db, other_user.id, artifact_type, True)
+        if other_already:
+            failures.append("test_artifact_download_gate_real_flow: a different account was incorrectly treated as having already downloaded")
+        if artifact_download_gate.blocked(True, artifact_type, other_already):
+            failures.append("test_artifact_download_gate_real_flow: a different account's own first download was incorrectly blocked")
+
+        # An artifact NOT on the free list is always blocked for a free-tier
+        # project, regardless of any download history.
+        if not artifact_download_gate.blocked(True, "methodology_pptx", False):
+            failures.append("test_artifact_download_gate_real_flow: a non-free-tier artifact wasn't blocked for a free-tier project")
+
+        # A paid project (is_free_tier=False) is never blocked, and
+        # mark_downloaded() must be a no-op -- no row written, no error --
+        # matching _project_is_free_tier()==False short-circuiting both
+        # _free_artifact_already_downloaded() and _mark_free_artifact_downloaded()
+        # before they ever touch the database.
+        if artifact_download_gate.blocked(False, artifact_type, False):
+            failures.append("test_artifact_download_gate_real_flow: a paid project's download was incorrectly blocked")
+        paid_had_error = artifact_download_gate.mark_downloaded(db, user.id, "org_chart_pptx", False)
+        if paid_had_error:
+            failures.append("test_artifact_download_gate_real_flow: mark_downloaded() reported an error for a paid (no-op) project")
+        if artifact_download_gate.already_downloaded(db, user.id, "org_chart_pptx", True):
+            failures.append("test_artifact_download_gate_real_flow: mark_downloaded() wrote a row despite is_free_tier=False")
+    finally:
+        _cleanup_test_user(db, user.id)
+        _cleanup_test_user(db, other_user.id)
+
+
 def test_migrate_project_identity_on_rename(failures: list[str]) -> None:
     """Audit fix Part 3b: renaming a paid project must migrate its
     ProposalUsage/ProjectPasses/ArtifactEvent rows to the new project_key,
@@ -730,6 +806,7 @@ def main() -> int:
     test_topup_no_project_falls_back(failures)
     test_artifact_event_gating(failures)
     test_free_tier_rename_bypass_closed(failures)
+    test_artifact_download_gate_real_flow(failures)
     test_migrate_project_identity_on_rename(failures)
     test_unlimited_account_bypasses_everything(failures)
     test_unlimited_bypasses_page_limits_and_rate_gate(failures)

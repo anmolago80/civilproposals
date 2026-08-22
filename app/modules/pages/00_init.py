@@ -114,6 +114,7 @@ from modules import (
     risk_register,
     program_pptx,
     program_render,
+    artifact_download_gate,
     proposal_library,
     reference_library,
     reference_projects as reference_projects_module,

@@ -741,7 +741,7 @@ def check_spanish_placeholders(failures: list[str]) -> None:
     Part 4's."""
     from docx import Document
 
-    from modules import export_docx, returnable_schedules
+    from modules import export_docx, export_i18n, returnable_schedules
 
     es_marker = returnable_schedules.make_placeholder("ABN", "es")
     if "POR COMPLETAR" not in es_marker:
@@ -793,6 +793,20 @@ def check_spanish_placeholders(failures: list[str]) -> None:
     es_found = export_docx.collect_placeholders(es_doc)
     if not es_found:
         failures.append("[Part4] a Spanish-output pack with unfilled sections swept to an empty placeholder list")
+    # Round 3, Part 5a: collect_placeholders() matches against
+    # ALL_PLACEHOLDER_PREFIXES, the flattened set across BOTH languages (see
+    # its own docstring on why -- a mid-project language switch can leave a
+    # document genuinely mixed) -- so the check above passes even if every
+    # single placeholder it found were an EN-prefixed leak into a Spanish
+    # document, which is exactly the class of bug Part 1 fixed and this
+    # entire test file exists to catch. Confirming es_found is non-empty
+    # alone never proves the SPANISH markers specifically were recognised;
+    # this asserts at least one match actually uses an ES-only prefix.
+    es_only_prefixes = tuple(export_i18n.PLACEHOLDER_PREFIXES["es"].values())
+    if not any(prefix in f.upper() for f in es_found for prefix in es_only_prefixes):
+        failures.append(
+            "[Part5a] a Spanish-output pack's placeholder sweep found matches, but none used an "
+            f"ES-only prefix -- every match may have been an English-prefix accident: {es_found[:5]!r}")
 
 
 def check_spanish_pptx(failures: list[str]) -> None:
