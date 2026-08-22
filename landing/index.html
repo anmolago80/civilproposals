@@ -21,7 +21,7 @@
       var wantsSpanish = langs.some(function(l){ return /^es/i.test(l || ''); });
       if(wantsSpanish){
         localStorage.setItem('cp_lang_redirect_done','1');
-        location.replace('index.es.html');
+        location.replace('/es/');
         return;
       }
     }
@@ -523,7 +523,7 @@
   <div class="nav-actions">
     <a class="nav-link" href="/blog/">Blog</a>
     <span class="lang-switch" aria-label="Language">
-      <span class="lang-current">EN</span><span class="lang-sep" aria-hidden="true">|</span><a class="lang-link" href="index.es.html" onclick="try{localStorage.setItem('cp_lang','es');localStorage.setItem('cp_lang_redirect_done','1');}catch(e){}">ES</a>
+      <span class="lang-current" title="English" aria-label="English">🇬🇧</span><span class="lang-sep" aria-hidden="true">|</span><a class="lang-link" href="/es/" title="Español" aria-label="Español" onclick="try{localStorage.setItem('cp_lang','es');localStorage.setItem('cp_lang_redirect_done','1');}catch(e){}">🇪🇸</a>
     </span>
     <a class="nav-cta plausible-event-name=CTA+Click plausible-event-position=nav" href="https://app.civilproposals.com">Try it free</a>
   </div>

@@ -44,13 +44,25 @@
 //      them (rather than fetching them client-side).
 //   6. /es, /es/, /es/index.html -> the same blog-cards splice as above,
 //      but serving the static index.es.html (Spanish homepage) instead.
-//      /es/security.html -> static security.es.html. These give the
-//      hreflang="es" URLs (https://civilproposals.com/es/, .../es/security.html)
-//      a real route rather than relying on the .es.html filenames directly,
-//      mirroring how "/" already resolves to a specific static file above.
-//   7. /sitemap.xml -> the generated version from KV when one exists,
+//      /es/security.html, /es/privacy-policy.html, /es/terms-of-service.html,
+//      /es/cookie-policy.html -> the matching static *.es.html file. These
+//      give the hreflang="es" URLs (https://civilproposals.com/es/, .../es/
+//      security.html, etc.) a real route rather than relying on the
+//      .es.html filenames directly, mirroring how "/" already resolves to
+//      a specific static file above -- the whole Spanish site now lives
+//      under one /es/... URL scheme (Audit Round 2, Part 7).
+//   7. The bare *.es.html paths (/index.es.html, /security.es.html,
+//      /privacy-policy.es.html, /terms-of-service.es.html,
+//      /cookie-policy.es.html) 301-redirect to their canonical /es/... form
+//      above, instead of serving directly -- so the raw filename can't end
+//      up indexed or linked as a second address for the same page (a
+//      leftover from before the /es/ scheme existed; the static files
+//      still have to exist under these names for Cloudflare's ASSETS
+//      binding to find them, they just aren't the address anything should
+//      point at any more).
+//   8. /sitemap.xml -> the generated version from KV when one exists,
 //      falling back to the static file before anything is published.
-//   8. anything else that reaches this script anyway (shouldn't normally
+//   9. anything else that reaches this script anyway (shouldn't normally
 //      happen given run_worker_first, but just in case) -> fall back to
 //      serving it from static assets via the ASSETS binding.
 //
@@ -638,12 +650,37 @@ export default {
       }
     }
 
-    // Spanish security page: no blog cards to splice, just a straight
-    // static-asset fetch of security.es.html under the /es/ URL.
-    if (url.pathname === "/es/security.html") {
+    // Spanish security/legal pages: no blog cards to splice on any of
+    // these, just a straight static-asset fetch of the matching *.es.html
+    // file under its canonical /es/... URL.
+    const ES_STATIC_PAGE_ROUTES = {
+      "/es/security.html": "/security.es.html",
+      "/es/privacy-policy.html": "/privacy-policy.es.html",
+      "/es/terms-of-service.html": "/terms-of-service.es.html",
+      "/es/cookie-policy.html": "/cookie-policy.es.html",
+    };
+    if (Object.prototype.hasOwnProperty.call(ES_STATIC_PAGE_ROUTES, url.pathname)) {
       const assetUrl = new URL(request.url);
-      assetUrl.pathname = "/security.es.html";
+      assetUrl.pathname = ES_STATIC_PAGE_ROUTES[url.pathname];
       return env.ASSETS.fetch(new Request(assetUrl.toString(), request));
+    }
+
+    // The bare *.es.html filenames -- everything now links to the
+    // canonical /es/... form above, but anything that still has one of
+    // these bookmarked or indexed (or /index.es.html specifically, which
+    // used to be the auto-redirect's own target) gets sent there too,
+    // rather than serving a second copy of the same page at a second URL.
+    const ES_BARE_FILENAME_REDIRECTS = {
+      "/index.es.html": "/es/",
+      "/security.es.html": "/es/security.html",
+      "/privacy-policy.es.html": "/es/privacy-policy.html",
+      "/terms-of-service.es.html": "/es/terms-of-service.html",
+      "/cookie-policy.es.html": "/es/cookie-policy.html",
+    };
+    if (Object.prototype.hasOwnProperty.call(ES_BARE_FILENAME_REDIRECTS, url.pathname)) {
+      const target = new URL(request.url);
+      target.pathname = ES_BARE_FILENAME_REDIRECTS[url.pathname];
+      return Response.redirect(target.toString(), 301);
     }
 
     if (url.pathname === "/app" || url.pathname.startsWith("/app/")) {

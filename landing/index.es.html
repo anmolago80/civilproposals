@@ -21,7 +21,7 @@
       var wantsSpanish = langs.some(function(l){ return /^es/i.test(l || ''); });
       if(wantsSpanish){
         localStorage.setItem('cp_lang_redirect_done','1');
-        location.replace('index.es.html');
+        location.replace('/es/');
         return;
       }
     }
@@ -35,8 +35,8 @@
 <link rel="alternate" hreflang="en" href="https://civilproposals.com/">
 <link rel="alternate" hreflang="es" href="https://civilproposals.com/es/">
 <link rel="alternate" hreflang="x-default" href="https://civilproposals.com/">
-<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
-<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
 
 <!-- Open Graph -->
 <meta property="og:type" content="website">
@@ -519,11 +519,11 @@
 <body>
 
 <nav class="wrap">
-  <div class="logo"><img src="assets/logo_mark.png" alt="CivilProposals"> CivilProposals <span class="beta-tag">Beta</span></div>
+  <div class="logo"><img src="/assets/logo_mark.png" alt="CivilProposals"> CivilProposals <span class="beta-tag">Beta</span></div>
   <div class="nav-actions">
     <a class="nav-link" href="/blog/">Blog</a>
     <span class="lang-switch" aria-label="Idioma">
-      <a class="lang-link" href="index.html" onclick="try{localStorage.setItem('cp_lang','en');localStorage.setItem('cp_lang_redirect_done','1');}catch(e){}">EN</a><span class="lang-sep" aria-hidden="true">|</span><span class="lang-current">ES</span>
+      <a class="lang-link" href="/" title="English" aria-label="English" onclick="try{localStorage.setItem('cp_lang','en');localStorage.setItem('cp_lang_redirect_done','1');}catch(e){}">🇬🇧</a><span class="lang-sep" aria-hidden="true">|</span><span class="lang-current" title="Español" aria-label="Español">🇪🇸</span>
     </span>
     <a class="nav-cta plausible-event-name=CTA+Click plausible-event-position=nav" href="https://app.civilproposals.com">Pruébalo gratis</a>
   </div>
@@ -543,7 +543,7 @@
     </div>
 
     <div class="hero-shot-frame">
-      <img src="assets/app_screenshot_workspace.jpg" alt="Espacio de trabajo de CivilProposals mostrando el progreso registrado y una estimación de honorarios en vivo" width="1902" height="1009" loading="eager" fetchpriority="high">
+      <img src="/assets/app_screenshot_workspace.jpg" alt="Espacio de trabajo de CivilProposals mostrando el progreso registrado y una estimación de honorarios en vivo" width="1902" height="1009" loading="eager" fetchpriority="high">
     </div>
     <p class="hero-shot-caption">Una captura real de la aplicación en uso, a mitad de una propuesta: el progreso se registra paso a paso, mientras el desglose de honorarios por disciplina y el gráfico se completan sobre la marcha.</p>
   </div>
@@ -701,35 +701,35 @@
     <p class="section-sub">Más allá del primer borrador, el mismo proyecto impulsa un conjunto de verificaciones y exportaciones más profundas. Todos los datos mostrados son de demostración: no hay clientes ni proyectos reales.</p>
     <div class="deep-grid">
       <div class="deep-card wide">
-        <div class="deep-shot"><img src="assets/feature_pitch_review.jpg" alt="Revisión de la propuesta en modo equipo rojo: la lectura de un evaluador sobre tu propuesta más una reescritura ajustada, construida solo con tu propio contenido" width="1902" height="780" loading="lazy"></div>
+        <div class="deep-shot"><img src="/assets/feature_pitch_review.jpg" alt="Revisión de la propuesta en modo equipo rojo: la lectura de un evaluador sobre tu propuesta más una reescritura ajustada, construida solo con tu propio contenido" width="1902" height="780" loading="lazy"></div>
         <div class="deep-body">
           <h3>Revisión de la propuesta en modo equipo rojo</h3>
           <p>Tu diferenciador y tu propuesta de venta, leídos tal como los leerá un evaluador: qué afirmaciones no suman puntos porque toda la competencia también las hace, qué recompensa realmente este brief, y una reescritura ajustada construida estrictamente a partir de tu propio contenido -- con marcadores en rojo donde aún falta evidencia, nunca un proyecto inventado.</p>
         </div>
       </div>
       <div class="deep-card">
-        <div class="deep-shot"><img src="assets/feature_gap_analysis.jpg" alt="Tabla de análisis de brechas que muestra cada requisito del brief marcado como cubierto, parcial o faltante" width="1902" height="780" loading="lazy"></div>
+        <div class="deep-shot"><img src="/assets/feature_gap_analysis.jpg" alt="Tabla de análisis de brechas que muestra cada requisito del brief marcado como cubierto, parcial o faltante" width="1902" height="780" loading="lazy"></div>
         <div class="deep-body">
           <h3>Análisis de brechas</h3>
           <p>Cada requisito del brief, verificado frente al material que realmente has subido y marcado como cubierto, parcial o faltante -- de modo que los huecos salen a la luz mientras aún hay tiempo de resolverlos, no la mañana de la entrega.</p>
         </div>
       </div>
       <div class="deep-card">
-        <div class="deep-shot"><img src="assets/feature_fee_benchmarks.jpg" alt="Tabla de estimación de honorarios con el desglose de cada disciplina comparado frente a rangos de referencia habituales" width="1902" height="780" loading="lazy"></div>
+        <div class="deep-shot"><img src="/assets/feature_fee_benchmarks.jpg" alt="Tabla de estimación de honorarios con el desglose de cada disciplina comparado frente a rangos de referencia habituales" width="1902" height="780" loading="lazy"></div>
         <div class="deep-body">
           <h3>Estimación de honorarios con valores de referencia</h3>
           <p>Tu desglose de horas y tarifas, verificado frente a patrones habituales de reparto de honorarios multidisciplinar. Una disciplina que se sale de su rango habitual queda marcada para una segunda revisión -- etiquetada claramente como una referencia indicativa, nunca un sustituto de tu propia estimación.</p>
         </div>
       </div>
       <div class="deep-card">
-        <div class="deep-shot"><img src="assets/feature_org_chart.jpg" alt="Organigrama de proyecto construido a partir del plan de recursos, con un botón para Descargar Organigrama en PPTX" width="1902" height="780" loading="lazy"></div>
+        <div class="deep-shot"><img src="/assets/feature_org_chart.jpg" alt="Organigrama de proyecto construido a partir del plan de recursos, con un botón para Descargar Organigrama en PPTX" width="1902" height="780" loading="lazy"></div>
         <div class="deep-body">
           <h3>Organigrama, exportado a PowerPoint</h3>
           <p>Un organigrama de proyecto construido directamente a partir de tu plan de recursos y exportado como un PPTX real y editable -- los roles sin asignar muestran un "TBC" en rojo en lugar de un nombre inventado, de modo que el organigrama es honesto sobre dónde el equipo aún tiene huecos.</p>
         </div>
       </div>
       <div class="deep-card wide">
-        <div class="deep-shot"><img src="assets/feature_methodology.jpg" alt="Tabla de metodología por etapas con el estilo de la propuesta, con elementos de alcance reales en la etapa dos y marcadores en rojo para las etapas aún sin confirmar" width="1902" height="780" loading="lazy"></div>
+        <div class="deep-shot"><img src="/assets/feature_methodology.jpg" alt="Tabla de metodología por etapas con el estilo de la propuesta, con elementos de alcance reales en la etapa dos y marcadores en rojo para las etapas aún sin confirmar" width="1902" height="780" loading="lazy"></div>
         <div class="deep-body">
           <h3>Tabla de metodología, exportada a PowerPoint</h3>
           <p>Una tabla de metodología por etapas con los colores de tu propuesta: las tareas clave de la etapa dos provienen directamente de los elementos de alcance reales de este brief, las etapas posteriores permanecen como marcadores en rojo explícitos hasta que las confirmes, y todo el conjunto se exporta como un PPTX editable para terminar en PowerPoint.</p>
@@ -884,7 +884,7 @@
         beta y aún no hemos completado certificaciones de cumplimiento formales como SOC 2, así que si eso
         es un requisito indispensable para tu empresa, contáctanos antes de registrarte y seremos totalmente
         transparentes sobre la situación actual. El panorama completo -- dónde se almacenan los datos, el
-        cifrado, el procesamiento de IA, la residencia de los datos -- está en nuestra página de <a href="security.es.html" style="color:var(--blue);font-weight:700;">Seguridad y
+        cifrado, el procesamiento de IA, la residencia de los datos -- está en nuestra página de <a href="/es/security.html" style="color:var(--blue);font-weight:700;">Seguridad y
         Manejo de Datos</a>.</p>
       </details>
 
@@ -893,7 +893,7 @@
         <p>Tú lo eres, igual que lo serías con un primer borrador de un miembro junior del equipo.
         CivilProposals produce un primer borrador, no un documento listo para entregar; tu proceso de
         revisión habitual debe seguir detectando y corrigiendo cualquier error antes de que llegue a un
-        cliente. Todos los detalles están en nuestros <a href="terms-of-service.es.html" style="color:var(--blue);font-weight:700;">Términos de
+        cliente. Todos los detalles están en nuestros <a href="/es/terms-of-service.html" style="color:var(--blue);font-weight:700;">Términos de
         Servicio</a>.</p>
       </details>
 
@@ -987,7 +987,7 @@
 <footer class="site-footer">
   <div class="wrap footer-top">
     <div class="footer-brand">
-      <div class="logo"><img src="assets/logo_mark.png" alt="CivilProposals"> CivilProposals</div>
+      <div class="logo"><img src="/assets/logo_mark.png" alt="CivilProposals"> CivilProposals</div>
       <p class="footer-tagline">Preparación de licitaciones y propuestas asistida por IA, creada para empresas de ingeniería civil.</p>
     </div>
     <div class="footer-col">
@@ -1019,10 +1019,10 @@
 
   <div class="wrap footer-bottom">
     <div class="footer-links">
-      <a href="security.es.html">Seguridad y Manejo de Datos</a>
-      <a href="privacy-policy.es.html">Política de Privacidad</a>
-      <a href="terms-of-service.es.html">Términos de Servicio</a>
-      <a href="cookie-policy.es.html">Política de Cookies</a>
+      <a href="/es/security.html">Seguridad y Manejo de Datos</a>
+      <a href="/es/privacy-policy.html">Política de Privacidad</a>
+      <a href="/es/terms-of-service.html">Términos de Servicio</a>
+      <a href="/es/cookie-policy.html">Política de Cookies</a>
     </div>
     <div class="footer-copyright">Copyright &copy; 2026 CivilProposals. Todos los derechos reservados.</div>
   </div>
