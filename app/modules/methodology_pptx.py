@@ -413,6 +413,33 @@ def _fit_single(text: str, width_emu, height_emu, start_pt: float, min_pt: float
     return min_pt
 
 
+def _fit_rotated_size(text: str, len_emu, thick_emu, start_pt: float, min_pt: float = 4.0) -> float:
+    """Shrink-to-fit for a rotated side-label (KEY TASKS, etc.).
+
+    _rotated_label builds its textbox pre-rotation as (width=len_emu,
+    height=thick_emu) and only rotates it 270 degrees afterwards -- word
+    wrap always wraps against the shape's own WIDTH, so it wraps against
+    len_emu (the row's length), not the strip's fixed thickness. Getting
+    this backwards -- as an earlier version of this function did, measuring
+    against the thickness -- had it computing wraps for an axis the
+    renderer never wraps against, so a label that needed to wrap sized
+    itself as if it fit on one line and then visibly overlapped itself once
+    rotated (worst on the longer Spanish labels, e.g. "ACTIVIDADES
+    CLAVE\nDE PARTICIPACIÓN" at a shrunk row height).
+
+    Shrinks the font until the label's total wrapped line count, at that
+    font, stacks within the fixed thickness available (row_label_w) --
+    same shrink-only contract _fit_single uses for OUTCOME."""
+    lines_text = text.split("\n")
+    size = start_pt
+    while size > min_pt:
+        line_h = (size * 1.28) / 72 * 914400
+        if _natural_lines(lines_text, len_emu, size) * line_h <= thick_emu:
+            return size
+        size -= 0.2
+    return min_pt
+
+
 def _render_cell_lines(slide, tf, lines, size_pt):
     """One list cell. Placeholder/TBC entries render red italic; real
     content renders as ordinary bullets, so a mixed cell shows at a glance
@@ -451,7 +478,16 @@ def _slide_matrix(slide, columns_data, from_stages, P, hold_icon, eng_icon,
     n = len(columns_data)
 
     M = Inches(0.14)
-    row_label_x, row_label_w = M, Inches(0.17)
+    # 0.26in, not the original 0.17in: a rotated two-line label (e.g. "KEY
+    # ENGAGEMENT\nACTIVITIES") needs both explicit lines to physically
+    # stack within this thickness once rotated -- two lines at the row's
+    # normal ~6.5pt need about 0.23in, so 0.17in was already marginal for
+    # English and routinely overflowed for the longer Spanish labels (Round
+    # 5 QA: "ACTIVIDADES CLAVE\nDE PARTICIPACIÓN" visibly overlapped
+    # itself). The increase is a few hundredths of an inch out of an
+    # ~11.5in-wide slide -- not visible as a layout change, just enough
+    # room for two lines to actually fit.
+    row_label_x, row_label_w = M, Inches(0.26)
     content_x = Emu(int(row_label_x + row_label_w + Inches(0.04)))
     right_edge = Emu(int(_SLIDE_W - M))
     gap = Inches(0.20)
@@ -478,24 +514,40 @@ def _slide_matrix(slide, columns_data, from_stages, P, hold_icon, eng_icon,
     # still lands inside the A4 landscape slide.
     h_title = Inches(0.40)
     y_header = Emu(int(y_top + h_title + Inches(0.04)))
-    h_header = Inches(0.46)
-    h_timeline = Inches(0.30)
 
-    # ---- content-sized row heights -----------------------------------
-    # Measure what each row's busiest column actually needs (at the row's
-    # preferred font size, nothing dropped yet), then either use those
-    # natural heights directly -- if all four fit in the space a fixed
-    # layout used to reserve -- or scale every row down proportionally
-    # (never below a legible floor) so the table still ends inside the
-    # slide. _fit_size (called per-cell below, with the ALLOCATED height)
-    # is what guarantees no individual cell overflows even after scaling.
+    # ---- geometry-derived row heights -------------------------------------
+    # Round 5: six rows now share the FULL band below the title down to the
+    # bottom margin -- header, key tasks, engagement, outcome, deliverables,
+    # timeline chevron -- instead of the middle four being sized from
+    # content inside a hardcoded budget (`available_h = Inches(3.35+...)`)
+    # while header/timeline stayed fixed constants. That old budget was
+    # never actually the true drawable area, and content that needed less
+    # than it just left the rest of the slide blank: matrix filled ~39-56%
+    # of an 8.27in-tall slide across the realistic range, chevrons (which
+    # divides its own remaining height into fixed proportions -- see
+    # _slide_chevrons) reached ~97-99% at every size on the same canvas.
+    #
+    # Two-pass, same shape as before: measure what each row's busiest
+    # column naturally needs (nothing dropped, floors applied), then either
+    # distribute the slack between that and the true drawable area -- this
+    # is the new step -- or, if content genuinely exceeds the drawable area,
+    # scale every row down proportionally (never below its floor), exactly
+    # as before. _fit_size (per-cell, with the ALLOCATED height) is what
+    # still guarantees no individual cell overflows either way.
+    bottom_margin = M
+    gap_before_timeline = Inches(0.03)
+    available_for_rows = Emu(int(_SLIDE_H - y_header - bottom_margin - gap_before_timeline))
+
     note_h = Inches(0.2)  # the WVR confirm/assert line under deliverables
-    available_h = Inches(3.35 + 0.70 + 0.50 + 2.30)  # same total budget the old fixed layout used
     row_specs = [("tasks", 5.6, Inches(0.08)), ("engagement", 5.4, Inches(0.06)),
                 ("outcome", 5.6, Inches(0.04)), ("deliverables", 5.0, Inches(0.03) + note_h + Inches(0.06))]
-    floors = {"tasks": Inches(0.55), "engagement": Inches(0.35), "outcome": Inches(0.32), "deliverables": Inches(0.75)}
+    # header/chevron floors match their old fixed heights -- that was
+    # already the right size for their (short, one-line) content; they now
+    # only ever grow from there when there's slack to share.
+    floors = {"header": Inches(0.46), "tasks": Inches(0.55), "engagement": Inches(0.35),
+              "outcome": Inches(0.32), "deliverables": Inches(0.75), "chevron": Inches(0.30)}
 
-    natural = {}
+    natural = {"header": int(floors["header"]), "chevron": int(floors["chevron"])}
     for key, start_pt, pad in row_specs:
         tallest = 0
         for (cx, cw), column in zip(cols, columns_data):
@@ -516,22 +568,44 @@ def _slide_matrix(slide, columns_data, from_stages, P, hold_icon, eng_icon,
     # only applied floors on the scale-down branch -- so the label text
     # overflowed sideways into the next row's column. Applying the floor
     # here, before summing, means both branches respect it.
-    natural = {k: max(floors[k], v) for k, v in natural.items()}
+    natural = {k: max(int(floors[k]), v) for k, v in natural.items()}
 
     total_natural = sum(natural.values())
-    if total_natural <= available_h:
-        row_h = natural
+    # Weights control how any leftover space beyond what content actually
+    # needs gets shared out. Key tasks and engagement -- the content-heavy
+    # rows -- take the largest shares; header and the timeline chevron,
+    # which only ever hold one short line, take the smallest, so growth
+    # reads as "the table breathes" rather than "the header ballooned".
+    weights = {"header": 0.6, "tasks": 2.3, "engagement": 1.9, "outcome": 1.0,
+               "deliverables": 1.4, "chevron": 0.6}
+    if total_natural <= available_for_rows:
+        slack = available_for_rows - total_natural
+        weight_total = sum(weights.values())
+        row_h = {k: natural[k] + int(slack * weights[k] / weight_total) for k in natural}
+        # ONE scale factor -- fonts, padding and icon sizes all derive from
+        # this single number (clamped so a nearly-empty deck can't blow up
+        # into cartoonish text) rather than each guessing its own. At 6x14
+        # (heavy content) natural content already fills most of the band,
+        # so this lands at ~1.0 -- today's proven sizes, unchanged.
+        scale = min(1.9, max(1.0, available_for_rows / max(total_natural, 1)))
     else:
-        scale = available_h / total_natural
-        row_h = {k: max(floors[k], int(v * scale)) for k, v in natural.items()}
+        scale_down = available_for_rows / total_natural
+        row_h = {k: max(int(floors[k]), int(v * scale_down)) for k, v in natural.items()}
+        scale = 1.0
 
+    icon_scale = min(scale, 1.5)
+    label_scale = min(scale, 1.6)
+    thick_scale = min(scale, 1.25)  # row-label width can't grow with column geometry -- see below
+
+    h_header = Emu(row_h["header"])
     h_tasks, h_eng, h_outcome, h_deliv = (
         Emu(row_h["tasks"]), Emu(row_h["engagement"]), Emu(row_h["outcome"]), Emu(row_h["deliverables"]))
+    h_timeline = Emu(row_h["chevron"])
     y_tasks = Emu(int(y_header + h_header))
     y_eng = Emu(int(y_tasks + h_tasks))
     y_outcome = Emu(int(y_eng + h_eng))
     y_deliv = Emu(int(y_outcome + h_outcome))
-    y_timeline = Emu(int(y_deliv + h_deliv + Inches(0.03)))
+    y_timeline = Emu(int(y_deliv + h_deliv + gap_before_timeline))
 
     # ---- title + KEY legend --------------------------------------------
     # Heading plus the project name, in ONE box so the two lines can't
@@ -590,7 +664,7 @@ def _slide_matrix(slide, columns_data, from_stages, P, hold_icon, eng_icon,
     # ---- stage headers ----------------------------------------------------
     for (cx, cw), column in zip(cols, columns_data):
         _rect(slide, cx, y_header, cw, h_header, P["header_bg"])
-        _centered_text(slide, cx, y_header, cw, h_header, column["name"], 9.5,
+        _centered_text(slide, cx, y_header, cw, h_header, column["name"], 9.5 * label_scale,
                        _RED if _is_placeholder(column["name"]) else _WHITE)
 
     # ---- KEY TASKS ---------------------------------------------------------
@@ -600,13 +674,17 @@ def _slide_matrix(slide, columns_data, from_stages, P, hold_icon, eng_icon,
         box_w = Emu(int(cw - Inches(0.1)))
         box_h = Emu(int(h_tasks - Inches(0.08)))
         box, tf = _textbox(slide, Emu(int(cx + Inches(0.05))), Emu(int(y_tasks + Inches(0.04))), box_w, box_h)
-        size, lines = _fit_size(column["tasks"], box_w, box_h, 5.6)
+        tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+        size, lines = _fit_size(column["tasks"], box_w, box_h, 5.6 * scale)
         _render_cell_lines(slide, tf, lines, size)
-    _rotated_label(slide, Emu(int(row_label_x + row_label_w / 2)), Emu(int(y_tasks + h_tasks / 2)), Emu(int(h_tasks - Inches(0.1))), row_label_w, export_i18n.export_t("pptx_row_key_tasks", language), 6.5, _DARK_TEXT)
+    tasks_label_text = export_i18n.export_t("pptx_row_key_tasks", language)
+    tasks_label_len = Emu(int(h_tasks - Inches(0.1)))
+    tasks_label_size = _fit_rotated_size(tasks_label_text, tasks_label_len, row_label_w, 6.5 * thick_scale, min_pt=4.2)
+    _rotated_label(slide, Emu(int(row_label_x + row_label_w / 2)), Emu(int(y_tasks + h_tasks / 2)), tasks_label_len, row_label_w, tasks_label_text, tasks_label_size, _DARK_TEXT)
     if n > 2:
-        _icon(slide, hold_icon, Emu(int(col3_x - gap / 2)), Emu(int(y_tasks + h_tasks - Inches(0.13))), Inches(0.15))
+        _icon(slide, hold_icon, Emu(int(col3_x - gap / 2)), Emu(int(y_tasks + h_tasks - Inches(0.13))), Inches(0.15 * icon_scale))
     if n > 3:
-        _icon(slide, hold_icon, Emu(int(col4_x - gap / 2)), Emu(int(y_tasks + h_tasks - Inches(0.13))), Inches(0.15))
+        _icon(slide, hold_icon, Emu(int(col4_x - gap / 2)), Emu(int(y_tasks + h_tasks - Inches(0.13))), Inches(0.15 * icon_scale))
 
     # ---- KEY ENGAGEMENT ACTIVITIES -----------------------------------------
     _rect(slide, row_label_x, y_eng, row_label_w, h_eng, P["eng_bg"])
@@ -615,10 +693,14 @@ def _slide_matrix(slide, columns_data, from_stages, P, hold_icon, eng_icon,
         box_w = Emu(int(cw - Inches(0.2)))
         box_h = Emu(int(h_eng - Inches(0.06)))
         box, tf = _textbox(slide, Emu(int(cx + Inches(0.05))), Emu(int(y_eng + Inches(0.03))), box_w, box_h)
-        size, lines = _fit_size(column["engagement"], box_w, box_h, 5.4)
+        tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+        size, lines = _fit_size(column["engagement"], box_w, box_h, 5.4 * scale)
         _render_cell_lines(slide, tf, lines, size)
-        _icon(slide, eng_icon, Emu(int(cx + cw - Inches(0.11))), Emu(int(y_eng + h_eng / 2)), Inches(0.16))
-    _rotated_label(slide, Emu(int(row_label_x + row_label_w / 2)), Emu(int(y_eng + h_eng / 2)), Emu(int(h_eng - Inches(0.06))), row_label_w, export_i18n.export_t("pptx_row_key_engagement_activities", language), 5.2, _DARK_TEXT)
+        _icon(slide, eng_icon, Emu(int(cx + cw - Inches(0.11))), Emu(int(y_eng + h_eng / 2)), Inches(0.16 * icon_scale))
+    eng_label_text = export_i18n.export_t("pptx_row_key_engagement_activities", language)
+    eng_label_len = Emu(int(h_eng - Inches(0.06)))
+    eng_label_size = _fit_rotated_size(eng_label_text, eng_label_len, row_label_w, 5.2 * thick_scale, min_pt=4.0)
+    _rotated_label(slide, Emu(int(row_label_x + row_label_w / 2)), Emu(int(y_eng + h_eng / 2)), eng_label_len, row_label_w, eng_label_text, eng_label_size, _DARK_TEXT)
 
     # ---- OUTCOME ------------------------------------------------------------
     _rect(slide, row_label_x, y_outcome, row_label_w, h_outcome, P["outcome_deliv_bg"])
@@ -628,11 +710,14 @@ def _slide_matrix(slide, columns_data, from_stages, P, hold_icon, eng_icon,
         placeholder = _is_placeholder(text)
         box_w = Emu(int(cw - Inches(0.1)))
         box_h = Emu(int(h_outcome - Inches(0.04)))
-        fitted_size = _fit_single(str(text), box_w, box_h, 5.6)
+        fitted_size = _fit_single(str(text), box_w, box_h, 5.6 * scale)
         _centered_text(slide, Emu(int(cx + Inches(0.05))), Emu(int(y_outcome + Inches(0.02))), box_w, box_h,
                         text, fitted_size,
                         _RED if placeholder else _DARK_TEXT, bold=not placeholder, italic=placeholder)
-    _rotated_label(slide, Emu(int(row_label_x + row_label_w / 2)), Emu(int(y_outcome + h_outcome / 2)), Emu(int(h_outcome - Inches(0.05))), row_label_w, export_i18n.export_t("pptx_row_outcome", language), 5.6, _DARK_TEXT)
+    outcome_label_text = export_i18n.export_t("pptx_row_outcome", language)
+    outcome_label_len = Emu(int(h_outcome - Inches(0.05)))
+    outcome_label_size = _fit_rotated_size(outcome_label_text, outcome_label_len, row_label_w, 5.6 * thick_scale, min_pt=4.2)
+    _rotated_label(slide, Emu(int(row_label_x + row_label_w / 2)), Emu(int(y_outcome + h_outcome / 2)), outcome_label_len, row_label_w, outcome_label_text, outcome_label_size, _DARK_TEXT)
 
     # ---- DELIVERABLES ---------------------------------------------------------
     _rect(slide, row_label_x, y_deliv, row_label_w, h_deliv, P["outcome_deliv_bg"])
@@ -641,7 +726,8 @@ def _slide_matrix(slide, columns_data, from_stages, P, hold_icon, eng_icon,
         _rect(slide, cx, y_deliv, cw, h_deliv, P["outcome_deliv_bg"])
         box_w = Emu(int(cw - Inches(0.1)))
         box, tf = _textbox(slide, Emu(int(cx + Inches(0.05))), Emu(int(y_deliv + Inches(0.03))), box_w, list_h)
-        size, lines = _fit_size(column["deliverables"], box_w, list_h, 5.0)
+        tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+        size, lines = _fit_size(column["deliverables"], box_w, list_h, 5.0 * scale)
         _render_cell_lines(slide, tf, lines, size)
         # The WVR line asserts a QA practice about the BIDDER. The app was
         # never told whether this firm issues Work Verification Records, so
@@ -655,21 +741,24 @@ def _slide_matrix(slide, columns_data, from_stages, P, hold_icon, eng_icon,
         nr.font.italic = True
         nr.font.name = _FONT
         nr.font.color.rgb = _DARK_TEXT if wvr_confirmed else _RED
-    _rotated_label(slide, Emu(int(row_label_x + row_label_w / 2)), Emu(int(y_deliv + h_deliv / 2)), Emu(int(h_deliv - Inches(0.1))), row_label_w, export_i18n.export_t("pptx_row_deliverables", language), 6.5, _DARK_TEXT)
+    deliv_label_text = export_i18n.export_t("pptx_row_deliverables", language)
+    deliv_label_len = Emu(int(h_deliv - Inches(0.1)))
+    deliv_label_size = _fit_rotated_size(deliv_label_text, deliv_label_len, row_label_w, 6.5 * thick_scale, min_pt=4.2)
+    _rotated_label(slide, Emu(int(row_label_x + row_label_w / 2)), Emu(int(y_deliv + h_deliv / 2)), deliv_label_len, row_label_w, deliv_label_text, deliv_label_size, _DARK_TEXT)
     if n > 2:
-        _icon(slide, hold_icon, Emu(int(col3_x - gap / 2)), Emu(int(y_deliv + h_deliv * 0.12)), Inches(0.15))
+        _icon(slide, hold_icon, Emu(int(col3_x - gap / 2)), Emu(int(y_deliv + h_deliv * 0.12)), Inches(0.15 * icon_scale))
     if n > 3:
-        _icon(slide, hold_icon, Emu(int(col4_x - gap / 2)), Emu(int(y_deliv + h_deliv * 0.12)), Inches(0.15))
+        _icon(slide, hold_icon, Emu(int(col4_x - gap / 2)), Emu(int(y_deliv + h_deliv * 0.12)), Inches(0.15 * icon_scale))
 
     # ---- TIMELINE ---------------------------------------------------------
     for (cx, cw), column in zip(cols, columns_data):
         chevron_text = column["chevron"]
         _chevron(slide, cx, y_timeline, cw, h_timeline, P["chevron_bg"],
-                 chevron_text if chevron_text else export_i18n.export_t("pptx_confirm_date_range", language), 5.4)
+                 chevron_text if chevron_text else export_i18n.export_t("pptx_confirm_date_range", language), 5.4 * label_scale)
     if n > 2:
-        _icon(slide, hold_icon, Emu(int(col3_x - gap / 2)), Emu(int(y_timeline + h_timeline / 2)), Inches(0.16))
+        _icon(slide, hold_icon, Emu(int(col3_x - gap / 2)), Emu(int(y_timeline + h_timeline / 2)), Inches(0.16 * icon_scale))
     if n > 3:
-        _icon(slide, hold_icon, Emu(int(col4_x - gap / 2)), Emu(int(y_timeline + h_timeline / 2)), Inches(0.16))
+        _icon(slide, hold_icon, Emu(int(col4_x - gap / 2)), Emu(int(y_timeline + h_timeline / 2)), Inches(0.16 * icon_scale))
 
 
 def _simple_title(slide, project_name: str, language: str = "en") -> None:
