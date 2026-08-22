@@ -19,15 +19,17 @@ sidecar service, or Railway's function support) once there's a reason to
 Changing the price later: this module reads STRIPE_PRICE_ID (and
 STRIPE_BID_PRICE_ID, see below) from environment variables, never hardcodes
 an amount. To change either price, create a new Price in the Stripe
-dashboard (Prices are immutable once created -- you can't edit $200 into
-$250 on the same Price object) and update the matching env var in Railway,
+dashboard (Prices are immutable once created -- you can't edit $120 into
+$150 on the same Price object) and update the matching env var in Railway,
 then redeploy (or just restart the service). No code change needed.
 
 Two products, one Checkout entry point each:
   - Monthly subscription (STRIPE_PRICE_ID) -- mode="subscription",
-    create_checkout_session(). Unlimited bids while active (see
-    auth.get_access_status/record_proposal_usage -- neither trial nor
-    bid_credits balance is ever touched while subscription_status=="active").
+    create_checkout_session(). Capped at auth.SUBSCRIPTION_MONTHLY_BID_LIMIT
+    (4) full generation cycles per real Stripe billing period while active
+    (see auth.get_access_status/record_proposal_usage) -- neither trial nor
+    bid_credits balance is ever touched while subscription_status=="active";
+    bid_credits still work on top of the monthly cap once it's used up.
   - Pay-as-you-go, one bid at a time (STRIPE_BID_PRICE_ID) -- mode=
     "payment", create_bid_checkout_session(). Each completed purchase adds
     exactly one credit to db.User.bid_credits, spent by
@@ -304,7 +306,7 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
 def refresh_subscription_status(user: db.User) -> db.User:
     """Pulls the live subscription status from Stripe and syncs it to the
     DB. Safe to call often (e.g. once per login) -- a no-op if the user has
-    never subscribed. Also resets the Monthly plan's "3 bids included"
+    never subscribed. Also resets the Monthly plan's "4 bids included"
     quota (db.User.subscription_bids_used, see auth.
     SUBSCRIPTION_MONTHLY_BID_LIMIT) when Stripe reports a new billing period
     has started -- detected by comparing the live current_period_end against

@@ -1024,8 +1024,8 @@ def get_access_status(user: db.User) -> dict:
     when they signed up, not an entitlement, so it's ignored here in favour
     of whatever DEFAULT_TRIAL_LIMIT currently is).
 
-    An ACTIVE subscription is capped at SUBSCRIPTION_MONTHLY_BID_LIMIT (3)
-    bids per real Stripe billing period -- matches the landing page's "3
+    An ACTIVE subscription is capped at SUBSCRIPTION_MONTHLY_BID_LIMIT (4)
+    bids per real Stripe billing period -- matches the landing page's "4
     bids included" promise, which the code used to silently ignore (treating
     "subscribed" as fully unlimited). Once that monthly quota is used up,
     bid_credits (pay-as-you-go purchases) still work on top of it, same as

@@ -83,9 +83,9 @@ class User(Base):
     subscription_status = Column(String, default="trial")
     subscription_updated_at = Column(DateTime, default=_now)
 
-    # The Monthly plan's advertised "3 bids included" cap (see
+    # The Monthly plan's advertised "4 bids included" cap (see
     # auth.SUBSCRIPTION_MONTHLY_BID_LIMIT) -- how many of THIS Stripe billing
-    # period's 3 bids have been used, and the period-end timestamp Stripe
+    # period's 4 bids have been used, and the period-end timestamp Stripe
     # reported the last time we checked. billing.refresh_subscription_status
     # compares the live Stripe current_period_end against
     # subscription_period_end on every call (e.g. every login); a change

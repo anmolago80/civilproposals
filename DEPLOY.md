@@ -104,7 +104,7 @@ DNS changes usually propagate within a few minutes on Cloudflare, sometimes up t
 
 1. Stripe dashboard → **Product catalog** → **Add product**.
    - Name: `CivilProposals Subscription`
-   - Pricing: **Recurring**, `$200.00`, **Monthly**
+   - Pricing: **Recurring**, `$120.00`, **Monthly**
 2. Save, then open the product and copy the **Price ID** (starts with
    `price_`, *not* the Product ID which starts with `prod_`) — that's your
    `STRIPE_PRICE_ID`.
@@ -112,7 +112,7 @@ DNS changes usually propagate within a few minutes on Cloudflare, sometimes up t
    testing, `sk_live_...` when you go live) — that's `STRIPE_SECRET_KEY`.
 4. Paste both into Railway's Variables (step 2 above) and redeploy.
 5. **To change the price later**: Stripe prices are immutable once created
-   — you can't edit $200 into a different number on the same Price object.
+   — you can't edit $120 into a different number on the same Price object.
    Create a *new* Price on the same product, copy its Price ID, update the
    `STRIPE_PRICE_ID` Railway variable, and redeploy. Existing subscribers
    keep paying their original price unless you separately migrate them —
