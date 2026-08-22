@@ -83,6 +83,8 @@ STRINGS: dict[str, str] = {
     "chrome_proposal_file_label": "Archivo de propuesta (.docx)",
     "chrome_discipline_label": "Disciplina",
     "chrome_pack_size_label": "Tamaño del paquete",
+    "chrome_pack_size_large_scope": "Alcance grande",
+    "chrome_pack_size_small_scope": "Alcance reducido",
     "chrome_project_name_optional_label": "Nombre del proyecto (opcional -- por defecto usa el nombre del archivo)",
     "chrome_add_to_library_button": "Añadir a la Biblioteca",
     "chrome_added_to_library_success": "Se añadió '{name}' a la Biblioteca de propuestas bajo {type}.",
@@ -106,6 +108,10 @@ STRINGS: dict[str, str] = {
     "chrome_added_as_reference_success": "Se añadió '{filename}' como referencia al proyecto actual.",
     "chrome_extract_failed_warning": "No se pudo extraer ningún texto de ese archivo.",
     "chrome_couldnt_add_as_reference_action": "No se pudo añadir como referencia",
+    "chrome_untitled_label": "Sin título",
+    "chrome_lib_entry_client_suffix": " | cliente: {client}",
+    "chrome_lib_entry_archived_meta": "{type} | archivado el {date}",
+    "chrome_ref_entry_uploaded_meta": "{type} | subido el {date}",
     "chrome_upload_reference_expander": "⬆️ Subir un proyecto de referencia",
     "chrome_upload_reference_caption": (
         "Añade un proyecto de referencia / caso de estudio de la firma (PDF, DOCX o TXT) a la "
@@ -1487,7 +1493,6 @@ STRINGS: dict[str, str] = {
 
     # Part A2 -- Export Pack tab (80_export.py)
     "export_subheader": "Exportar paquete",
-    "export_continue_to_payment_button": "Continuar al pago",
     "export_readiness_expander": "⚠️ {n} cosa(s) aún pendiente(s) antes de que este paquete esté listo",
     "export_readiness_item": "- **{label}** -- ve a *{where}*",
     "export_readiness_caption": (

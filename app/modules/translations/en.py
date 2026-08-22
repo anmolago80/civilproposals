@@ -92,6 +92,12 @@ STRINGS: dict[str, str] = {
     "chrome_proposal_file_label": "Proposal file (.docx)",
     "chrome_discipline_label": "Discipline",
     "chrome_pack_size_label": "Pack size",
+    # Round 3, Part 7d: display-only labels for the "Large Scope"/"Small
+    # Scope" option VALUES used throughout this file and proposal_library.py
+    # (pack_type="large_scope"/"small_scope") -- those internal values stay
+    # these exact English strings; only what's shown on screen is translated.
+    "chrome_pack_size_large_scope": "Large Scope",
+    "chrome_pack_size_small_scope": "Small Scope",
     "chrome_project_name_optional_label": "Project name (optional -- defaults to the filename)",
     "chrome_add_to_library_button": "Add to Library",
     "chrome_added_to_library_success": "Added '{name}' to the Proposal Library under {type}.",
@@ -115,6 +121,14 @@ STRINGS: dict[str, str] = {
     "chrome_added_as_reference_success": "Added '{filename}' as a reference to the current project.",
     "chrome_extract_failed_warning": "Couldn't extract any text from that file.",
     "chrome_couldnt_add_as_reference_action": "Couldn't add as reference",
+    # Round 3, Part 7d: the Proposal Library/Project Reference Library entry
+    # list lines -- "Untitled" fallback, the " | client: X" suffix, and the
+    # "{type} | archived {date}"/"{type} | uploaded {date}" meta line -- were
+    # all plain hardcoded English f-string fragments regardless of UI language.
+    "chrome_untitled_label": "Untitled",
+    "chrome_lib_entry_client_suffix": " | client: {client}",
+    "chrome_lib_entry_archived_meta": "{type} | archived {date}",
+    "chrome_ref_entry_uploaded_meta": "{type} | uploaded {date}",
     "chrome_upload_reference_expander": "⬆️ Upload a reference project",
     "chrome_upload_reference_caption": (
         "Add a firm reference project / case study (PDF, DOCX, or TXT) to the Library, filed "
@@ -1486,7 +1500,6 @@ STRINGS: dict[str, str] = {
 
     # Part A2 -- Export Pack tab (80_export.py)
     "export_subheader": "Export Pack",
-    "export_continue_to_payment_button": "Continue to payment",
     "export_readiness_expander": "⚠️ {n} thing(s) still outstanding before this pack is ready",
     "export_readiness_item": "- **{label}** -- go to *{where}*",
     "export_readiness_caption": (

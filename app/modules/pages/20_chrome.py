@@ -691,7 +691,16 @@ def _render_proposal_library_popover_body() -> None:
         with _lib_up_col1:
             _lib_up_type = st.selectbox(i18n.t("chrome_discipline_label"), PROJECT_TYPES, key="lib_upload_proposal_type")
         with _lib_up_col2:
-            _lib_up_pack = st.selectbox(i18n.t("chrome_pack_size_label"), ["Large Scope", "Small Scope"], key="lib_upload_proposal_pack")
+            _lib_up_pack = st.selectbox(
+                i18n.t("chrome_pack_size_label"), ["Large Scope", "Small Scope"], key="lib_upload_proposal_pack",
+                # Round 3, Part 7d: the two option VALUES stay these exact
+                # English strings -- archive_proposal() below compares
+                # against "Small Scope" literally, same as PROJECT_TYPES'
+                # closed taxonomy elsewhere in this file -- only the
+                # DISPLAYED text is translated, via format_func.
+                format_func=lambda v: i18n.t("chrome_pack_size_large_scope") if v == "Large Scope"
+                else i18n.t("chrome_pack_size_small_scope"),
+            )
         _lib_up_name = st.text_input(
             i18n.t("chrome_project_name_optional_label"), key="lib_upload_proposal_name",
         )
@@ -713,9 +722,15 @@ def _render_proposal_library_popover_body() -> None:
     st.divider()
     st.caption(i18n.t("chrome_browse_library_caption"))
     _lib_pack_type = "small_scope" if _is_letter() else "large_scope"
-    _lib_pack_label = "Small Scope" if _is_letter() else "Large Scope"
+    _lib_pack_label = i18n.t("chrome_pack_size_small_scope") if _is_letter() else i18n.t("chrome_pack_size_large_scope")
     _lib_type_filter = st.selectbox(
         i18n.t("chrome_filter_by_discipline_label"), ["All"] + PROJECT_TYPES, key="lib_setup_type_filter",
+        # Round 3, Part 7d: "All" stays the literal sentinel value compared
+        # against below (None if _lib_type_filter == "All" else ...); only
+        # its displayed text is translated. PROJECT_TYPES entries are a
+        # closed English taxonomy (also a filesystem folder name -- see
+        # PROJECT_TYPES' own comment in 00_init.py) and stay as-is.
+        format_func=lambda v: i18n.t("chrome_all_disciplines_label") if v == "All" else v,
     )
     st.caption(i18n.t(
         "chrome_showing_pack_caption", pack_label=_lib_pack_label,
@@ -733,11 +748,11 @@ def _render_proposal_library_popover_body() -> None:
             st.caption(i18n.t("chrome_library_empty_filtered", discipline=_lib_type_filter, pack_label=_lib_pack_label))
     else:
         for _e in _lib_entries:
-            _client_bit = f" | client: {_e['client_name']}" if _e.get("client_name") else ""
+            _client_bit = i18n.t("chrome_lib_entry_client_suffix", client=_e["client_name"]) if _e.get("client_name") else ""
             st.markdown(
-                f"**{_e.get('project_name') or _e.get('tender_name') or 'Untitled'}** -- "
-                f"{_e.get('project_type', '')} | archived {_e.get('archived_at', '')}"
-                f"{_client_bit}"
+                f"**{_e.get('project_name') or _e.get('tender_name') or i18n.t('chrome_untitled_label')}** -- "
+                + i18n.t("chrome_lib_entry_archived_meta", type=_e.get("project_type", ""), date=_e.get("archived_at", ""))
+                + _client_bit
             )
             _lcol1, _lcol2 = st.columns(2)
             _lib_bytes = None
@@ -814,6 +829,8 @@ def _render_project_reference_library_popover_body() -> None:
     st.caption(i18n.t("chrome_browse_reference_library_caption"))
     _ref_type_filter = st.selectbox(
         i18n.t("chrome_filter_by_discipline_label"), ["All"] + PROJECT_TYPES, key="reflib_type_filter",
+        # Round 3, Part 7d -- see the matching selectbox above.
+        format_func=lambda v: i18n.t("chrome_all_disciplines_label") if v == "All" else v,
     )
     _ref_entries = reference_library.list_library(
         _lib_user_id(),
@@ -827,8 +844,8 @@ def _render_project_reference_library_popover_body() -> None:
     else:
         for _e in _ref_entries:
             st.markdown(
-                f"**{_e.get('title') or _e.get('filename') or 'Untitled'}** -- "
-                f"{_e.get('project_type', '')} | uploaded {_e.get('uploaded_at', '')}"
+                f"**{_e.get('title') or _e.get('filename') or i18n.t('chrome_untitled_label')}** -- "
+                + i18n.t("chrome_ref_entry_uploaded_meta", type=_e.get("project_type", ""), date=_e.get("uploaded_at", ""))
             )
             _rcol1, _rcol2 = st.columns(2)
             _ref_bytes = None

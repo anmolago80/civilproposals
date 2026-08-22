@@ -194,10 +194,22 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
     the customer with a retry path) on purpose; swallowing errors in here
     would make that distinction impossible for the caller to make.
 
-    Returns the updated user, or None if the session wasn't actually paid or
-    didn't carry a recognisable user id."""
+    Returns (user, purchase_kind), or (None, None) if the session wasn't
+    actually paid or didn't carry a recognisable user id. purchase_kind is
+    "topup" when this payment specifically added passes to an existing
+    project (see the _topup_project_key branch below) and None for every
+    other outcome, INCLUDING a topup checkout that fell back to a plain bid
+    credit (no matching project) and a replay of an already-processed
+    session -- the caller (00_init.py) uses it only to choose between the
+    generic "payment confirmed" toast and the more specific "N passes added
+    to this project" one, so None just means "show the generic one",
+    never an error. Kept separate from _receipt_kind below (which still
+    only distinguishes "subscription"/"bid" and drives the receipt EMAIL's
+    wording) -- widening _receipt_kind itself to a third value would also
+    change what the topup receipt email says, which is a separate, unnamed
+    change this pass doesn't make."""
     if not stripe.api_key or not session_id:
-        return None
+        return None, None
 
     session = stripe.checkout.Session.retrieve(session_id)
     # payment_status is the only field that actually says money changed
@@ -213,11 +225,11 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
     # correct and sufficient check; status is irrelevant to "was this
     # actually paid".
     if session.get("payment_status") not in ("paid", "no_payment_required"):
-        return None
+        return None, None
 
     user_id = session.get("client_reference_id")
     if not user_id:
-        return None
+        return None, None
 
     with db.get_session() as s:
         already = s.query(db.ProcessedCheckoutSession).filter(
@@ -227,13 +239,17 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
             # Already applied -- return the user's current state (not a
             # re-application) so the caller still sees a "success" outcome
             # for a plain refresh/replay, without spending anything twice.
-            return s.query(db.User).filter(db.User.id == already.user_id).first()
+            # purchase_kind is None here (not re-derived) -- a replay
+            # showing the generic toast instead of the specific topup one
+            # is a cosmetic difference only, not worth re-querying for.
+            return s.query(db.User).filter(db.User.id == already.user_id).first(), None
 
         db_user = s.query(db.User).filter(db.User.id == user_id).first()
         if not db_user:
-            return None
+            return None, None
         db_user.stripe_customer_id = session.get("customer") or db_user.stripe_customer_id
         _topup_project_key = ((session.get("metadata") or {}).get("topup_project_key") or "").strip().lower()
+        _purchase_kind = None
         if session.get("mode") == "subscription":
             db_user.stripe_subscription_id = session.get("subscription") or db_user.stripe_subscription_id
             db_user.subscription_status = "active"
@@ -262,6 +278,8 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
                 # never silently drop a real $50 payment over it) -- fall
                 # back to the plain pay-as-you-go credit below.
                 db_user.bid_credits = (db_user.bid_credits or 0) + 1
+            else:
+                _purchase_kind = "topup"
             _receipt_kind = "bid"
         else:
             # Pay-as-you-go: always +1 -- create_bid_checkout_session always
@@ -286,7 +304,7 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
             # same outcome as the `already` branch above, just discovered a
             # few lines later.
             s.rollback()
-            return s.query(db.User).filter(db.User.id == user_id).first()
+            return s.query(db.User).filter(db.User.id == user_id).first(), None
         s.refresh(db_user)
 
     # Best-effort receipt email -- the purchase itself is already committed
@@ -300,7 +318,7 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
     except Exception as exc:
         print(f"[purchase_receipt_email] failed for {db_user.email}: {exc}", file=sys.stderr)
 
-    return db_user
+    return db_user, _purchase_kind
 
 
 def refresh_subscription_status(user: db.User) -> db.User:

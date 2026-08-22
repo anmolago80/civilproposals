@@ -355,14 +355,23 @@ if IS_SAAS_MODE:
         _checkout_session_id = _qp.get("session_id")
         _checkout_error = None
         try:
-            _checkout_user = billing.handle_checkout_redirect(_checkout_session_id)
+            _checkout_user, _checkout_kind = billing.handle_checkout_redirect(_checkout_session_id)
         except Exception as _exc:
-            _checkout_user = None
+            _checkout_user, _checkout_kind = None, None
             _checkout_error = str(_exc)
 
         if _checkout_user is not None:
             st.query_params.clear()
-            st.toast(i18n.t("init_payment_confirmed_toast"), icon="✅")
+            # Round 3, Part 7e: a project pass top-up gets its own specific
+            # confirmation (passes_topup_success was defined in the i18n
+            # catalogs but never actually shown anywhere) instead of the
+            # generic "payment confirmed" toast every other purchase kind
+            # still gets -- see billing.handle_checkout_redirect()'s
+            # purchase_kind return value.
+            if _checkout_kind == "topup":
+                st.toast(i18n.t("passes_topup_success"), icon="✅")
+            else:
+                st.toast(i18n.t("init_payment_confirmed_toast"), icon="✅")
         elif _checkout_error is not None:
             # A genuine verification error, not just "this session wasn't
             # actually paid" -- keep the query params so refreshing the page
