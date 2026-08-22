@@ -366,6 +366,72 @@ def _wrap(fig, ax, text, max_frac: float, size: float, weight: str = "normal") -
     return lines or [text]
 
 
+# Rotated labels get a little breathing room beyond their bare rendered
+# extent, so a "fits" label doesn't sit with its edge exactly touching the
+# row boundary -- 1.0 would be a mathematically-exact fit, which reads as
+# cramped and risks touching a neighbouring band on any rounding.
+_ROTATED_LABEL_PAD = 1.08
+
+
+def _rotated_label_extent(fig, ax, text, size: float, weight: str = "bold") -> tuple[float, float]:
+    """The rendered (length, thickness) of `text` if drawn rotated 90
+    degrees, in the same 0-1 axes-data-unit space row_h/label_w are
+    expressed in -- (length runs along the row, top-to-bottom; thickness
+    runs across the label column, left-to-right).
+
+    matplotlib's Text.get_window_extent() already returns the POST-rotation
+    bounding box (confirmed empirically: at rotation=90 its width/height are
+    exactly the rotation=0 height/width, swapped) -- so this measures once,
+    unrotated, and swaps, rather than drawing an actual rotated probe.
+
+    The axes are far wider than they are tall while rows are being laid out
+    (fig_w=12.0 vs a still-unfinalised fig_h=6.0, both spanning an 0-1
+    data range), so a pixel in x is not the same data-unit size as a pixel
+    in y -- comparing an unrotated text WIDTH (an x-shaped quantity) against
+    row_h (a y-axis quantity) without converting through pixels first would
+    silently compare the wrong units, the same class of bug Round 5's
+    methodology_pptx._fit_rotated_size fix was written to avoid."""
+    try:
+        renderer = fig.canvas.get_renderer()
+    except Exception:
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+    axes_bbox = ax.get_window_extent(renderer=renderer)
+    xlim, ylim = ax.get_xlim(), ax.get_ylim()
+    px_per_x = axes_bbox.width / max(1e-9, xlim[1] - xlim[0])
+    px_per_y = axes_bbox.height / max(1e-9, ylim[1] - ylim[0])
+
+    probe = ax.text(0, 0, text, fontsize=size, fontweight=weight, alpha=0)
+    bbox = probe.get_window_extent(renderer=renderer)
+    probe.remove()
+    needed_len = bbox.width / px_per_y
+    needed_thick = bbox.height / px_per_x
+    return needed_len, needed_thick
+
+
+def _fit_rotated_label(fig, ax, text, row_h: float, thick: float, start_size: float,
+                        weight: str = "bold", min_size: float = 4.0) -> tuple[float, float]:
+    """Shrink-to-fit for a rotated row label (KEY TASKS, etc.), mirroring
+    methodology_pptx._fit_rotated_size's shrink-only contract but measuring
+    the label's actual rendered extent from the renderer instead of
+    estimating it, since matplotlib -- unlike python-pptx -- can.
+
+    Shrinks from start_size down to min_size looking for a size whose
+    rotated extent fits inside (row_h, thick) with a little padding
+    (_ROTATED_LABEL_PAD). Returns (size, needed_len) -- if nothing in that
+    range fits, size is min_size and needed_len is how much of row_h the
+    label needs even at the floor, so the caller can grow that one band
+    just enough rather than let the label overflow into its neighbours."""
+    size = start_size
+    while size > min_size:
+        needed_len, needed_thick = _rotated_label_extent(fig, ax, text, size, weight)
+        if needed_len * _ROTATED_LABEL_PAD <= row_h and needed_thick * _ROTATED_LABEL_PAD <= thick:
+            return size, needed_len
+        size -= 0.2
+    needed_len, _ = _rotated_label_extent(fig, ax, text, min_size, weight)
+    return min_size, needed_len
+
+
 def _cap_items(items, max_items):
     """Keep at most `max_items` bullets, and say honestly how many were
     dropped rather than silently truncating -- mirrors
@@ -553,9 +619,21 @@ def _render_matrix(columns, project_name, client_name, language: str | None = No
             col_lines.append(lines or [""])
         row_h = max(0.035, max(len(lines) for lines in col_lines) * 0.024 + 0.012)
 
+        # The rotated row label (KEY TASKS, etc.) needs its own minimum band
+        # height too -- content alone (above) doesn't account for it, which
+        # is exactly what let these labels overflow and collide before this
+        # fit check existed. Shrink the label first; only grow the row if it
+        # still doesn't fit even at the floor size, so a row whose
+        # content-driven height already covers the label is never stretched
+        # further -- growing is a means to legibility, not a goal.
+        label_size, label_needed_len = _fit_rotated_label(
+            fig, ax, label, row_h, label_w - 0.006, start_size=5.6, min_size=4.0)
+        if label_needed_len * _ROTATED_LABEL_PAD > row_h:
+            row_h = label_needed_len * _ROTATED_LABEL_PAD
+
         from matplotlib.patches import Rectangle
         ax.add_patch(Rectangle((margin, y - row_h), label_w - 0.006, row_h, facecolor="#DCE6F7", edgecolor="none"))
-        ax.text(margin + (label_w - 0.006) / 2, y - row_h / 2, label, fontsize=5.6, color="#0F2A5C",
+        ax.text(margin + (label_w - 0.006) / 2, y - row_h / 2, label, fontsize=label_size, color="#0F2A5C",
                 fontweight="bold", ha="center", va="center", rotation=90)
 
         for i, (col, lines) in enumerate(zip(columns, col_lines)):
