@@ -380,9 +380,10 @@ def _save(prs) -> bytes:
     return buffer.read()
 
 
-def _client_label(model) -> tuple[str, RGBColor]:
+def _client_label(model, language: str = "en") -> tuple[str, RGBColor]:
     name = (model.client_name or "").strip()
-    return (name or "[CLIENT NAME]", _WHITE if name else _RED_TBC_ON_DARK)
+    return (name or export_i18n.export_t("export_client_name_placeholder", language),
+            _WHITE if name else _RED_TBC_ON_DARK)
 
 
 # ---------------------------------------------------------------------------
@@ -397,7 +398,8 @@ _PANEL_ROW_EMU = int(Inches(0.28))
 _PANEL_W_EMU = int(Inches(3.1))
 
 
-def _draw_peer_review_panel(slide, model, scale: float, x_emu: int, top_emu: int, w_emu_ref: int) -> int:
+def _draw_peer_review_panel(slide, model, scale: float, x_emu: int, top_emu: int, w_emu_ref: int,
+                            language: str = "en") -> int:
     """Draws the panel anchored at its top-left corner and returns its
     bottom y (EMU), so a caller that needs to clear it knows how far down
     it reaches."""
@@ -411,7 +413,8 @@ def _draw_peer_review_panel(slide, model, scale: float, x_emu: int, top_emu: int
     _round(slide, Emu(int(x_emu)), Emu(int(top_emu)), Emu(w), Emu(total_h),
           _ASSURANCE_FILL, line=_ASSURANCE_AMBER, radius=0.05)
     _stack(slide, Emu(int(x_emu)), Emu(int(top_emu)), Emu(w), Emu(header_h),
-          [("PEER REVIEW", max(7.0, 9.0 * scale), True, _ASSURANCE_AMBER)], align=PP_ALIGN.CENTER)
+          [(export_i18n.export_t("pptx_peer_review_heading", language), max(7.0, 9.0 * scale), True, _ASSURANCE_AMBER)],
+          align=PP_ALIGN.CENTER)
     row_y = top_emu + header_h
     pad = int(w * 0.06)
     for group in model.disciplines:
@@ -464,7 +467,7 @@ def _avatar_card(slide, x, y, w, h, person, accent: RGBColor, scale: float, badg
           _person_lines(person, bar_colour, scale))
 
 
-def _render_cards_slide(prs, slide, model, accent: RGBColor):
+def _render_cards_slide(prs, slide, model, accent: RGBColor, language: str = "en"):
     from modules.org_chart_render import _row_candidates, _balanced_wrap
 
     centre = int(_SLIDE_W / 2)
@@ -479,7 +482,8 @@ def _render_cards_slide(prs, slide, model, accent: RGBColor):
 
     lead_people = list(model.leadership)
     top_person = lead_people[0] if lead_people else None
-    rank = [(p, "") for p in lead_people[1:]] + [(p, "QA / Review") for p in model.assurance]
+    qa_badge = export_i18n.export_t("pptx_qa_review_badge", language)
+    rank = [(p, "") for p in lead_people[1:]] + [(p, qa_badge) for p in model.assurance]
     rank_per_row = _balanced_wrap(len(rank), 4) if rank else 0
     rank_rows = -(-len(rank) // rank_per_row) if rank else 0
     rank_h = (rank_rows * _CARDS_CARD_H + max(0, rank_rows - 1) * _CARDS_ROW_GAP) if rank else 0
@@ -522,7 +526,7 @@ def _render_cards_slide(prs, slide, model, accent: RGBColor):
             h = y_bottom - y_top
             x = lead_centre - w // 2
             _round(slide, Emu(int(x)), Emu(int(y_top)), Emu(w), Emu(h), _CLIENT_DARK)
-            label, colour = _client_label(model)
+            label, colour = _client_label(model, language)
             _stack(slide, Emu(int(x)), Emu(int(y_top)), Emu(w), Emu(h),
                   [(label, max(9.0, 12.0 * scale), True, colour),
                    (model.client_role, max(6.5, 9.0 * scale), True, _GREY_TEXT)], align=PP_ALIGN.CENTER)
@@ -617,7 +621,7 @@ def _render_cards_slide(prs, slide, model, accent: RGBColor):
     if model.disciplines:
         panel_w = int(_PANEL_W_EMU * scale)
         panel_x = int(_SLIDE_W - _STYLE_MARGIN) - panel_w
-        _draw_peer_review_panel(slide, model, scale, panel_x, CONTENT_TOP_EMU, _PANEL_W_EMU)
+        _draw_peer_review_panel(slide, model, scale, panel_x, CONTENT_TOP_EMU, _PANEL_W_EMU, language)
 
     _grow(prs, bottom + int(Inches(0.35)))
 
@@ -625,7 +629,7 @@ def _render_cards_slide(prs, slide, model, accent: RGBColor):
 def _slide_cards(model, accent: RGBColor, language: str = "en") -> bytes:
     prs, slide = _new_deck()
     _title_block(slide, model, language=language)
-    _render_cards_slide(prs, slide, model, accent)
+    _render_cards_slide(prs, slide, model, accent, language)
     return _save(prs)
 
 
@@ -683,8 +687,9 @@ def _slide_columns(model, accent: RGBColor, language: str = "en") -> bytes:
             w = int(_COLUMNS_CLIENT_W * scale)
             h = y_bottom - y_top
             x = centre - w // 2
-            label, colour = _client_label(model)
-            _pill(slide, x, y_top, w, h, _CLIENT_DARK, f"{label} — Client", "", colour, colour, scale)
+            label, colour = _client_label(model, language)
+            client_pill_text = export_i18n.export_t("pptx_client_suffix_label", language, label=label)
+            _pill(slide, x, y_top, w, h, _CLIENT_DARK, client_pill_text, "", colour, colour, scale)
         flow.block(_COLUMNS_PILL_H, draw_client)
 
         for index, person in enumerate(model.leadership):
@@ -757,8 +762,9 @@ def _slide_columns(model, accent: RGBColor, language: str = "en") -> bytes:
                 _round(slide, Emu(int(x)), Emu(int(y_top)), Emu(w), Emu(h), _ASSURANCE_FILL,
                       line=RGBColor(0xFB, 0xBF, 0x24), radius=0.3)
                 text = " · ".join(f"{p.name or 'TBC'} — {p.role}" for p in model.assurance)
+                review_line = export_i18n.export_t("pptx_independent_review_prefix", language, text=text)
                 _stack(slide, Emu(int(x)), Emu(int(y_top)), Emu(w), Emu(h),
-                      [(f"★ Independent review: {text}", max(7.5, 10.5 * scale), True, _ASSURANCE_AMBER)],
+                      [(review_line, max(7.5, 10.5 * scale), True, _ASSURANCE_AMBER)],
                       align=PP_ALIGN.CENTER)
             flow.block(_COLUMNS_STRIP_H, draw_strip)
 
@@ -769,7 +775,7 @@ def _slide_columns(model, accent: RGBColor, language: str = "en") -> bytes:
             def draw_panel(y_top, y_bottom, scale):
                 w = int(_PANEL_W_EMU * scale)
                 x = centre - w // 2
-                _draw_peer_review_panel(slide, model, scale, x, y_top, _PANEL_W_EMU)
+                _draw_peer_review_panel(slide, model, scale, x, y_top, _PANEL_W_EMU, language)
             flow.block(panel_h, draw_panel)
 
         return flow, row_width
@@ -863,7 +869,7 @@ def _slide_bands(model, accent: RGBColor, language: str = "en") -> bytes:
         flow.gap(_BANDS_SECTION_GAP)
 
     make_band(export_i18n.export_t("pptx_org_band_client", language),
-             [(_client_label(model)[0], model.client_role, False, _MUTED)],
+             [(_client_label(model, language)[0], model.client_role, False, _MUTED)],
               _CLIENT_DARK, chip_edge=_CLIENT_DARK)
     make_band(export_i18n.export_t("pptx_org_band_leadership", language),
              [(p.name or "TBC", p.role, p.is_tbc, accent) for p in model.leadership],
@@ -977,7 +983,8 @@ def _slide_tree(model, accent: RGBColor, language: str = "en") -> bytes:
             h = y_bottom - y_top
             x = lead_centre - w // 2
             _tree_box(slide, x, y_top, w, h, [
-                (model.client_name or "[CLIENT NAME]", max(9.0, 12.0 * scale), True,
+                (model.client_name or export_i18n.export_t("export_client_name_placeholder", language),
+                 max(9.0, 12.0 * scale), True,
                  _INK if model.client_name else _RED_TBC),
                 (model.client_role, max(6.5, 9.5 * scale), True, _GREY_TEXT),
             ])
@@ -1068,7 +1075,7 @@ def _slide_tree(model, accent: RGBColor, language: str = "en") -> bytes:
         panel_w = int(_PANEL_W_EMU * scale)
         panel_top = panel_anchor.get("y", CONTENT_TOP_EMU + int(director_h * scale))
         panel_x = int(_SLIDE_W - _STYLE_MARGIN) - panel_w
-        _draw_peer_review_panel(slide, model, scale, panel_x, panel_top, _PANEL_W_EMU)
+        _draw_peer_review_panel(slide, model, scale, panel_x, panel_top, _PANEL_W_EMU, language)
 
     _grow(prs, bottom + int(Inches(0.35)))
     return _save(prs)
@@ -1113,7 +1120,7 @@ def populate_org_chart(resource_plan: list, client_name: str = "", project_name:
     from modules import org_chart_render
 
     model = org_chart_render.build_model(resource_plan, client_name, project_name,
-                                         tender_name)
+                                         tender_name, output_language)
     if model.is_empty:
         return _empty_slide(model, output_language)
     resolved = org_chart_render.effective_style(

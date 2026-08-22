@@ -78,7 +78,10 @@ _SLIDE_H = Inches(8.2677)
 # The reviewed-stages/legacy-fallback column content itself now lives in
 # methodology_render.py (build_columns() and friends) so every style here
 # and every live-preview PNG there read the identical data -- this is just
-# the one fallback label still needed directly in this module.
+# the one fallback label still needed directly in this module. English
+# default only -- the "matrix" style's own use of it (the only caller) goes
+# through export_i18n.export_t("pptx_confirm_date_range", language) instead,
+# see Round 3, Part 2.
 _CONFIRM_DATE_RANGE = "[Date range]"
 
 
@@ -557,7 +560,7 @@ def _slide_matrix(slide, columns_data, from_stages, P, hold_icon, eng_icon,
     key_box, key_tf = _textbox(slide, Emu(int(right_edge - Inches(2.7))), Emu(int(y_top + Inches(0.02))), Inches(0.55), Emu(int(h_title * 0.5)))
     key_tf.vertical_anchor = MSO_ANCHOR.MIDDLE
     kr = key_tf.paragraphs[0].add_run()
-    kr.text = "KEY"
+    kr.text = export_i18n.export_t("pptx_key_legend_heading", language)
     kr.font.size = Pt(8)
     kr.font.bold = True
     kr.font.name = _FONT
@@ -567,21 +570,21 @@ def _slide_matrix(slide, columns_data, from_stages, P, hold_icon, eng_icon,
     label_box, label_tf = _textbox(slide, Emu(int(right_edge - Inches(1.93))), y_top, Inches(1.93), Emu(int(h_title * 0.5)))
     label_tf.vertical_anchor = MSO_ANCHOR.MIDDLE
     p1 = label_tf.paragraphs[0]
-    client_display = (client_name or "").strip() or "[Insert client name]"
+    client_display = (client_name or "").strip() or export_i18n.export_t("pptx_meth_client_placeholder", language)
     r1 = p1.add_run()
     r1.text = client_display
     r1.font.size = Pt(6.5)
     r1.font.name = _FONT
     r1.font.color.rgb = _DARK_TEXT if (client_name or "").strip() else _RED
     r2 = p1.add_run()
-    r2.text = " hold point"
+    r2.text = export_i18n.export_t("pptx_meth_hold_point_suffix", language)
     r2.font.size = Pt(6.5)
     r2.font.name = _FONT
     r2.font.color.rgb = _DARK_TEXT
 
     _icon(slide, eng_icon, Emu(int(right_edge - Inches(2.1))), Emu(int(y_top + Inches(0.24) + Inches(0.085))), Inches(0.17))
     _centered_text(slide, Emu(int(right_edge - Inches(1.93))), Emu(int(y_top + Inches(0.18))), Inches(1.9), Emu(int(h_title * 0.5)),
-                    "Collaborative engagement", 6.5, _DARK_TEXT, bold=False)
+                    export_i18n.export_t("pptx_meth_collaborative_engagement", language), 6.5, _DARK_TEXT, bold=False)
     slide.shapes[-1].text_frame.paragraphs[0].alignment = PP_ALIGN.LEFT
 
     # ---- stage headers ----------------------------------------------------
@@ -599,7 +602,7 @@ def _slide_matrix(slide, columns_data, from_stages, P, hold_icon, eng_icon,
         box, tf = _textbox(slide, Emu(int(cx + Inches(0.05))), Emu(int(y_tasks + Inches(0.04))), box_w, box_h)
         size, lines = _fit_size(column["tasks"], box_w, box_h, 5.6)
         _render_cell_lines(slide, tf, lines, size)
-    _rotated_label(slide, Emu(int(row_label_x + row_label_w / 2)), Emu(int(y_tasks + h_tasks / 2)), Emu(int(h_tasks - Inches(0.1))), row_label_w, "KEY TASKS", 6.5, _DARK_TEXT)
+    _rotated_label(slide, Emu(int(row_label_x + row_label_w / 2)), Emu(int(y_tasks + h_tasks / 2)), Emu(int(h_tasks - Inches(0.1))), row_label_w, export_i18n.export_t("pptx_row_key_tasks", language), 6.5, _DARK_TEXT)
     if n > 2:
         _icon(slide, hold_icon, Emu(int(col3_x - gap / 2)), Emu(int(y_tasks + h_tasks - Inches(0.13))), Inches(0.15))
     if n > 3:
@@ -615,7 +618,7 @@ def _slide_matrix(slide, columns_data, from_stages, P, hold_icon, eng_icon,
         size, lines = _fit_size(column["engagement"], box_w, box_h, 5.4)
         _render_cell_lines(slide, tf, lines, size)
         _icon(slide, eng_icon, Emu(int(cx + cw - Inches(0.11))), Emu(int(y_eng + h_eng / 2)), Inches(0.16))
-    _rotated_label(slide, Emu(int(row_label_x + row_label_w / 2)), Emu(int(y_eng + h_eng / 2)), Emu(int(h_eng - Inches(0.06))), row_label_w, "KEY ENGAGEMENT\nACTIVITIES", 5.2, _DARK_TEXT)
+    _rotated_label(slide, Emu(int(row_label_x + row_label_w / 2)), Emu(int(y_eng + h_eng / 2)), Emu(int(h_eng - Inches(0.06))), row_label_w, export_i18n.export_t("pptx_row_key_engagement_activities", language), 5.2, _DARK_TEXT)
 
     # ---- OUTCOME ------------------------------------------------------------
     _rect(slide, row_label_x, y_outcome, row_label_w, h_outcome, P["outcome_deliv_bg"])
@@ -629,7 +632,7 @@ def _slide_matrix(slide, columns_data, from_stages, P, hold_icon, eng_icon,
         _centered_text(slide, Emu(int(cx + Inches(0.05))), Emu(int(y_outcome + Inches(0.02))), box_w, box_h,
                         text, fitted_size,
                         _RED if placeholder else _DARK_TEXT, bold=not placeholder, italic=placeholder)
-    _rotated_label(slide, Emu(int(row_label_x + row_label_w / 2)), Emu(int(y_outcome + h_outcome / 2)), Emu(int(h_outcome - Inches(0.05))), row_label_w, "OUTCOME", 5.6, _DARK_TEXT)
+    _rotated_label(slide, Emu(int(row_label_x + row_label_w / 2)), Emu(int(y_outcome + h_outcome / 2)), Emu(int(h_outcome - Inches(0.05))), row_label_w, export_i18n.export_t("pptx_row_outcome", language), 5.6, _DARK_TEXT)
 
     # ---- DELIVERABLES ---------------------------------------------------------
     _rect(slide, row_label_x, y_deliv, row_label_w, h_deliv, P["outcome_deliv_bg"])
@@ -652,7 +655,7 @@ def _slide_matrix(slide, columns_data, from_stages, P, hold_icon, eng_icon,
         nr.font.italic = True
         nr.font.name = _FONT
         nr.font.color.rgb = _DARK_TEXT if wvr_confirmed else _RED
-    _rotated_label(slide, Emu(int(row_label_x + row_label_w / 2)), Emu(int(y_deliv + h_deliv / 2)), Emu(int(h_deliv - Inches(0.1))), row_label_w, "DELIVERABLES", 6.5, _DARK_TEXT)
+    _rotated_label(slide, Emu(int(row_label_x + row_label_w / 2)), Emu(int(y_deliv + h_deliv / 2)), Emu(int(h_deliv - Inches(0.1))), row_label_w, export_i18n.export_t("pptx_row_deliverables", language), 6.5, _DARK_TEXT)
     if n > 2:
         _icon(slide, hold_icon, Emu(int(col3_x - gap / 2)), Emu(int(y_deliv + h_deliv * 0.12)), Inches(0.15))
     if n > 3:
@@ -662,7 +665,7 @@ def _slide_matrix(slide, columns_data, from_stages, P, hold_icon, eng_icon,
     for (cx, cw), column in zip(cols, columns_data):
         chevron_text = column["chevron"]
         _chevron(slide, cx, y_timeline, cw, h_timeline, P["chevron_bg"],
-                 chevron_text if chevron_text else _CONFIRM_DATE_RANGE, 5.4)
+                 chevron_text if chevron_text else export_i18n.export_t("pptx_confirm_date_range", language), 5.4)
     if n > 2:
         _icon(slide, hold_icon, Emu(int(col3_x - gap / 2)), Emu(int(y_timeline + h_timeline / 2)), Inches(0.16))
     if n > 3:
@@ -688,7 +691,8 @@ def _simple_title(slide, project_name: str, language: str = "en") -> None:
     r.font.color.rgb = _DARK_TEXT
 
 
-def _deliverable_chips(slide, x, w, y, avail_h, items, fill, text_fill, size_pt=6.5) -> None:
+def _deliverable_chips(slide, x, w, y, avail_h, items, fill, text_fill, size_pt=6.5,
+                       language: str = "en") -> None:
     """Deliverables as flowing rounded chips within a fixed box, capped
     (with an honest "+N more" line) rather than silently overflowing --
     same convention _fit_size uses for bulleted cells."""
@@ -715,7 +719,7 @@ def _deliverable_chips(slide, x, w, y, avail_h, items, fill, text_fill, size_pt=
         box, tf = _textbox(slide, x, note_y, w, Inches(0.16))
         p = tf.paragraphs[0]
         r = p.add_run()
-        r.text = f"+{dropped} more — see full methodology"
+        r.text = export_i18n.export_t("pptx_deliverables_more_line", language, dropped=dropped)
         r.font.size = Pt(5.6)
         r.font.italic = True
         r.font.name = _FONT
@@ -764,7 +768,8 @@ def _slide_chevrons(slide, columns_data, from_stages, P, hold_icon, eng_icon,
         box_w = Emu(int(col_w - 2 * pad))
 
         for label_text, key, h in (
-            ("KEY TASKS", "tasks", tasks_h), ("ENGAGEMENT", "engagement", eng_h),
+            (export_i18n.export_t("pptx_row_key_tasks", language), "tasks", tasks_h),
+            (export_i18n.export_t("pptx_row_engagement", language), "engagement", eng_h),
         ):
             lb, lbtf = _textbox(slide, Emu(int(cx + pad)), y, box_w, Inches(0.14))
             lr = lbtf.paragraphs[0].add_run()
@@ -788,7 +793,7 @@ def _slide_chevrons(slide, columns_data, from_stages, P, hold_icon, eng_icon,
         # OUTCOME -- single sentence, shrink-only.
         lb, lbtf = _textbox(slide, Emu(int(cx + pad)), y, box_w, Inches(0.14))
         lr = lbtf.paragraphs[0].add_run()
-        lr.text = "OUTCOME"
+        lr.text = export_i18n.export_t("pptx_row_outcome", language)
         lr.font.size = Pt(6.2)
         lr.font.bold = True
         lr.font.name = _FONT
@@ -810,7 +815,7 @@ def _slide_chevrons(slide, columns_data, from_stages, P, hold_icon, eng_icon,
         # DELIVERABLES -- chips.
         lb, lbtf = _textbox(slide, Emu(int(cx + pad)), y, box_w, Inches(0.14))
         lr = lbtf.paragraphs[0].add_run()
-        lr.text = "DELIVERABLES"
+        lr.text = export_i18n.export_t("pptx_row_deliverables", language)
         lr.font.size = Pt(6.2)
         lr.font.bold = True
         lr.font.name = _FONT
@@ -821,7 +826,7 @@ def _slide_chevrons(slide, columns_data, from_stages, P, hold_icon, eng_icon,
         placeholder_deliv = any(_is_placeholder(d) for d in deliverables)
         _deliverable_chips(slide, Emu(int(cx + pad)), box_w, chips_top, chips_h, deliverables,
                            RGBColor(0xFC, 0xE8, 0xE8) if placeholder_deliv else colour,
-                           _RED if placeholder_deliv else _WHITE)
+                           _RED if placeholder_deliv else _WHITE, language=language)
 
 
 def _slide_programme(slide, columns_data, from_stages, P, hold_icon, eng_icon,
@@ -863,7 +868,10 @@ def _slide_programme(slide, columns_data, from_stages, P, hold_icon, eng_icon,
         pad = Inches(0.06)
         y = Emu(int(card_top + Inches(0.05)))
         box_w = Emu(int(col_w - 2 * pad))
-        for label_text, key, h in (("WHAT WE DO", "tasks", do_h), ("WITH YOU", "engagement", with_h)):
+        for label_text, key, h in (
+            (export_i18n.export_t("pptx_row_what_we_do", language), "tasks", do_h),
+            (export_i18n.export_t("pptx_row_with_you", language), "engagement", with_h),
+        ):
             lb, lbtf = _textbox(slide, Emu(int(cx + pad)), y, box_w, Inches(0.14))
             lr = lbtf.paragraphs[0].add_run()
             lr.text = label_text
@@ -881,7 +889,7 @@ def _slide_programme(slide, columns_data, from_stages, P, hold_icon, eng_icon,
 
         lb, lbtf = _textbox(slide, Emu(int(cx + pad)), y, box_w, Inches(0.14))
         lr = lbtf.paragraphs[0].add_run()
-        lr.text = "YOU RECEIVE"
+        lr.text = export_i18n.export_t("pptx_row_you_receive", language)
         lr.font.size = Pt(6.0)
         lr.font.bold = True
         lr.font.name = _FONT
@@ -892,7 +900,7 @@ def _slide_programme(slide, columns_data, from_stages, P, hold_icon, eng_icon,
         placeholder_deliv = any(_is_placeholder(d) for d in deliverables)
         _deliverable_chips(slide, Emu(int(cx + pad)), box_w, chips_top, chips_h, deliverables,
                            RGBColor(0xFC, 0xE8, 0xE8) if placeholder_deliv else _tint(colour, 0.15),
-                           _RED if placeholder_deliv else _WHITE)
+                           _RED if placeholder_deliv else _WHITE, language=language)
 
         # Hold-point diamond after this stage, only if it actually carries
         # one -- positioned clear of the header band, in the gap column.
@@ -900,7 +908,7 @@ def _slide_programme(slide, columns_data, from_stages, P, hold_icon, eng_icon,
             gx = Emu(int(cx + col_w + gap / 2))
             gy = Emu(int(content_top + header_h + Inches(0.28)))
             _diamond(slide, gx, gy, Emu(int(Inches(0.11))), RGBColor(0xF9, 0x73, 0x16),
-                    text="HOLD\nPOINT", text_size=5.2)
+                    text=export_i18n.export_t("pptx_hold_point_diamond", language), text_size=5.2)
 
 
 def _slide_spine(slide, columns_data, from_stages, P, hold_icon, eng_icon,
@@ -973,7 +981,7 @@ def _slide_spine(slide, columns_data, from_stages, P, hold_icon, eng_icon,
         # WHAT WE DO
         tlb, tltf = _textbox(slide, tasks_x, Emu(int(y + Inches(0.03))), tasks_w, Inches(0.14))
         tlr = tltf.paragraphs[0].add_run()
-        tlr.text = "WHAT WE DO"
+        tlr.text = export_i18n.export_t("pptx_row_what_we_do", language)
         tlr.font.size = Pt(6.0)
         tlr.font.bold = True
         tlr.font.name = _FONT
@@ -988,7 +996,7 @@ def _slide_spine(slide, columns_data, from_stages, P, hold_icon, eng_icon,
         # WHAT YOU RECEIVE -- chips.
         dlb, dltf = _textbox(slide, deliv_x, Emu(int(y + Inches(0.03))), deliv_w, Inches(0.14))
         dlr = dltf.paragraphs[0].add_run()
-        dlr.text = "WHAT YOU RECEIVE"
+        dlr.text = export_i18n.export_t("pptx_row_what_you_receive", language)
         dlr.font.size = Pt(6.0)
         dlr.font.bold = True
         dlr.font.name = _FONT
@@ -999,7 +1007,7 @@ def _slide_spine(slide, columns_data, from_stages, P, hold_icon, eng_icon,
         chips_h = Emu(int(band_h - Inches(0.22)))
         _deliverable_chips(slide, deliv_x, deliv_w, chips_top, chips_h, deliverables,
                            RGBColor(0xFC, 0xE8, 0xE8) if placeholder_deliv else _tint(colour, 0.8),
-                           _RED if placeholder_deliv else _DARK_TEXT, size_pt=6.0)
+                           _RED if placeholder_deliv else _DARK_TEXT, size_pt=6.0, language=language)
 
         node_r = Emu(int(Inches(0.045)))
         node_cy = Emu(int(y + band_h / 2))
@@ -1063,7 +1071,7 @@ def populate_methodology(
     hold_icon = _render_icon_png("hold_point")
     eng_icon = _render_icon_png("engagement")
 
-    columns_data = build_columns(analysis, stages, week_labels)
+    columns_data = build_columns(analysis, stages, week_labels, output_language)
     from_stages = bool(stages)
 
     prs = Presentation()

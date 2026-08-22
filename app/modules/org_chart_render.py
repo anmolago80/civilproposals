@@ -196,14 +196,24 @@ def _is_assurance(slot: str) -> bool:
 
 
 def build_model(resource_plan: list | None, client_name: str = "", project_name: str = "",
-                tender_name: str = "") -> OrgModel:
+                tender_name: str = "", language: str | None = None) -> OrgModel:
     """Normalise the resourcing plan into the one object all four renderers
-    read. Pure derivation -- see the module note on what is never invented."""
-    from modules import resourcing
+    read. Pure derivation -- see the module note on what is never invented.
+
+    `language`: None (the default -- every PNG-live-preview caller, Part 4b's
+    own territory) keeps the English fallbacks below (CONFIRM_TITLE, the
+    " Lead" suffix, the "Client" role label) as plain English; a real
+    language (org_chart_pptx.py's PPTX caller passes output_language)
+    resolves all of them through export_i18n instead -- Round 3, Part 2,
+    since an untitled support member, a discipline lead, and the client's
+    own box are all everyday, not edge-case, states."""
+    from modules import export_i18n, resourcing
 
     model = OrgModel(client_name=(client_name or "").strip(),
                      project_name=(project_name or "").strip(),
                      tender_name=(tender_name or "").strip())
+    if language is not None:
+        model.client_role = export_i18n.export_t("pptx_org_band_client", language)
 
     groups: dict[str, DisciplineGroup] = {}
     order: list[str] = []
@@ -221,14 +231,16 @@ def build_model(resource_plan: list | None, client_name: str = "", project_name:
             # discipline's. Falling back to the discipline name here would
             # read as a real, deliberate title -- the one place this module
             # would be filling a blank in rather than marking it.
-            role = CONFIRM_TITLE
+            role = (export_i18n.export_t("pptx_confirm_title", language) if language is not None
+                   else CONFIRM_TITLE)
             role_is_placeholder = True
         elif kind != "management" and is_lead and not _is_assurance(slot):
             # "Structural Lead" rather than bare "Structural": the app has
             # always called this row the discipline's Lead (it was the literal
             # word on the old chart's sub-row), and the bare discipline name
             # reads as a department rather than a person's position.
-            role = f"{role} Lead"
+            role = (export_i18n.export_t("pptx_role_lead_label", language, role=role) if language is not None
+                   else f"{role} Lead")
         person = Person(
             name=(getattr(assignment, "person_name", "") or "").strip(),
             role=role,
@@ -242,7 +254,9 @@ def build_model(resource_plan: list | None, client_name: str = "", project_name:
                 # The client's own PM is the client's staff, not the firm's --
                 # it names the box at the top rather than joining leadership.
                 if person.name:
-                    model.client_role = f"Client · {person.name}"
+                    model.client_role = (
+                        export_i18n.export_t("pptx_client_role_with_name", language, name=person.name)
+                        if language is not None else f"Client · {person.name}")
                 continue
             # A reviewer entered as a management row is still assurance.
             (model.assurance if _is_assurance(slot) else model.leadership).append(person)

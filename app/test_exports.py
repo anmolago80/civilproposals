@@ -796,15 +796,19 @@ def check_spanish_placeholders(failures: list[str]) -> None:
 
 
 def check_spanish_pptx(failures: list[str]) -> None:
-    """Audit Round 2, Part 5: the three PPTX companions (org chart,
-    methodology, delivery program) ignored export_i18n entirely -- a Spanish
-    project got fully English PowerPoints. Generate each with
-    output_language="es" and confirm the builder-written scaffolding text
-    (titles, band/legend labels, empty-state notes) actually came out in
-    Spanish, not just that the file didn't crash."""
+    """Audit Round 2, Part 5 + Round 3, Part 2/5b: the three PPTX companions
+    (org chart, methodology, delivery program) ignored export_i18n entirely
+    -- a Spanish project got fully English PowerPoints. Round 2 fixed this
+    for one non-default style each and only checked slide TITLES; Round 3
+    found the actual DEFAULT styles (cards / matrix / swimlanes) were still
+    untouched, plus body text (row labels, legends, badges) that title-only
+    checks never exercised. This now loops every style of all three decks,
+    with BOTH an empty plan/schedule (empty-state notes) and a real one
+    (row/label/badge text), and asserts real translated body content -- not
+    just that a title localised."""
     from pptx import Presentation
 
-    from modules import methodology_pptx, org_chart_pptx, program_pptx
+    from modules import methodology_pptx, org_chart_pptx, program_pptx, resourcing
 
     def all_text(blob: bytes) -> str:
         prs = Presentation(io.BytesIO(blob))
@@ -813,28 +817,72 @@ def check_spanish_pptx(failures: list[str]) -> None:
             for shape in slide.shapes:
                 if shape.has_text_frame:
                     parts.append(shape.text_frame.text)
+                if shape.has_table:
+                    for row in shape.table.rows:
+                        for cell in row.cells:
+                            parts.append(cell.text_frame.text)
         return "\n".join(parts)
 
-    org_es = all_text(org_chart_pptx.populate_org_chart(
-        [], client_name="Client", project_name="P", tender_name="T",
-        style="bands", output_language="es"))
-    if "Organización del proyecto" not in org_es:
-        failures.append(f"[Part5] org_chart_pptx (style=bands) title didn't localise to Spanish: {org_es[:120]!r}")
-    if "SIN EQUIPO ASIGNADO" not in org_es:
-        failures.append("[Part5] org_chart_pptx empty-team note didn't localise to Spanish")
+    # A small real resourcing plan: one management row (so the client band
+    # renders), a titled discipline lead, and one deliberately-untitled
+    # support member (exercises the "[CONFIRMAR CARGO]" / "Líder de ..."
+    # body text every style renders, not just the title).
+    org_plan = [
+        resourcing.ResourceAssignment(slot="Project Director", slot_kind="management",
+                                      person_name="Jane Smith"),
+        resourcing.ResourceAssignment(slot="Structural", slot_kind="discipline",
+                                      person_name="Mat Williams", is_lead=True),
+        resourcing.ResourceAssignment(slot="Structural", slot_kind="discipline",
+                                      person_name="Ryan Swagemakers", is_lead=False),
+    ]
 
+    for style in ("cards", "columns", "bands", "tree"):
+        org_es = all_text(org_chart_pptx.populate_org_chart(
+            org_plan, client_name="Cliente Real", project_name="P", tender_name="T",
+            style=style, output_language="es"))
+        if "Organización del proyecto" not in org_es:
+            failures.append(f"[Part2] org_chart_pptx (style={style}) title didn't localise to Spanish: {org_es[:120]!r}")
+        if "CONFIRMAR CARGO" not in org_es:
+            failures.append(f"[Part2] org_chart_pptx (style={style}) untitled-member body text didn't localise to Spanish")
+        if "Líder de" not in org_es:
+            failures.append(f"[Part2] org_chart_pptx (style={style}) discipline-lead body text didn't localise to Spanish")
+
+        org_es_empty = all_text(org_chart_pptx.populate_org_chart(
+            [], client_name="Client", project_name="P", tender_name="T",
+            style=style, output_language="es"))
+        if "SIN EQUIPO ASIGNADO" not in org_es_empty:
+            failures.append(f"[Part2] org_chart_pptx (style={style}) empty-team note didn't localise to Spanish")
+
+    program_schedule = {"Item A": [True, True, False, True], "Item B": [False, True, True, True]}
     for style in ("gantt", "swimlanes", "table", "timeline"):
         prog_es = all_text(program_pptx.populate_program(
-            {"Item": [True] * 4}, ["Wk 1", "Wk 2", "Wk 3", "Wk 4"],
-            project_name="P", style=style, output_language="es"))
+            program_schedule, ["Wk 1", "Wk 2", "Wk 3", "Wk 4"],
+            project_name="P", client_name="Cliente Real", style=style, output_language="es"))
         if "Programa de ejecución" not in prog_es:
-            failures.append(f"[Part5] program_pptx (style={style}) title didn't localise to Spanish: {prog_es[:120]!r}")
+            failures.append(f"[Part2] program_pptx (style={style}) title didn't localise to Spanish: {prog_es[:120]!r}")
+        # The timeline style draws item labels on its bars but never a
+        # separate duration string (no "X wk" text to localise there) --
+        # every other style does.
+        if style != "timeline" and "sem" not in prog_es.lower():
+            failures.append(f"[Part2] program_pptx (style={style}) duration body text didn't localise to Spanish")
+
+        prog_es_empty = all_text(program_pptx.populate_program(
+            {}, [], project_name="P", client_name="Cliente Real", style=style, output_language="es"))
+        if "SIN PROGRAMA INGRESADO" not in prog_es_empty:
+            failures.append(f"[Part2] program_pptx (style={style}) empty-schedule note didn't localise to Spanish")
 
     for style in ("matrix", "chevrons", "programme", "spine"):
+        # No stages yet -- exercises methodology_render.py's "legacy"
+        # boilerplate columns (Round 3, Part 2 follow-up), the exact case
+        # that made this loop fail before that fix.
         meth_es = all_text(methodology_pptx.populate_methodology(
-            None, project_name="P", style=style, output_language="es"))
+            None, project_name="P", client_name="Cliente Real", style=style, output_language="es"))
         if "metodología propuesta" not in meth_es:
-            failures.append(f"[Part5] methodology_pptx (style={style}) title didn't localise to Spanish: {meth_es[:120]!r}")
+            failures.append(f"[Part2] methodology_pptx (style={style}) title didn't localise to Spanish: {meth_es[:120]!r}")
+        if "TAREAS" not in meth_es.upper() and "QUÉ HACEMOS" not in meth_es.upper():
+            failures.append(f"[Part2] methodology_pptx (style={style}) legacy-boilerplate body text didn't localise to Spanish")
+        if not any(marker in meth_es.upper() for marker in ("ENTREGABLES", "LO QUE USTED RECIBE", "USTED RECIBE")):
+            failures.append(f"[Part2] methodology_pptx (style={style}) deliverables body text didn't localise to Spanish")
 
     # English output must be completely unaffected by any of this threading.
     org_en = all_text(org_chart_pptx.populate_org_chart(

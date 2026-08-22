@@ -106,6 +106,11 @@ def stage_carries_hold_point(column: dict) -> bool:
 # shape methodology_pptx.py's four style builders consume.
 # ---------------------------------------------------------------------------
 
+# English defaults -- the sole reader that still needs these as plain
+# constants is render_png() (the live PNG preview), which has no language
+# support yet (Round 3, Part 4b's own territory). build_columns()'s PPTX
+# caller (methodology_pptx.py) passes a real `language` and gets the
+# translated versions via export_i18n instead -- see _legacy_columns() below.
 _STAGE_HEADERS = [
     "Project Initiation",
     "15% design stage",
@@ -139,12 +144,50 @@ _CONFIRM_TASKS = "[CONFIRM TASKS FOR THIS STAGE]"
 _CONFIRM_DATE_RANGE = "[Date range]"
 
 
-def _stage2_tasks(scope_items: list) -> list:
+def _legacy_strings(language: str) -> dict:
+    """The same legacy boilerplate content as the module-level English
+    constants above, resolved through export_i18n for a real `language`.
+    Only build_columns()'s PPTX path calls this -- render_png() (the live
+    preview) still reads the English constants directly until Part 4b gives
+    it language support too."""
+    from modules import export_i18n as ei
+    t = lambda key, **fmt: ei.export_t(key, language, **fmt)  # noqa: E731
+    return {
+        "stage_headers": [
+            t("pptx_legacy_stage1_name"), t("pptx_legacy_stage2_name"),
+            t("pptx_legacy_stage3_name"), t("pptx_legacy_stage4_name"),
+        ],
+        "tasks": [
+            t("pptx_legacy_task_liaison"),
+            "",
+            (t("pptx_legacy_task_including"), True),
+            t("pptx_legacy_task_inception"),
+            t("pptx_legacy_task_site_inspection"),
+            t("pptx_legacy_task_confirm_program"),
+            t("pptx_legacy_task_comm_protocols"),
+            t("pptx_legacy_task_progress_setup"),
+            t("pptx_legacy_task_quality_plan"),
+        ],
+        "engagement": [t("pptx_legacy_engagement_inception"), t("pptx_legacy_engagement_site_walkover")],
+        "outcome": t("pptx_legacy_outcome"),
+        "deliverables": [t("pptx_legacy_deliverable_minutes"), t("pptx_legacy_deliverable_comm_doc")],
+        "no_scope_placeholder": t("pptx_no_scope_placeholder"),
+        "confirm_engagement": t("pptx_confirm_engagement_stage"),
+        "confirm_outcome": t("pptx_confirm_outcome_stage"),
+        "confirm_deliverables": t("pptx_confirm_deliverables_stage"),
+        "confirm_tasks": t("pptx_confirm_tasks_stage"),
+        "confirm_date_range": t("pptx_confirm_date_range"),
+        "untitled_scope_item": t("export_untitled_scope_item"),
+    }
+
+
+def _stage2_tasks(scope_items: list, no_scope_placeholder: str = _NO_SCOPE_PLACEHOLDER,
+                  untitled_label: str = "[UNTITLED SCOPE ITEM]") -> list:
     if not scope_items:
-        return [_NO_SCOPE_PLACEHOLDER]
+        return [no_scope_placeholder]
     lines = []
     for item in scope_items:
-        title = (getattr(item, "title", "") or "[UNTITLED SCOPE ITEM]").strip()
+        title = (getattr(item, "title", "") or untitled_label).strip()
         tasks = getattr(item, "tasks", None) or []
         lines.append(f"{title}: {'; '.join(tasks)}" if tasks else title)
     return lines
@@ -167,50 +210,79 @@ def _columns_from_stages(stages, week_labels) -> list[dict]:
     return columns
 
 
-def _legacy_columns(analysis) -> list[dict]:
+def _legacy_columns(analysis, language: str | None = None) -> list[dict]:
     """The pre-stages content: one real column built from scope items, and
     three columns of placeholders. Kept so a project that has not run the
-    stage drafter exports exactly what it did before."""
+    stage drafter exports exactly what it did before.
+
+    `language`: None (render_png()'s live-preview caller, Part 4b's own
+    territory) keeps the plain English module constants; a real language
+    (methodology_pptx.py's PPTX caller) resolves every string through
+    export_i18n instead -- Round 3, Part 2, since this boilerplate is what
+    a Spanish project not yet through the stage drafter actually exports."""
+    if language is None:
+        headers = _STAGE_HEADERS
+        tasks1, engagement1, outcome1, deliverables1 = (
+            _PROJECT_INITIATION_TASKS, _PROJECT_INITIATION_ENGAGEMENT,
+            _PROJECT_INITIATION_OUTCOME, _PROJECT_INITIATION_DELIVERABLES)
+        no_scope, confirm_eng, confirm_out, confirm_deliv, confirm_tasks, date_range, untitled = (
+            _NO_SCOPE_PLACEHOLDER, _CONFIRM_ENGAGEMENT, _CONFIRM_OUTCOME, _CONFIRM_DELIVERABLES,
+            _CONFIRM_TASKS, _CONFIRM_DATE_RANGE, "[UNTITLED SCOPE ITEM]")
+    else:
+        s = _legacy_strings(language)
+        headers = s["stage_headers"]
+        tasks1, engagement1, outcome1, deliverables1 = (
+            s["tasks"], s["engagement"], s["outcome"], s["deliverables"])
+        no_scope, confirm_eng, confirm_out, confirm_deliv, confirm_tasks, date_range, untitled = (
+            s["no_scope_placeholder"], s["confirm_engagement"], s["confirm_outcome"],
+            s["confirm_deliverables"], s["confirm_tasks"], s["confirm_date_range"],
+            s["untitled_scope_item"])
+
     return [
         {
-            "name": _STAGE_HEADERS[0],
-            "tasks": list(_PROJECT_INITIATION_TASKS),
-            "engagement": list(_PROJECT_INITIATION_ENGAGEMENT),
-            "outcome": _PROJECT_INITIATION_OUTCOME,
-            "deliverables": list(_PROJECT_INITIATION_DELIVERABLES),
-            "chevron": _CONFIRM_DATE_RANGE,
+            "name": headers[0],
+            "tasks": list(tasks1),
+            "engagement": list(engagement1),
+            "outcome": outcome1,
+            "deliverables": list(deliverables1),
+            "chevron": date_range,
         },
         {
-            "name": _STAGE_HEADERS[1],
-            "tasks": _stage2_tasks(getattr(analysis, "scope_items", None) or []),
-            "engagement": [_CONFIRM_ENGAGEMENT],
-            "outcome": _CONFIRM_OUTCOME,
-            "deliverables": [_CONFIRM_DELIVERABLES],
-            "chevron": _CONFIRM_DATE_RANGE,
+            "name": headers[1],
+            "tasks": _stage2_tasks(getattr(analysis, "scope_items", None) or [], no_scope, untitled),
+            "engagement": [confirm_eng],
+            "outcome": confirm_out,
+            "deliverables": [confirm_deliv],
+            "chevron": date_range,
         },
     ] + [
         {
             "name": header,
-            "tasks": [_CONFIRM_TASKS],
-            "engagement": [_CONFIRM_ENGAGEMENT],
-            "outcome": _CONFIRM_OUTCOME,
-            "deliverables": [_CONFIRM_DELIVERABLES],
-            "chevron": _CONFIRM_DATE_RANGE,
+            "tasks": [confirm_tasks],
+            "engagement": [confirm_eng],
+            "outcome": confirm_out,
+            "deliverables": [confirm_deliv],
+            "chevron": date_range,
         }
-        for header in _STAGE_HEADERS[2:]
+        for header in headers[2:]
     ]
 
 
-def build_columns(analysis, stages, week_labels) -> list[dict]:
+def build_columns(analysis, stages, week_labels, language: str | None = None) -> list[dict]:
     """The one normalised view of the methodology every renderer -- this
     module's four PNG previews, and methodology_pptx.py's four PPTX
     builders -- reads. `stages` (the reviewed methodology_stages.
     MethodologyStage list) wins whenever it exists; otherwise this falls
     back to exactly the pre-stages boilerplate the table always used to
-    show, built from the brief's own scope items."""
+    show, built from the brief's own scope items.
+
+    `language`: forwarded to _legacy_columns() -- see its docstring. Has no
+    effect when `stages` is supplied, since _columns_from_stages() reads
+    real reviewed content (already in whatever language the stage drafter
+    produced it in), not this module's own boilerplate."""
     if stages:
         return _columns_from_stages(stages, week_labels)
-    return _legacy_columns(analysis)
+    return _legacy_columns(analysis, language)
 
 
 # ---------------------------------------------------------------------------

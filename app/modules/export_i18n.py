@@ -195,6 +195,84 @@ _EN: dict[str, str] = {
     "pptx_wvr_statement": "All design deliverables will be issued with completed Work Verification Records (WVRs)",
     "pptx_wvr_confirm_placeholder": "[CONFIRM WVR / QA STATEMENT FOR THIS FIRM]",
 
+    # -- Round 3, Part 2: methodology_pptx.py's DEFAULT "matrix" style (and
+    # the three non-default styles, which had the identical bug) had these
+    # row labels/legend text hardcoded in English regardless of language. --
+    "pptx_key_legend_heading": "KEY",
+    "pptx_meth_client_placeholder": "[Insert client name]",
+    "pptx_meth_hold_point_suffix": " hold point",
+    "pptx_meth_collaborative_engagement": "Collaborative engagement",
+    "pptx_row_key_tasks": "KEY TASKS",
+    "pptx_row_key_engagement_activities": "KEY ENGAGEMENT\nACTIVITIES",
+    "pptx_row_outcome": "OUTCOME",
+    "pptx_row_deliverables": "DELIVERABLES",
+    "pptx_row_engagement": "ENGAGEMENT",
+    "pptx_row_what_we_do": "WHAT WE DO",
+    "pptx_row_with_you": "WITH YOU",
+    "pptx_row_you_receive": "YOU RECEIVE",
+    "pptx_row_what_you_receive": "WHAT YOU RECEIVE",
+    "pptx_hold_point_diamond": "HOLD\nPOINT",
+    "pptx_confirm_date_range": "[Date range]",
+    "pptx_deliverables_more_line": "+{dropped} more — see full methodology",
+
+    # -- Round 3, Part 2: org_chart_pptx.py's DEFAULT "cards" style (and the
+    # "columns"/"tree" styles, same bug) -- the "bands" style was localised
+    # in Audit Round 2, but the panel/badge text it shares with these three
+    # was not. --
+    "pptx_peer_review_heading": "PEER REVIEW",
+    "pptx_qa_review_badge": "QA / Review",
+    "pptx_client_suffix_label": "{label} — Client",
+    "pptx_independent_review_prefix": "★ Independent review: {text}",
+    "pptx_confirm_title": "[CONFIRM TITLE]",
+    "pptx_role_lead_label": "{role} Lead",
+    "pptx_client_role_with_name": "Client · {name}",
+
+    # -- Round 3, Part 2: program_pptx.py's swimlanes-style-specific legend
+    # text and stage fallback (the shared _activity_legend() helper was
+    # already localised; this swatch is built ad hoc only in that style). --
+    "pptx_milestone_legend": "Milestone",
+    "pptx_unassigned_stage_label": "Unassigned",
+    "pptx_duration_weeks_short": "{weeks} wk",
+    "pptx_week_number_short": "Wk {week}",
+    "pptx_duration_weeks_long_singular": "{weeks} week",
+    "pptx_duration_weeks_long_plural": "{weeks} weeks",
+
+    # -- Round 3, Part 2 follow-up: methodology_render.py's "legacy"
+    # boilerplate columns (build_columns()/_legacy_columns()) -- shown by
+    # ALL FOUR methodology PPTX styles (and the matching PNG preview,
+    # Part 4b's own territory for the render side) whenever a project hasn't
+    # run the stage drafter yet, i.e. the exact case check_spanish_pptx's
+    # own default arguments exercise. Not in Part 2's own file citations
+    # (org_chart_pptx.py / methodology_pptx.py / program_pptx.py) but the
+    # identical "hardcoded English regardless of output_language" bug, and
+    # the one that made the loop-every-style-and-check-body-text acceptance
+    # test actually fail -- so fixed here rather than left as a gap. --
+    "pptx_legacy_stage1_name": "Project Initiation",
+    "pptx_legacy_stage2_name": "15% design stage",
+    "pptx_legacy_stage3_name": "15% developed to 50% design stage",
+    "pptx_legacy_stage4_name": "50% developed to Final stage",
+    "pptx_legacy_task_liaison": "Liaison with the client",
+    "pptx_legacy_task_including": "Including:",
+    "pptx_legacy_task_inception": "Inception (prestart) meeting",
+    "pptx_legacy_task_site_inspection": "Site inspection",
+    "pptx_legacy_task_confirm_program": "Confirmation of delivery program and team availability",
+    "pptx_legacy_task_comm_protocols": "Establishing communication protocols",
+    "pptx_legacy_task_progress_setup": "Initial progress reporting setup",
+    "pptx_legacy_task_quality_plan": "Draft Quality Plan for discussion",
+    "pptx_legacy_engagement_inception": "Inception meeting",
+    "pptx_legacy_engagement_site_walkover": "Site inspection walkover",
+    "pptx_legacy_outcome": "Project governance, scope, and collaboration framework established.",
+    "pptx_legacy_deliverable_minutes": "Inception meeting minutes",
+    "pptx_legacy_deliverable_comm_doc": "Communication protocols document",
+    "pptx_no_scope_placeholder": (
+        "[DESCRIBE APPROACH FOR THIS STAGE -- analyse the brief (Tender Analysis tab) to "
+        "prefill this from the brief's real scope items]"
+    ),
+    "pptx_confirm_engagement_stage": "[CONFIRM ENGAGEMENT / WORKSHOP ACTIVITIES FOR THIS STAGE]",
+    "pptx_confirm_outcome_stage": "[CONFIRM OUTCOME FOR THIS STAGE]",
+    "pptx_confirm_deliverables_stage": "[CONFIRM DELIVERABLE(S) FOR THIS STAGE]",
+    "pptx_confirm_tasks_stage": "[CONFIRM TASKS FOR THIS STAGE]",
+
     # -- Round 3, Part 1a: export_docx.py placeholders/labels that were still
     # written as raw English constants regardless of output_language. --
     "export_methodology_table_placeholder": (
@@ -507,6 +585,65 @@ _ES: dict[str, str] = {
     "pptx_methodology_title": "Nuestra metodología propuesta",
     "pptx_wvr_statement": "Todos los entregables de diseño se emitirán con Registros de Verificación de Trabajo (WVR) completos",
     "pptx_wvr_confirm_placeholder": "[CONFIRMAR DECLARACIÓN DE WVR / CALIDAD PARA ESTA EMPRESA]",
+
+    # -- Round 3, Part 2 -- see the matching English keys' comments above. --
+    "pptx_key_legend_heading": "CLAVE",
+    "pptx_meth_client_placeholder": "[Insertar nombre del cliente]",
+    "pptx_meth_hold_point_suffix": " punto de espera",
+    "pptx_meth_collaborative_engagement": "Participación colaborativa",
+    "pptx_row_key_tasks": "TAREAS CLAVE",
+    "pptx_row_key_engagement_activities": "ACTIVIDADES CLAVE\nDE PARTICIPACIÓN",
+    "pptx_row_outcome": "RESULTADO",
+    "pptx_row_deliverables": "ENTREGABLES",
+    "pptx_row_engagement": "PARTICIPACIÓN",
+    "pptx_row_what_we_do": "QUÉ HACEMOS",
+    "pptx_row_with_you": "CON USTED",
+    "pptx_row_you_receive": "USTED RECIBE",
+    "pptx_row_what_you_receive": "LO QUE USTED RECIBE",
+    "pptx_hold_point_diamond": "PUNTO DE\nESPERA",
+    "pptx_confirm_date_range": "[Rango de fechas]",
+    "pptx_deliverables_more_line": "+{dropped} más — ver metodología completa",
+
+    "pptx_peer_review_heading": "REVISIÓN POR PARES",
+    "pptx_qa_review_badge": "QA / Revisión",
+    "pptx_client_suffix_label": "{label} — Cliente",
+    "pptx_independent_review_prefix": "★ Revisión independiente: {text}",
+    "pptx_confirm_title": "[CONFIRMAR CARGO]",
+    "pptx_role_lead_label": "Líder de {role}",
+    "pptx_client_role_with_name": "Cliente · {name}",
+
+    "pptx_milestone_legend": "Hito",
+    "pptx_unassigned_stage_label": "Sin asignar",
+    "pptx_duration_weeks_short": "{weeks} sem",
+    "pptx_week_number_short": "Sem {week}",
+    "pptx_duration_weeks_long_singular": "{weeks} semana",
+    "pptx_duration_weeks_long_plural": "{weeks} semanas",
+
+    "pptx_legacy_stage1_name": "Iniciación del proyecto",
+    "pptx_legacy_stage2_name": "Etapa de diseño al 15%",
+    "pptx_legacy_stage3_name": "Etapa de diseño del 15% al 50%",
+    "pptx_legacy_stage4_name": "Etapa del 50% a la etapa final",
+    "pptx_legacy_task_liaison": "Enlace con el cliente",
+    "pptx_legacy_task_including": "Incluyendo:",
+    "pptx_legacy_task_inception": "Reunión de inicio de obra",
+    "pptx_legacy_task_site_inspection": "Inspección del sitio",
+    "pptx_legacy_task_confirm_program": "Confirmación del programa de ejecución y disponibilidad del equipo",
+    "pptx_legacy_task_comm_protocols": "Establecimiento de protocolos de comunicación",
+    "pptx_legacy_task_progress_setup": "Configuración inicial de informes de avance",
+    "pptx_legacy_task_quality_plan": "Borrador del Plan de Calidad para su discusión",
+    "pptx_legacy_engagement_inception": "Reunión de inicio",
+    "pptx_legacy_engagement_site_walkover": "Recorrido de inspección del sitio",
+    "pptx_legacy_outcome": "Gobernanza del proyecto, alcance y marco de colaboración establecidos.",
+    "pptx_legacy_deliverable_minutes": "Acta de la reunión de inicio",
+    "pptx_legacy_deliverable_comm_doc": "Documento de protocolos de comunicación",
+    "pptx_no_scope_placeholder": (
+        "[DESCRIBIR EL ENFOQUE PARA ESTA ETAPA -- analice el brief (pestaña Análisis de la "
+        "Licitación) para prellenar esto con las partidas de alcance reales del brief]"
+    ),
+    "pptx_confirm_engagement_stage": "[CONFIRMAR ACTIVIDADES DE PARTICIPACIÓN / TALLER PARA ESTA ETAPA]",
+    "pptx_confirm_outcome_stage": "[CONFIRMAR RESULTADO PARA ESTA ETAPA]",
+    "pptx_confirm_deliverables_stage": "[CONFIRMAR ENTREGABLE(S) PARA ESTA ETAPA]",
+    "pptx_confirm_tasks_stage": "[CONFIRMAR TAREAS PARA ESTA ETAPA]",
 
     # -- Round 3, Part 1a/4a -- see the matching English keys' comments above. --
     "export_methodology_table_placeholder": (

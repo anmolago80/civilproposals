@@ -582,13 +582,14 @@ def _slide_gantt(model, accent: RGBColor, language: str = "en") -> bytes:
         row_h = y_bottom - y_top
         pt = max(_ROW_LABEL_PT_MIN, _ROW_LABEL_PT_REF * scale)
         _text(slide, Emu(CONTENT_LEFT_EMU), Emu(int(y_top)), Emu(int(label_col_w)), Emu(int(row_h)),
-              item.label or "[UNTITLED SCOPE ITEM]", pt, _INK, bold=True)
+              item.label or export_i18n.export_t("export_untitled_scope_item", language), pt, _INK, bold=True)
         x0 = grid_left + (item.start_week - 1) * week_col_w
         x1 = grid_left + item.end_week * week_col_w
         bar_h = int(row_h * 0.45)
         bar_pt = max(_BAR_LABEL_PT_MIN, _BAR_LABEL_PT_REF * scale)
         _pill(slide, Emu(int(x0 + Inches(0.02))), Emu(int(y_top + (row_h - bar_h) / 2)),
-              Emu(int(x1 - x0 - Inches(0.04))), Emu(bar_h), accent, f"{item.weeks} wk", bar_pt)
+              Emu(int(x1 - x0 - Inches(0.04))), Emu(bar_h), accent,
+              export_i18n.export_t("pptx_duration_weeks_short", language, weeks=item.weeks), bar_pt)
 
     if has_ms:
         _milestones(slide, model, grid_left, grid_right, bounds["grid_top"], bounds["grid_bottom"],
@@ -701,7 +702,8 @@ def _slide_swimlanes(model, accent: RGBColor, language: str = "en") -> bytes:
     _gridlines(slide, model, grid_left, bounds["grid_top"], bounds["grid_bottom"], week_col_w, scale)
 
     for y_top, _member_h, colour, stage_index in lane_draws:
-        name = (model.stages[stage_index] if stage_index is not None else "Unassigned").upper()
+        name = (model.stages[stage_index] if stage_index is not None
+               else export_i18n.export_t("pptx_unassigned_stage_label", language)).upper()
         pt = max(_LANE_PT_MIN, _LANE_PT_REF * scale)
         header_h = int(Inches(_SWIM_LANE_HEADER_H_REF) * scale)
         _text(slide, Emu(CONTENT_LEFT_EMU), Emu(int(y_top)), Emu(int(grid_right - CONTENT_LEFT_EMU)),
@@ -711,13 +713,15 @@ def _slide_swimlanes(model, accent: RGBColor, language: str = "en") -> bytes:
         pt = max(_ROW_LABEL_PT_MIN, _ROW_LABEL_PT_REF * 0.92 * scale)
         inset = int(Inches(0.10) * scale)
         _text(slide, Emu(CONTENT_LEFT_EMU + inset), Emu(int(y_top)), Emu(int(label_col_w - inset)),
-              Emu(int(row_h)), item.label or "[UNTITLED SCOPE ITEM]", pt, _INK, bold=True)
+              Emu(int(row_h)), item.label or export_i18n.export_t("export_untitled_scope_item", language),
+              pt, _INK, bold=True)
         x0 = grid_left + (item.start_week - 1) * week_col_w
         x1 = grid_left + item.end_week * week_col_w
         bar_h = int(row_h * 0.48)
         bar_pt = max(_BAR_LABEL_PT_MIN, _BAR_LABEL_PT_REF * scale)
         _pill(slide, Emu(int(x0 + Inches(0.02))), Emu(int(y_top + (row_h - bar_h) / 2)),
-              Emu(int(x1 - x0 - Inches(0.04))), Emu(bar_h), colour, f"{item.weeks} wk", bar_pt)
+              Emu(int(x1 - x0 - Inches(0.04))), Emu(bar_h), colour,
+              export_i18n.export_t("pptx_duration_weeks_short", language, weeks=item.weeks), bar_pt)
 
     if has_ms:
         _milestones(slide, model, grid_left, grid_right, bounds["grid_top"], bounds["grid_bottom"],
@@ -725,7 +729,7 @@ def _slide_swimlanes(model, accent: RGBColor, language: str = "en") -> bytes:
     legend = [(_hex(program_render.STAGE_COLOURS[i % len(program_render.STAGE_COLOURS)]), name)
               for i, name in enumerate(model.stages)]
     if model.milestones:
-        legend.append((_MILESTONE_ORANGE, "Milestone"))
+        legend.append((_MILESTONE_ORANGE, export_i18n.export_t("pptx_milestone_legend", language)))
     _legend(slide, legend, bounds["legend_y"], CONTENT_LEFT_EMU, scale)
 
     _grow(prs, total_h_emu)
@@ -768,7 +772,10 @@ def _slide_table(model, accent: RGBColor, language: str = "en") -> bytes:
     prs, slide = _new_deck()
     top = _heading(slide, model, language)
 
-    headers = ["Scope item", "Commence", "Complete", "Duration"]
+    headers = [export_i18n.export_t("export_table_header_scope_item", language),
+              export_i18n.export_t("export_table_header_commence", language),
+              export_i18n.export_t("export_table_header_complete", language),
+              export_i18n.export_t("export_table_header_duration", language)]
     widths = [Inches(5.0), Inches(2.1), Inches(2.1), Inches(1.89)]
     rows = n + 1
 
@@ -812,25 +819,29 @@ def _slide_table(model, accent: RGBColor, language: str = "en") -> bytes:
         _fill(table.cell(0, index), accent, header.upper(), head_pt, _WHITE, bold=True)
 
     def _week_text(week: int) -> str:
-        label = model.week_labels[week - 1] if week - 1 < len(model.week_labels) else f"Wk {week}"
+        label = (model.week_labels[week - 1] if week - 1 < len(model.week_labels)
+                else export_i18n.export_t("pptx_week_number_short", language, week=week))
         date_text = model.week_dates[week - 1] if week - 1 < len(model.week_dates) else ""
         return f"{label} · {date_text}" if date_text else label
 
     for row_index, item in enumerate(model.items, start=1):
         band = _WHITE if row_index % 2 else _ROW_BAND
-        _fill(table.cell(row_index, 0), band, item.label or "[UNTITLED SCOPE ITEM]", name_pt,
+        _fill(table.cell(row_index, 0), band,
+              item.label or export_i18n.export_t("export_untitled_scope_item", language), name_pt,
               _INK, bold=True)
         _fill(table.cell(row_index, 1), band, _week_text(item.start_week), cell_pt, _DARK_TEXT)
         _fill(table.cell(row_index, 2), band, _week_text(item.end_week), cell_pt, _DARK_TEXT)
+        weeks_key = "pptx_duration_weeks_long_singular" if item.weeks == 1 else "pptx_duration_weeks_long_plural"
         _fill(table.cell(row_index, 3), band,
-              f"{item.weeks} week{'s' if item.weeks != 1 else ''}", cell_pt, _DARK_TEXT)
+              export_i18n.export_t(weeks_key, language, weeks=item.weeks), cell_pt, _DARK_TEXT)
 
     bottom = int(top + header_h + row_h * n)
     legend_y = bottom + gap_h + max(0, remaining_for_rows - row_h * n)
     if model.start_date_text:
+        anchored_note = export_i18n.export_t(
+            "export_program_anchored_note", language, start_date=model.start_date_text)
         _text(slide, _M, Emu(int(legend_y)), Emu(int(_SLIDE_W - 2 * _M)), Emu(int(legend_h)),
-              f"Program anchored to an anticipated commencement of {model.start_date_text} "
-              f"— dates shift with the actual award date.", max(6.5, 8.0 * scale), _MUTED)
+              anchored_note, max(6.5, 8.0 * scale), _MUTED)
     _grow(prs, total_h_emu)
     return _save(prs)
 
@@ -920,7 +931,8 @@ def _slide_timeline(model, accent: RGBColor, language: str = "en") -> bytes:
         pt = max(_BAR_LABEL_PT_MIN, _BAR_LABEL_PT_REF * scale + 0.5)
         _pill(slide, Emu(int(x0 + Inches(0.01))), Emu(int(y_top + (row_h - bar_h) / 2)),
               Emu(int(x1 - x0 - Inches(0.02))), Emu(bar_h),
-              accent, item.label or "[UNTITLED SCOPE ITEM]", pt, align=PP_ALIGN.LEFT)
+              accent, item.label or export_i18n.export_t("export_untitled_scope_item", language),
+              pt, align=PP_ALIGN.LEFT)
 
     if has_ms:
         _milestones(slide, model, grid_left, grid_right, bounds["grid_top"], bounds["grid_bottom"],
