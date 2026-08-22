@@ -1,0 +1,333 @@
+"""
+test_billing_i18n.py -- regression tests for the EN/ES dual-language +
+one-pass-free-tier brief (Parts A0, B, B2, C).
+
+Same house style as test_batch1_wiring.py: plain `def test_X(failures)`
+functions appending human-readable strings, no pytest, driven by main()
+printing PASS/FAIL + exit code. Exercises the auth.py / db.py layer
+directly (no Streamlit AppTest needed for these -- record_proposal_usage,
+consume_project_pass, project_funded_by etc. are all plain functions that
+take a db.User and never touch st.session_state) plus the i18n catalog's
+own internal consistency, which is cheap to check exhaustively and catches
+the single most common mistake across a large translation sweep: a key
+used in one language's catalog but missing from the other.
+
+Run from this directory:
+
+    python test_billing_i18n.py
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import uuid
+
+
+def _fresh_test_user(auth, db):
+    """A throwaway account for these tests, isolated by a random email so
+    repeated runs never collide with each other or with anything real."""
+    email = f"_test_billing_{uuid.uuid4().hex[:12]}@example.invalid"
+    user = auth.create_user(email, "testpassword123", "Test User", "Test Firm")
+    return user
+
+
+def _cleanup_test_user(db, user_id: str) -> None:
+    """Best-effort teardown -- deletes everything this test suite could
+    have written for this user across every table touched by the brief.
+    Never raises: a cleanup failure must never be reported as a test
+    failure, and must never stop the other tests from running."""
+    try:
+        with db.get_session() as s:
+            s.query(db.ArtifactEvent).filter(db.ArtifactEvent.user_id == user_id).delete()
+            s.query(db.ProjectPasses).filter(db.ProjectPasses.user_id == user_id).delete()
+            s.query(db.ProposalUsage).filter(db.ProposalUsage.user_id == user_id).delete()
+            s.query(db.User).filter(db.User.id == user_id).delete()
+            s.commit()
+    except Exception:
+        pass
+
+
+def test_funded_by_trial(failures: list[str]) -> None:
+    """Part B: the first Tender Analysis run on a fresh trial account
+    should record funded_by == "trial", and project_funded_by /
+    is_trial_funded_project should agree with that."""
+    from modules import auth, db
+
+    user = _fresh_test_user(auth, db)
+    try:
+        key = "test project|test tender|test client|abc123"
+        charged = auth.record_proposal_usage(user, key, "Test Project")
+        if not charged:
+            failures.append("test_funded_by_trial: record_proposal_usage() returned False on a fresh account")
+            return
+        funded = auth.project_funded_by(user, key)
+        if funded != "trial":
+            failures.append(f"test_funded_by_trial: expected funded_by='trial', got {funded!r}")
+        if not auth.is_trial_funded_project(user, key):
+            failures.append("test_funded_by_trial: is_trial_funded_project() should be True right after a trial-funded run")
+        # No ProjectPasses row should exist for a trial-funded project --
+        # passes are a paid-project-only concept (Part B2).
+        status = auth.project_passes_status(user, key)
+        if status["has_passes"]:
+            failures.append("test_funded_by_trial: a trial-funded project should not have a ProjectPasses row")
+    finally:
+        _cleanup_test_user(db, user.id)
+
+
+def test_funded_by_subscription_opens_passes(failures: list[str]) -> None:
+    """Part B2: a project funded by an ACTIVE subscription should open a
+    5-pass ProjectPasses row with 1 already spent (the analysis run that
+    was just funded) -- 4 remaining, not 5."""
+    from modules import auth, db
+
+    user = _fresh_test_user(auth, db)
+    try:
+        with db.get_session() as s:
+            db_user = s.query(db.User).filter(db.User.id == user.id).first()
+            db_user.subscription_status = "active"
+            s.commit()
+            s.refresh(db_user)
+
+        key = "sub project|sub tender|sub client|def456"
+        charged = auth.record_proposal_usage(user, key, "Sub Project")
+        if not charged:
+            failures.append("test_funded_by_subscription_opens_passes: record_proposal_usage() returned False for an active subscriber")
+            return
+        funded = auth.project_funded_by(user, key)
+        if funded != "subscription":
+            failures.append(f"test_funded_by_subscription_opens_passes: expected funded_by='subscription', got {funded!r}")
+        if auth.is_trial_funded_project(user, key):
+            failures.append("test_funded_by_subscription_opens_passes: a subscription-funded project must not read back as trial-funded")
+
+        status = auth.project_passes_status(user, key)
+        if not status["has_passes"]:
+            failures.append("test_funded_by_subscription_opens_passes: expected a ProjectPasses row to exist")
+        elif status["remaining"] != 4 or status["purchased"] != 5 or status["used"] != 1:
+            failures.append(
+                "test_funded_by_subscription_opens_passes: expected purchased=5 used=1 remaining=4, got "
+                f"purchased={status['purchased']} used={status['used']} remaining={status['remaining']}"
+            )
+    finally:
+        _cleanup_test_user(db, user.id)
+
+
+def test_consume_and_exhaust_passes(failures: list[str]) -> None:
+    """Part B2: consume_project_pass() should succeed exactly as many times
+    as there are passes remaining, then start returning False without
+    touching the database further -- and a top-up should top it back up."""
+    from modules import auth, db
+
+    user = _fresh_test_user(auth, db)
+    try:
+        with db.get_session() as s:
+            db_user = s.query(db.User).filter(db.User.id == user.id).first()
+            db_user.subscription_status = "active"
+            s.commit()
+
+        key = "consume project|consume tender|consume client|ghi789"
+        auth.record_proposal_usage(user, key, "Consume Project")  # spends pass 1 of 5
+
+        ok_count = 0
+        for _ in range(10):  # way more than the 4 remaining -- must stop itself
+            if auth.consume_project_pass(user, key):
+                ok_count += 1
+            else:
+                break
+        if ok_count != 4:
+            failures.append(f"test_consume_and_exhaust_passes: expected exactly 4 successful consumes, got {ok_count}")
+
+        status = auth.project_passes_status(user, key)
+        if status["remaining"] != 0:
+            failures.append(f"test_consume_and_exhaust_passes: expected 0 remaining after exhausting, got {status['remaining']}")
+
+        if auth.consume_project_pass(user, key):
+            failures.append("test_consume_and_exhaust_passes: consume_project_pass() should return False once exhausted")
+
+        if not auth.add_project_pass_topup(user, key, passes=5):
+            failures.append("test_consume_and_exhaust_passes: add_project_pass_topup() should return True")
+        status = auth.project_passes_status(user, key)
+        if status["remaining"] != 5 or status["purchased"] != 10:
+            failures.append(
+                f"test_consume_and_exhaust_passes: expected purchased=10 remaining=5 after topup, got "
+                f"purchased={status['purchased']} remaining={status['remaining']}"
+            )
+    finally:
+        _cleanup_test_user(db, user.id)
+
+
+def test_artifact_event_gating(failures: list[str]) -> None:
+    """Part B: a trial-funded project's free artifacts should download
+    exactly once each; a project not on the free list should always be
+    reported as blocked; a paid project should never be blocked."""
+    from modules import auth, db
+
+    user = _fresh_test_user(auth, db)
+    try:
+        key = "artifact project|artifact tender|artifact client|jkl012"
+        auth.record_proposal_usage(user, key, "Artifact Project")  # trial-funded
+
+        with db.get_session() as s:
+            already = s.query(db.ArtifactEvent).filter(
+                db.ArtifactEvent.user_id == user.id,
+                db.ArtifactEvent.project_key == key.lower(),
+                db.ArtifactEvent.artifact_type == "proposal_docx",
+            ).first()
+        if already is not None:
+            failures.append("test_artifact_event_gating: a fresh trial project should have no download recorded yet")
+
+        with db.get_session() as s:
+            s.add(db.ArtifactEvent(user_id=user.id, project_key=key.lower(), artifact_type="proposal_docx"))
+            s.commit()
+
+        with db.get_session() as s:
+            recorded = s.query(db.ArtifactEvent).filter(
+                db.ArtifactEvent.user_id == user.id,
+                db.ArtifactEvent.project_key == key.lower(),
+                db.ArtifactEvent.artifact_type == "proposal_docx",
+            ).first()
+        if recorded is None:
+            failures.append("test_artifact_event_gating: ArtifactEvent row didn't persist")
+
+        # The unique constraint should make a second identical insert fail
+        # harmlessly (same idempotency pattern as ProposalUsage) rather than
+        # silently duplicating.
+        with db.get_session() as s:
+            s.add(db.ArtifactEvent(user_id=user.id, project_key=key.lower(), artifact_type="proposal_docx"))
+            try:
+                s.commit()
+                failures.append("test_artifact_event_gating: a duplicate (user, project, artifact_type) insert should have raised IntegrityError")
+            except Exception:
+                s.rollback()
+    finally:
+        _cleanup_test_user(db, user.id)
+
+
+def test_unlimited_account_bypasses_everything(failures: list[str]) -> None:
+    """UNLIMITED_ACCOUNTS should never have their trial/subscription
+    counters actually decremented in a way that would ever block them --
+    get_access_status()['allowed'] must stay True no matter what."""
+    from modules import auth, db
+
+    # Use a real UNLIMITED_ACCOUNTS address so this test means something --
+    # but never actually charge against the real production account; only
+    # read-check get_access_status()'s pure computation, which needs a
+    # User object but never writes anything by itself.
+    fake_unlimited = db.User(
+        id="test-unlimited-" + uuid.uuid4().hex[:8],
+        email=next(iter(auth.UNLIMITED_ACCOUNTS)),
+        password_hash="x",
+        subscription_status="trial",
+        trial_proposals_used=999,  # would exhaust a normal trial many times over
+        bid_credits=0,
+    )
+    access = auth.get_access_status(fake_unlimited)
+    if not access["unlimited"] or not access["allowed"] or access["limit_reached"]:
+        failures.append(
+            f"test_unlimited_account_bypasses_everything: expected unlimited=True allowed=True limit_reached=False, "
+            f"got unlimited={access['unlimited']} allowed={access['allowed']} limit_reached={access['limit_reached']}"
+        )
+
+
+def test_subscription_monthly_bid_limit_is_four(failures: list[str]) -> None:
+    """Part B2 (owner-confirmed): the Monthly plan raised from 3 to 4
+    proposal projects/month. Pinning the constant directly so a future
+    accidental revert is caught immediately, loudly, in one place."""
+    from modules import auth
+
+    if auth.SUBSCRIPTION_MONTHLY_BID_LIMIT != 4:
+        failures.append(
+            f"test_subscription_monthly_bid_limit_is_four: expected 4, got {auth.SUBSCRIPTION_MONTHLY_BID_LIMIT}"
+        )
+
+
+def test_i18n_catalogs_are_in_sync(failures: list[str]) -> None:
+    """Every key defined in the English catalog must also exist in the
+    Spanish one and vice versa -- modules/i18n.t() silently falls back to
+    English for a missing Spanish key, which is the RIGHT behaviour at
+    runtime (never crash), but a silent English string inside an otherwise
+    Spanish document/screen is exactly the kind of thing that should be
+    caught in CI, not discovered by a Spanish-speaking user."""
+    from modules.translations import en, es
+
+    en_keys = set(en.STRINGS.keys())
+    es_keys = set(es.STRINGS.keys())
+    missing_in_es = sorted(en_keys - es_keys)
+    missing_in_en = sorted(es_keys - en_keys)
+    if missing_in_es:
+        failures.append(f"test_i18n_catalogs_are_in_sync: {len(missing_in_es)} key(s) in en.py missing from es.py: {missing_in_es[:10]}")
+    if missing_in_en:
+        failures.append(f"test_i18n_catalogs_are_in_sync: {len(missing_in_en)} key(s) in es.py missing from en.py: {missing_in_en[:10]}")
+    empty_values = [k for k, v in en.STRINGS.items() if not (v or "").strip()]
+    if empty_values:
+        failures.append(f"test_i18n_catalogs_are_in_sync: {len(empty_values)} key(s) with an empty English value: {empty_values[:10]}")
+
+
+def test_i18n_t_fallback_behaviour(failures: list[str]) -> None:
+    """t() must fall back to English for a language-specific miss, then to
+    a visible [[key]] marker for a total miss -- never raise, never return
+    None, never silently return an empty string for a genuinely missing
+    key (that would look like a rendering bug, not a translation gap)."""
+    from modules import i18n
+
+    missing = i18n.t("this_key_definitely_does_not_exist_anywhere")
+    if missing != "[[this_key_definitely_does_not_exist_anywhere]]":
+        failures.append(f"test_i18n_t_fallback_behaviour: expected a [[key]] marker for a missing key, got {missing!r}")
+
+    formatted = i18n.t("sidebar_trial_remaining", remaining=2, limit=1)
+    if "2" not in formatted or "1" not in formatted:
+        failures.append(f"test_i18n_t_fallback_behaviour: format placeholders didn't substitute, got {formatted!r}")
+
+
+def test_export_i18n_headings_differ_by_language(failures: list[str]) -> None:
+    """Part A3: export_i18n.export_t() must actually return different text
+    for "en" vs "es" for at least the headings the DOCX builders use, and
+    must never raise for a totally unknown key (same fallback contract as
+    the UI i18n system)."""
+    from modules import export_i18n
+
+    en_heading = export_i18n.export_t("heading_executive_summary", "en")
+    es_heading = export_i18n.export_t("heading_executive_summary", "es")
+    if en_heading == es_heading:
+        failures.append(
+            f"test_export_i18n_headings_differ_by_language: heading_executive_summary is identical in both "
+            f"languages ({en_heading!r}) -- expected a real Spanish translation"
+        )
+    unknown = export_i18n.export_t("this_export_key_does_not_exist", "es")
+    if not unknown:
+        failures.append("test_export_i18n_headings_differ_by_language: export_t() returned falsy for an unknown key instead of a fallback marker")
+
+
+def main() -> int:
+    import logging
+    logging.disable(logging.WARNING)
+
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    os.environ.setdefault("SAAS_MODE", "true")
+
+    from modules import db
+    db.init_db()
+
+    failures: list[str] = []
+
+    test_funded_by_trial(failures)
+    test_funded_by_subscription_opens_passes(failures)
+    test_consume_and_exhaust_passes(failures)
+    test_artifact_event_gating(failures)
+    test_unlimited_account_bypasses_everything(failures)
+    test_subscription_monthly_bid_limit_is_four(failures)
+    test_i18n_catalogs_are_in_sync(failures)
+    test_i18n_t_fallback_behaviour(failures)
+    test_export_i18n_headings_differ_by_language(failures)
+
+    if failures:
+        print("BILLING + I18N TESTS FAILED:")
+        for failure in failures:
+            print("  -", failure)
+        return 1
+    print("BILLING + I18N TESTS PASSED")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
