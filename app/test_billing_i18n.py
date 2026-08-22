@@ -346,6 +346,59 @@ def test_artifact_event_gating(failures: list[str]) -> None:
         _cleanup_test_user(db, user.id)
 
 
+def test_free_tier_rename_bypass_closed(failures: list[str]) -> None:
+    """Audit fix Part 2b: a trial account's free-artifact download record
+    is written with a fixed sentinel project_key (see
+    10_state_helpers.py's _TRIAL_ARTIFACT_EVENT_SENTINEL_KEY = ""), so it's
+    found by a query scoped to (user_id, artifact_type) alone -- NOT also
+    by project_key -- no matter what project_key the download happened
+    under, or what a rename (a brand new project_key -- see
+    _current_project_key()'s brief-hash-folded identity) would compute
+    next. This exercises the underlying DB mechanism the app-level
+    functions build on directly (those need a live Streamlit session with
+    current_user/_access set to call)."""
+    from modules import auth, db
+
+    user = _fresh_test_user(auth, db)
+    try:
+        with db.get_session() as s:
+            s.add(db.ArtifactEvent(user_id=user.id, project_key="", artifact_type="proposal_docx"))
+            s.commit()
+
+        # A "renamed" project computes a completely different project_key
+        # under the OLD (pre-fix) per-project scheme -- but the query the
+        # app actually runs now ignores project_key entirely, so this must
+        # still read as already-downloaded for this account+artifact_type.
+        with db.get_session() as s:
+            found = s.query(db.ArtifactEvent).filter(
+                db.ArtifactEvent.user_id == user.id,
+                db.ArtifactEvent.artifact_type == "proposal_docx",
+            ).first()
+        if found is None:
+            failures.append("test_free_tier_rename_bypass_closed: expected the account-level download record to be found regardless of project_key")
+
+        # A second insert under the same sentinel key (what a second
+        # download attempt -- under ANY project name -- would write) must
+        # collide with the unique constraint instead of creating a second row.
+        with db.get_session() as s:
+            s.add(db.ArtifactEvent(user_id=user.id, project_key="", artifact_type="proposal_docx"))
+            try:
+                s.commit()
+                failures.append("test_free_tier_rename_bypass_closed: a second account-level download record for the same artifact_type should have raised IntegrityError")
+            except Exception:
+                s.rollback()
+
+        with db.get_session() as s:
+            count = s.query(db.ArtifactEvent).filter(
+                db.ArtifactEvent.user_id == user.id,
+                db.ArtifactEvent.artifact_type == "proposal_docx",
+            ).count()
+        if count != 1:
+            failures.append(f"test_free_tier_rename_bypass_closed: expected exactly 1 ArtifactEvent row after the rename + duplicate attempts, got {count}")
+    finally:
+        _cleanup_test_user(db, user.id)
+
+
 def test_unlimited_account_bypasses_everything(failures: list[str]) -> None:
     """UNLIMITED_ACCOUNTS should never have their trial/subscription
     counters actually decremented in a way that would ever block them --
@@ -460,6 +513,7 @@ def main() -> int:
     test_bid_purchase_unlocks_trial_project(failures)
     test_topup_no_project_falls_back(failures)
     test_artifact_event_gating(failures)
+    test_free_tier_rename_bypass_closed(failures)
     test_unlimited_account_bypasses_everything(failures)
     test_subscription_monthly_bid_limit_is_four(failures)
     test_i18n_catalogs_are_in_sync(failures)

@@ -100,6 +100,10 @@ STRINGS: dict[str, str] = {
     "passes_topup_button": "Comprar 5 pasadas más ($50)",
     "passes_topup_success": "Se agregaron 5 pasadas a este proyecto.",
     "subscription_bid_limit_caption": "{limit} proyectos de propuesta incluidos por mes",
+    "export_download_mark_failed_warning": (
+        "No pudimos registrar esa descarga en este momento -- inténtalo de nuevo. Si sigue "
+        "ocurriendo, escribe a hello@civilproposals.com."
+    ),
 
     "bid_includes_popover_title": "Qué incluye una propuesta",
     "bid_includes_popover_body": (

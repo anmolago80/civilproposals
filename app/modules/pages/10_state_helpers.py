@@ -511,44 +511,79 @@ def _project_is_free_tier() -> bool:
     return auth.is_trial_funded_project(current_user, _key)
 
 
+_TRIAL_ARTIFACT_EVENT_SENTINEL_KEY = ""
+
+
 def _free_artifact_already_downloaded(artifact_type: str) -> bool:
-    """True once this project's ONE free download of `artifact_type` (one
+    """True once this ACCOUNT's ONE free download of `artifact_type` (one
     of FREE_TIER_ARTIFACTS) has already happened. Only meaningful while
     _project_is_free_tier() is True -- a paid project never writes or
-    checks these rows at all (see db.ArtifactEvent's docstring)."""
+    checks these rows at all (see db.ArtifactEvent's docstring).
+
+    Audit fix Part 2b: checked by (user_id, artifact_type) alone, NOT also
+    by project_key -- previously scoping by project_key meant the free
+    download was really "once per project IDENTITY", and project identity
+    folds in a hash of the brief text (see _current_project_key()), so
+    editing even one character of the project/tender/client name computed
+    a brand new, never-downloaded-from identity with no ArtifactEvent rows
+    against it: a fresh "one free download" on demand, repeatable forever
+    on the trial tier. The trial is fundamentally ONE bid; "one free
+    download of each artifact on the trial, ever" (account-wide) is the
+    correct rule and closes the rename bypass outright. Deliberately
+    ignores project_key on the read side too, so an ArtifactEvent row
+    written under the OLD per-project scheme (before this fix shipped)
+    still correctly counts as "already used" -- no data migration needed,
+    see _mark_free_artifact_downloaded()'s sentinel-key approach below."""
     if not _project_is_free_tier():
-        return False
-    _key = _current_project_key()
-    if not _key:
         return False
     with db.get_session() as s:
         return s.query(db.ArtifactEvent).filter(
             db.ArtifactEvent.user_id == current_user.id,
-            db.ArtifactEvent.project_key == _key.lower(),
             db.ArtifactEvent.artifact_type == artifact_type,
         ).first() is not None
 
 
 def _mark_free_artifact_downloaded(artifact_type: str) -> None:
-    """Records that this project's one free download of `artifact_type`
+    """Records that this ACCOUNT's one free download of `artifact_type`
     has now happened. Call this the moment a free-tier download actually
-    fires (see modules/pages/80_export.py) -- never for a paid project
-    (see _project_is_free_tier()), which has no download cap to track.
-    Best-effort/idempotent: the underlying unique constraint (see
-    db.ArtifactEvent) means a double-click racing this can insert twice
-    only in appearance -- the second insert fails harmlessly and is
-    swallowed here, same "already counted" outcome either way."""
+    fires (see modules/pages/80_export.py's on_click= callbacks) -- never
+    for a paid project (see _project_is_free_tier()), which has no
+    download cap to track.
+
+    Audit fix Part 2b: writes with project_key=_TRIAL_ARTIFACT_EVENT_SENTINEL_KEY
+    (a fixed empty string, not this project's real key) so the EXISTING
+    unique constraint on (user_id, project_key, artifact_type) enforces
+    "once per account", not "once per project" -- see
+    _free_artifact_already_downloaded()'s docstring for why per-project
+    scoping was a rename-driven bypass, and why this needs no database
+    schema change: a real project's key is always non-empty (a project
+    name is required before Tender Analysis can even run), so the sentinel
+    can never collide with one.
+
+    Audit fix Part 2c: previously caught a bare `except Exception` and
+    silently swallowed it -- meaning ANY database hiccup on this insert
+    (not just the expected duplicate-key "already downloaded" case) failed
+    OPEN, granting an unmetered extra download with no record and no sign
+    anything went wrong. Now only a genuine duplicate-key IntegrityError
+    (the harmless, expected "already downloaded" outcome -- including a
+    concurrent click racing this exact insert) is swallowed; any other
+    failure sets a flag the download button area checks and surfaces as
+    the standard retry warning instead of silently succeeding."""
     if not _project_is_free_tier():
         return
-    _key = _current_project_key()
-    if not _key:
-        return
+    from sqlalchemy.exc import IntegrityError
     with db.get_session() as s:
-        s.add(db.ArtifactEvent(user_id=current_user.id, project_key=_key.lower(), artifact_type=artifact_type))
+        s.add(db.ArtifactEvent(
+            user_id=current_user.id, project_key=_TRIAL_ARTIFACT_EVENT_SENTINEL_KEY,
+            artifact_type=artifact_type,
+        ))
         try:
             s.commit()
+        except IntegrityError:
+            s.rollback()
         except Exception:
             s.rollback()
+            st.session_state["_free_artifact_mark_error"] = artifact_type
 
 
 def _free_artifact_download_blocked(artifact_type: str) -> bool:

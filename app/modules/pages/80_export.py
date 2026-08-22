@@ -19,6 +19,14 @@ from __future__ import annotations
 with tabs[9]:
     st.subheader(i18n.t("export_subheader"))
 
+    # Audit fix Part 2c: _mark_free_artifact_downloaded() (10_state_helpers.py)
+    # now distinguishes a genuine database failure from the expected
+    # duplicate-key "already downloaded" case -- a genuine failure sets this
+    # flag instead of silently granting an unmetered extra download. Shown
+    # once, then cleared, same "read it once" pattern as a st.toast.
+    if st.session_state.pop("_free_artifact_mark_error", None):
+        st.warning(i18n.t("export_download_mark_failed_warning"))
+
     # Part B2: passes-remaining indicator for a paid project -- the brief's
     # own "sidebar/readiness pass counter" requirement, placed here (right
     # above the readiness checklist) rather than the sidebar itself, since
@@ -281,13 +289,23 @@ with tabs[9]:
                 st.button(i18n.t("export_download_docx_button"), disabled=True, type="primary", key="_dl_docx_blocked")
                 st.caption(i18n.t("free_tier_artifact_used"))
             else:
-                if st.download_button(
+                # Audit fix Part 2a: marked via on_click=, not by checking
+                # st.download_button()'s return value on the FOLLOWING
+                # rerun. The old pattern re-evaluated the gate BEFORE the
+                # mark ran (this same `if _free_artifact_download_blocked`
+                # check, at the top of the next script run, still saw "not
+                # yet used"), so the button rendered enabled for one more
+                # rerun and a fast second click served the file again.
+                # on_click fires as part of handling this click itself, so
+                # the mark commits before any later render can decide
+                # whether to show this button enabled again.
+                st.download_button(
                     i18n.t("export_download_docx_button"), data=st.session_state.docx_buffer,
                     file_name=f"{filename}_{suffix}.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     type="primary",
-                ):
-                    _mark_free_artifact_downloaded("proposal_docx")
+                    on_click=_mark_free_artifact_downloaded, args=("proposal_docx",),
+                )
         # All three PowerPoint companions below used to be rebuilt from
         # scratch on EVERY rerun of the script -- so every keystroke, every
         # checkbox, every tab change re-ran three full presentation builds
@@ -347,13 +365,15 @@ with tabs[9]:
                                 style=st.session_state.org_chart_style,
                             ),
                         )
-                        if st.download_button(
+                        # Audit fix Part 2a -- see the proposal DOCX button above.
+                        st.download_button(
                             i18n.t("export_download_orgchart_button"),
                             data=chart_bytes,
                             file_name="Org_Chart.pptx",
                             mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                         type="primary"):
-                            _mark_free_artifact_downloaded("org_chart_pptx")
+                            type="primary",
+                            on_click=_mark_free_artifact_downloaded, args=("org_chart_pptx",),
+                        )
                         st.caption(i18n.t("export_orgchart_caption"))
                     except Exception:
                         # Never let a chart-generation bug block the DOCX download that
@@ -475,13 +495,15 @@ with tabs[9]:
                     st.button(i18n.t("export_download_tendersummary_button"), disabled=True, type="primary", key="_dl_tendersummary_blocked")
                     st.caption(i18n.t("free_tier_artifact_used"))
                 else:
-                    if st.download_button(
+                    # Audit fix Part 2a -- see the proposal DOCX button above.
+                    st.download_button(
                         i18n.t("export_download_tendersummary_button"),
                         data=st.session_state.tender_summary_buffer,
                         file_name=f"{filename}_tender_summary.docx",
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                     type="primary"):
-                        _mark_free_artifact_downloaded("tender_summary_docx")
+                        type="primary",
+                        on_click=_mark_free_artifact_downloaded, args=("tender_summary_docx",),
+                    )
                     st.caption(i18n.t("export_tendersummary_caption"))
             else:
                 st.caption(i18n.t("export_tendersummary_pending_caption"))

@@ -111,6 +111,10 @@ STRINGS: dict[str, str] = {
     "passes_topup_button": "Buy 5 more passes ($50)",
     "passes_topup_success": "5 passes added to this project.",
     "subscription_bid_limit_caption": "{limit} proposal projects included per month",
+    "export_download_mark_failed_warning": (
+        "We couldn't record that download just now -- please try again. If it keeps happening, "
+        "email hello@civilproposals.com."
+    ),
 
     # Part C -- single-bid rules & rename-confirm dialog.
     "bid_includes_popover_title": "What a bid includes",
