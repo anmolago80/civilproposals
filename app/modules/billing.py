@@ -133,13 +133,21 @@ def create_checkout_session(user: db.User) -> str:
     return session.url
 
 
-def create_bid_checkout_session(user: db.User) -> str:
+def create_bid_checkout_session(user: db.User, topup_project_key: str | None = None) -> str:
     """Creates a Stripe Checkout session for a single $50 pay-as-you-go bid
     and returns the URL to redirect the user to -- mode="payment" (a
     one-time charge), NOT "subscription". Shares the exact same success/
     cancel URL shape as create_checkout_session, so both flows land back on
     the same ?checkout=success&session_id=... redirect handler below, which
-    tells them apart by the completed session's own `mode` field."""
+    tells them apart by the completed session's own `mode` field.
+
+    Part B2's "$50 top-up -> +5 passes on the SAME project" reuses this
+    exact same $50 Stripe price rather than a second one -- the brief's own
+    words are "the same $50 bid price"; the only difference is what the
+    payment is FOR, which is carried through Stripe as Checkout Session
+    metadata (topup_project_key) and read back by handle_checkout_redirect()
+    below. When given, the completed payment adds 5 passes to that project
+    instead of the normal "+1 bid_credit, starts a new project" outcome."""
     if not bid_is_configured():
         raise RuntimeError(
             "Pay-as-you-go isn't configured yet -- set STRIPE_SECRET_KEY and STRIPE_BID_PRICE_ID."
@@ -153,6 +161,8 @@ def create_bid_checkout_session(user: db.User) -> str:
         cancel_url=f"{APP_BASE_URL}/?checkout=cancelled",
         allow_promotion_codes=True,
     )
+    if topup_project_key:
+        kwargs["metadata"] = {"topup_project_key": topup_project_key.strip().lower()}
     if user.stripe_customer_id:
         kwargs["customer"] = user.stripe_customer_id
     else:
@@ -221,10 +231,21 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
         if not db_user:
             return None
         db_user.stripe_customer_id = session.get("customer") or db_user.stripe_customer_id
+        _topup_project_key = ((session.get("metadata") or {}).get("topup_project_key") or "").strip().lower()
         if session.get("mode") == "subscription":
             db_user.stripe_subscription_id = session.get("subscription") or db_user.stripe_subscription_id
             db_user.subscription_status = "active"
             _receipt_kind = "subscription"
+        elif _topup_project_key:
+            # Part B2 top-up: this $50 payment is earmarked (via Checkout
+            # Session metadata -- see create_bid_checkout_session) for +5
+            # passes on an EXISTING project, not a new bid_credit -- see
+            # auth.add_project_pass_topup(). The ProjectPasses row lives in
+            # its own short session (same pattern as auth.
+            # record_proposal_usage/consume_project_pass), so it's applied
+            # right after this transaction commits below rather than nested
+            # inside it.
+            _receipt_kind = "bid"
         else:
             # Pay-as-you-go: always +1 -- create_bid_checkout_session always
             # requests quantity=1, so there's no line-item quantity to read.
@@ -250,6 +271,19 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
             s.rollback()
             return s.query(db.User).filter(db.User.id == user_id).first()
         s.refresh(db_user)
+
+    if _topup_project_key:
+        try:
+            from modules import auth
+            auth.add_project_pass_topup(db_user, _topup_project_key, passes=5)
+        except Exception as exc:
+            # The $50 charge and this session's idempotency row are already
+            # committed above -- a failure here must never look like the
+            # customer's payment vanished. Logged loudly so it can be
+            # applied manually; never raised back to the checkout redirect
+            # handler, which would otherwise show a paying customer an
+            # error page immediately after a successful charge.
+            print(f"[topup_passes] failed for project {_topup_project_key}: {exc}", file=sys.stderr)
 
     # Best-effort receipt email -- the purchase itself is already committed
     # above regardless of whether this send succeeds, since a paying

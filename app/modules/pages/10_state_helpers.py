@@ -470,6 +470,176 @@ def _ai_block_reason() -> str | None:
     return _PROJECT_NOT_PAID_HINT
 
 
+# ---------------------------------------------------------------------------
+# Part B (one-pass free tier) / Part B2 (pass allowances per plan) --
+# entitlement checks for Export Pack's artifact downloads and Tender
+# Analysis's generation passes. See auth.project_funded_by(),
+# auth.is_trial_funded_project(), auth.project_passes_status() and
+# db.ArtifactEvent / db.ProjectPasses for the underlying data model.
+# ---------------------------------------------------------------------------
+
+# The exactly-3 artifacts a free-trial project gets ONE download each of
+# (Part B). Everything else Export Pack can produce (Methodology Table
+# PPTX, Delivery Program PPTX, filled returnable schedules) is paid-only,
+# full stop -- never offered to a trial-funded project regardless of
+# download count. Keys match the `artifact_type` values written to
+# db.ArtifactEvent by _mark_free_artifact_downloaded() below and read by
+# modules/pages/80_export.py's download buttons.
+FREE_TIER_ARTIFACTS = ("proposal_docx", "tender_summary_docx", "org_chart_pptx")
+
+
+def _project_is_free_tier() -> bool:
+    """True when the CURRENT project is subject to Part B's free-tier
+    artifact rules (a trial-funded, or not-yet-funded, project) -- False
+    for a paid (subscription/credit) or UNLIMITED_ACCOUNTS project, and
+    always False outside SaaS mode (the desktop/BYOK build has no
+    billing concept at all, so nothing here ever restricts it)."""
+    if not IS_SAAS_MODE or not current_user:
+        return False
+    if _access.get("unlimited"):
+        return False
+    _key = _current_project_key()
+    if not _key:
+        # No project identity yet -- nothing has been (or can be) analysed
+        # or exported, so there's nothing to gate; the readiness checklist
+        # elsewhere already blocks getting this far without one.
+        return False
+    return auth.is_trial_funded_project(current_user, _key)
+
+
+def _free_artifact_already_downloaded(artifact_type: str) -> bool:
+    """True once this project's ONE free download of `artifact_type` (one
+    of FREE_TIER_ARTIFACTS) has already happened. Only meaningful while
+    _project_is_free_tier() is True -- a paid project never writes or
+    checks these rows at all (see db.ArtifactEvent's docstring)."""
+    if not _project_is_free_tier():
+        return False
+    _key = _current_project_key()
+    if not _key:
+        return False
+    with db.get_session() as s:
+        return s.query(db.ArtifactEvent).filter(
+            db.ArtifactEvent.user_id == current_user.id,
+            db.ArtifactEvent.project_key == _key.lower(),
+            db.ArtifactEvent.artifact_type == artifact_type,
+        ).first() is not None
+
+
+def _mark_free_artifact_downloaded(artifact_type: str) -> None:
+    """Records that this project's one free download of `artifact_type`
+    has now happened. Call this the moment a free-tier download actually
+    fires (see modules/pages/80_export.py) -- never for a paid project
+    (see _project_is_free_tier()), which has no download cap to track.
+    Best-effort/idempotent: the underlying unique constraint (see
+    db.ArtifactEvent) means a double-click racing this can insert twice
+    only in appearance -- the second insert fails harmlessly and is
+    swallowed here, same "already counted" outcome either way."""
+    if not _project_is_free_tier():
+        return
+    _key = _current_project_key()
+    if not _key:
+        return
+    with db.get_session() as s:
+        s.add(db.ArtifactEvent(user_id=current_user.id, project_key=_key.lower(), artifact_type=artifact_type))
+        try:
+            s.commit()
+        except Exception:
+            s.rollback()
+
+
+def _free_artifact_download_blocked(artifact_type: str) -> bool:
+    """The single check a download button should gate on: True means show
+    the paywall message instead of the file. False for every paid/
+    unlimited/non-SaaS project (unlimited re-downloads -- Part B2's "buying
+    a bid unlocks everything" rule), and for a free-tier project's FIRST
+    download of one of the three FREE_TIER_ARTIFACTS; True for a free-tier
+    project's second+ download of one of those three, or for ANY download
+    of an artifact not on the free list at all (Methodology/Program PPTX,
+    filled schedules -- see FREE_TIER_ARTIFACTS)."""
+    if not _project_is_free_tier():
+        return False
+    if artifact_type not in FREE_TIER_ARTIFACTS:
+        return True
+    return _free_artifact_already_downloaded(artifact_type)
+
+
+def _project_passes_status() -> dict:
+    """Wraps auth.project_passes_status() for the current project -- see
+    that function's docstring for the returned shape. Returns the
+    "has_passes: False" shape outright for UNLIMITED_ACCOUNTS, non-SaaS
+    use, or a project with no identity yet, so callers never need to
+    special-case those themselves before reading ['remaining']."""
+    if not IS_SAAS_MODE or not current_user or _access.get("unlimited"):
+        return {"has_passes": False, "purchased": 0, "used": 0, "remaining": 0}
+    _key = _current_project_key()
+    if not _key:
+        return {"has_passes": False, "purchased": 0, "used": 0, "remaining": 0}
+    return auth.project_passes_status(current_user, _key)
+
+
+# ---------------------------------------------------------------------------
+# Part C -- rename-confirm dialog for a paid project. See _current_project_key()
+# above for why project_name/tender_name/client_name/brief-hash together ARE
+# the billing identity: changing any of the three typed names (Project
+# Setup fields commit live, with no separate save step -- see that tab's
+# own comment) computes a DIFFERENT key, meaning the paid analysis stays
+# attached to the OLD identity and the new one looks unpaid. This warns
+# once per actual identity change on an already-paid project, rather than
+# silently letting someone rename their way into what looks like a fresh,
+# unpaid project.
+# ---------------------------------------------------------------------------
+
+def _maybe_snapshot_paid_identity() -> None:
+    """Call once per rerun (Project Setup tab) to keep track of the most
+    recently seen PAID (subscription/credit-funded) project identity.
+    Deliberately does nothing for a trial-funded or not-yet-funded project
+    -- renaming one of those has no paid analysis to strand, so there's
+    nothing to warn about."""
+    if not IS_SAAS_MODE or not current_user:
+        return
+    _key = _current_project_key()
+    if not _key:
+        return
+    _funded = auth.project_funded_by(current_user, _key)
+    if _funded in ("subscription", "credit"):
+        st.session_state["_paid_identity_key"] = _key.lower()
+
+
+def _pending_rename_confirmation() -> str | None:
+    """Returns the NEW project key a rename dialog should warn about, or
+    None if nothing needs confirming right now. True exactly when the
+    account has a remembered PAID identity (see
+    _maybe_snapshot_paid_identity above) that no longer matches the
+    CURRENT identity, and this exact new identity hasn't already been
+    acknowledged (see _acknowledge_rename below) -- so the same dialog
+    doesn't re-appear on every rerun after the user's already clicked
+    through it once."""
+    if not IS_SAAS_MODE or not current_user:
+        return None
+    _prev_paid_key = st.session_state.get("_paid_identity_key")
+    if not _prev_paid_key:
+        return None
+    _key = (_current_project_key() or "").lower()
+    if not _key or _key == _prev_paid_key:
+        return None
+    if st.session_state.get("_rename_ack_key") == _key:
+        return None
+    return _key
+
+
+def _acknowledge_rename(new_key: str) -> None:
+    """Dismisses the rename-confirm dialog for `new_key` -- called from its
+    "Yes, rename" button. The old paid identity is deliberately NOT carried
+    forward onto the new key (that would silently transfer the paid status
+    to a project that hasn't actually been paid for under its new name,
+    exactly the loophole this dialog exists to close) -- it's simply
+    forgotten, so a later rename back to something resembling the old name
+    would (correctly) warn again if the account still holds a stale
+    _paid_identity_key from some other project in the meantime."""
+    st.session_state["_rename_ack_key"] = new_key
+    st.session_state.pop("_paid_identity_key", None)
+
+
 def _record_ai_click() -> None:
     """Call once, right when an AI-feature button's own click-handler
     begins real work -- the first line inside its `try:`/spinner block, not

@@ -62,6 +62,42 @@ with tabs[0]:
         st.selectbox("Proposal theme", PROPOSAL_THEMES, key="proposal_theme")
     st.caption("Saved as you type -- there's no separate save step.")
 
+    if IS_SAAS_MODE and current_user:
+        with st.popover(i18n.t("bid_includes_popover_title")):
+            st.markdown(i18n.t("bid_includes_popover_body"))
+
+    # Part C: renaming (or swapping the client/tender name on) an
+    # already-PAID project computes a different billing identity -- see
+    # _current_project_key()'s docstring -- so the paid analysis stays
+    # attached to the name it was actually billed under. This can't block
+    # the edit itself (Project Setup's fields commit live, with no submit
+    # step to intercept -- see the comment above), so instead it surfaces
+    # right after the change is detected, once per new identity.
+    _pending_rename_key = _pending_rename_confirmation()
+    if _pending_rename_key:
+        @st.dialog(i18n.t("rename_confirm_title"))
+        def _rename_confirm_dialog():
+            st.write(i18n.t("rename_confirm_body"))
+            _rc_col1, _rc_col2 = st.columns(2)
+            with _rc_col1:
+                if st.button(i18n.t("rename_confirm_yes"), type="primary", key="_rename_confirm_yes_btn"):
+                    _acknowledge_rename(_pending_rename_key)
+                    st.rerun()
+            with _rc_col2:
+                if st.button(i18n.t("rename_confirm_cancel"), key="_rename_confirm_cancel_btn"):
+                    # There's no reliable way to programmatically revert an
+                    # already-committed text_input value in Streamlit (see
+                    # the comment above) -- "Cancel" here dismisses the
+                    # dialog without erasing the acknowledgement, so it
+                    # simply stops nagging; the field itself still shows
+                    # what was typed, same as every other field on this
+                    # tab. The paid analysis is unaffected either way -- it
+                    # stays attached to the OLD identity regardless of
+                    # which button is clicked.
+                    _acknowledge_rename(_pending_rename_key)
+                    st.rerun()
+        _rename_confirm_dialog()
+
     # The cover page and the brief can disagree about when this is due, and
     # nothing used to say so. The typed date is what gets printed; the
     # extracted one is what the client actually wrote.
@@ -654,6 +690,32 @@ with tabs[2]:
             ).first() is not None
     _trial_blocked = IS_SAAS_MODE and current_user and not _access["allowed"] and not _already_counted
 
+    # Part B / B2: re-running Tender Analysis on a project that's ALREADY
+    # been recorded (see _already_counted above) used to always be free --
+    # correct for the idempotent "same project + same document, don't
+    # double-charge" case, but wrong once B2 redefined a "pass" as one full
+    # generation cycle: a trial-funded project gets exactly one pass, ever
+    # (Part B), and a paid project's re-runs draw down its 5-pass allowance
+    # (Part B2), not an unconditional free re-run forever. Both checks are
+    # no-ops (False/unlimited) outside SaaS mode or for UNLIMITED_ACCOUNTS.
+    _repeat_funded_by = auth.project_funded_by(current_user, _project_key) if (IS_SAAS_MODE and current_user and _already_counted) else ""
+    _repeat_is_trial = _repeat_funded_by in ("", "trial")
+    _repeat_passes = (
+        auth.project_passes_status(current_user, _project_key)
+        if (IS_SAAS_MODE and current_user and _already_counted and not _repeat_is_trial and not _access.get("unlimited"))
+        else {"has_passes": False, "purchased": 0, "used": 0, "remaining": 0}
+    )
+    # A trial-funded project's one pass was already spent by the run that
+    # set _already_counted True in the first place -- any further click is
+    # a second pass it never had. A paid project can re-run as long as
+    # project_passes_status shows any remaining; once that hits 0, it needs
+    # a top-up (see the "Buy 5 more passes" button below), same as running
+    # out of the trial needs an upgrade.
+    _repeat_blocked = (
+        IS_SAAS_MODE and current_user and _already_counted and not _access.get("unlimited")
+        and (_repeat_is_trial or _repeat_passes["remaining"] <= 0)
+    )
+
     # Trial page-cap hard block (Part 1) and the account-level AI-spend
     # ceiling / fair-use rate limit (Parts 2-3, see modules/limits.py and
     # _ai_gate_msg computed once per script run in 00_init.py) -- both
@@ -665,7 +727,24 @@ with tabs[2]:
         _page_cap_msg = limits.tender_page_cap_message(st.session_state.tender_extracted.page_count, _access)
     _extra_blocked_msg = _page_cap_msg or _ai_gate_msg
 
-    if _trial_blocked or (IS_SAAS_MODE and current_user and _access["limit_reached"] and not _already_counted):
+    if _repeat_blocked and _repeat_is_trial:
+        # Part B: the free trial's one-and-only generation pass on this
+        # project has already been spent -- re-running analysis again
+        # (even on the exact same document) now needs a paid bid, unlike
+        # the old unconditional "same project, always free" behaviour.
+        st.warning(i18n.t("free_tier_generate_used"))
+        _render_upgrade_buttons(current_user, key_prefix="_tab3_repeat_trial",
+                                 already_subscribed=_access["subscribed"] or _access["past_due"])
+    elif _repeat_blocked:
+        # Paid project, but its 5-pass allowance (Part B2) is used up.
+        st.warning(i18n.t("passes_exhausted"))
+        if st.button(i18n.t("passes_topup_button"), key="_tab3_passes_topup_btn", type="primary"):
+            try:
+                _checkout_url = billing.create_bid_checkout_session(current_user, topup_project_key=_project_key)
+                st.link_button("Continue to payment", _checkout_url, type="primary")
+            except Exception as exc:
+                _show_error("Couldn't start checkout", exc)
+    elif _trial_blocked or (IS_SAAS_MODE and current_user and _access["limit_reached"] and not _already_counted):
         if _access["past_due"]:
             # Same monthly quota as an active subscriber (see
             # auth.get_access_status), but the actionable fix here is fixing
@@ -705,9 +784,15 @@ with tabs[2]:
     # it by accident and land on the paywall with no idea why. Skipped
     # entirely for re-runs of the exact same project+document (see
     # _already_counted above -- those are free) and for unlimited accounts.
-    if IS_SAAS_MODE and current_user and ready and not _trial_blocked and not _access["unlimited"]:
-        if _already_counted:
-            st.caption("You've already run analysis on this exact project and document -- re-running it now won't use another bid.")
+    if IS_SAAS_MODE and current_user and ready and not _trial_blocked and not _repeat_blocked and not _access["unlimited"]:
+        if _already_counted and not _repeat_is_trial:
+            # Part B2: a paid project's re-run now spends one of its 5
+            # passes (not free forever the way it used to be) -- say so,
+            # same spirit as the "this will use 1 bid" captions below for a
+            # first run.
+            st.caption(i18n.t("passes_remaining_caption",
+                               remaining=_repeat_passes["remaining"], total=_repeat_passes["purchased"])
+                       + " -- running analysis again will use one.")
         elif _access["subscribed"] or _access["past_due"]:
             if _access["subscription_bids_remaining"] > 0:
                 st.caption(
@@ -721,7 +806,7 @@ with tabs[2]:
         else:
             st.caption(f"This will use 1 pay-as-you-go bid credit (you have {_access['bid_credits']} left).")
 
-    if st.button("Run Tender Analysis", type="primary", disabled=not ready or _trial_blocked or bool(_extra_blocked_msg)):
+    if st.button("Run Tender Analysis", type="primary", disabled=not ready or _trial_blocked or _repeat_blocked or bool(_extra_blocked_msg)):
         extracted = st.session_state.tender_extracted
         progress = st.progress(0.0, text="Analysing...")
 
@@ -763,9 +848,24 @@ with tabs[2]:
             progress.progress(1.0, text="Done.")
             st.success("Tender analysis complete.")
             if IS_SAAS_MODE and current_user:
-                auth.record_proposal_usage(current_user, _project_key, st.session_state.project_name)
-                # Signup-funnel step 3 (activation): a bid actually analysed.
-                analytics.track_event("Bid Analysed")
+                if _already_counted:
+                    # Part B2: this is a repeat run on an already-funded
+                    # PAID project (a trial-funded or first-ever repeat
+                    # would have been _repeat_blocked above, and the button
+                    # disabled) -- spend one of its passes rather than
+                    # calling record_proposal_usage(), which would just
+                    # no-op (the ProposalUsage row already exists).
+                    auth.consume_project_pass(current_user, _project_key)
+                else:
+                    auth.record_proposal_usage(current_user, _project_key, st.session_state.project_name)
+                    # Signup-funnel step 3 (activation): a bid actually analysed.
+                    analytics.track_event("Bid Analysed")
+                # Part C: remember this as the last-confirmed PAID identity
+                # (no-op for a trial-funded run) -- see
+                # _maybe_snapshot_paid_identity()'s docstring for why this
+                # has to happen right HERE (the moment a paid generation
+                # cycle actually completes) rather than on every rerun.
+                _maybe_snapshot_paid_identity()
         except Exception as exc:
             _show_error("Analysis failed", exc)
 

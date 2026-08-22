@@ -19,6 +19,33 @@ from __future__ import annotations
 with tabs[9]:
     st.subheader("Export Pack")
 
+    # Part B2: passes-remaining indicator for a paid project -- the brief's
+    # own "sidebar/readiness pass counter" requirement, placed here (right
+    # above the readiness checklist) rather than the sidebar itself, since
+    # passes are a PER-PROJECT figure and the sidebar's plan/status block is
+    # already a per-ACCOUNT one (see modules/pages/20_chrome.py) -- mixing
+    # the two there would misleadingly imply passes are account-wide.
+    # Nothing shown at all for a trial-funded project (trial_remaining in
+    # the sidebar already covers that), for UNLIMITED_ACCOUNTS, or outside
+    # SaaS mode.
+    _export_passes = _project_passes_status()
+    if _export_passes["has_passes"]:
+        if _export_passes["remaining"] > 0:
+            st.caption("🎫 " + i18n.t(
+                "passes_remaining_caption",
+                remaining=_export_passes["remaining"], total=_export_passes["purchased"],
+            ))
+        else:
+            st.warning(i18n.t("passes_exhausted"))
+            if st.button(i18n.t("passes_topup_button"), key="_export_passes_topup_btn", type="primary"):
+                try:
+                    _topup_url = billing.create_bid_checkout_session(
+                        current_user, topup_project_key=_current_project_key(),
+                    )
+                    st.link_button("Continue to payment", _topup_url, type="primary")
+                except Exception as exc:
+                    _show_error("Couldn't start checkout", exc)
+
     # Readiness checklist. Most of the red in an exported pack is not missing
     # information -- it is a step that hasn't been run. Listing those here,
     # each with where to go, turns a silently red document into a short list
@@ -236,12 +263,24 @@ with tabs[9]:
         # Table + Program, all PPTX, + Tender Summary.
         dcols = st.columns(2 if _is_letter() else 5)
         with dcols[0]:
-            st.download_button(
-                "Download DOCX", data=st.session_state.docx_buffer,
-                file_name=f"{filename}_{suffix}.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                type="primary",
-            )
+            # Part B: the Proposal DOCX is one of the three free-tier
+            # artifacts (see FREE_TIER_ARTIFACTS in 10_state_helpers.py) --
+            # a trial-funded project gets exactly one download of it; a
+            # paid/unlimited project always gets it. _mark_free_artifact_downloaded
+            # is a no-op for anything other than a free-tier project's
+            # first download, so it's always safe to call right after a
+            # successful click.
+            if _free_artifact_download_blocked("proposal_docx"):
+                st.button("Download DOCX", disabled=True, type="primary", key="_dl_docx_blocked")
+                st.caption(i18n.t("free_tier_artifact_used"))
+            else:
+                if st.download_button(
+                    "Download DOCX", data=st.session_state.docx_buffer,
+                    file_name=f"{filename}_{suffix}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    type="primary",
+                ):
+                    _mark_free_artifact_downloaded("proposal_docx")
         # All three PowerPoint companions below used to be rebuilt from
         # scratch on EVERY rerun of the script -- so every keystroke, every
         # checkbox, every tab change re-ran three full presentation builds
@@ -279,37 +318,47 @@ with tabs[9]:
         # Personnel/org chart section, so skip it there.
         if not _is_letter():
             with dcols[1]:
-                try:
-                    chart_bytes = _cached_pptx(
-                        "org_chart",
-                        _org_signature(st.session_state.org_chart_style),
-                        lambda: org_chart_pptx.populate_org_chart(
-                            st.session_state.resource_plan or [],
-                            client_name=st.session_state.client_name,
-                            project_name=st.session_state.project_name,
-                            tender_name=st.session_state.tender_name,
-                            theme_name=st.session_state.proposal_theme,
-                            style=st.session_state.org_chart_style,
-                        ),
-                    )
-                    st.download_button(
-                        "Download Org Chart (PPTX)",
-                        data=chart_bytes,
-                        file_name="Org_Chart.pptx",
-                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                     type="primary")
-                    st.caption(
-                        "Built from this project's resourcing plan -- each discipline's lead plus "
-                        "anyone added under them, with red \"TBC\" for unassigned roles and "
-                        "[CONFIRM TITLE] where a support member has no title yet. The client's own "
-                        "PM and subconsultant firms aren't shown -- the app holds no data for them. "
-                        "Fill in the gaps, then paste the finished chart over the first-pass image "
-                        "in the DOCX."
-                    )
-                except Exception:
-                    # Never let a chart-generation bug block the DOCX download that
-                    # actually matters -- just skip the org chart download this time.
-                    st.caption("Couldn't build the org chart this time -- the DOCX download above is unaffected.")
+                # Part B: the third free-tier artifact -- same one-download
+                # gate as the DOCX above, checked BEFORE the (non-trivial)
+                # PPTX build, so a project that's already used its free
+                # download doesn't pay the render cost for a file it can't
+                # have.
+                if _free_artifact_download_blocked("org_chart_pptx"):
+                    st.button("Download Org Chart (PPTX)", disabled=True, type="primary", key="_dl_orgchart_blocked")
+                    st.caption(i18n.t("free_tier_artifact_used"))
+                else:
+                    try:
+                        chart_bytes = _cached_pptx(
+                            "org_chart",
+                            _org_signature(st.session_state.org_chart_style),
+                            lambda: org_chart_pptx.populate_org_chart(
+                                st.session_state.resource_plan or [],
+                                client_name=st.session_state.client_name,
+                                project_name=st.session_state.project_name,
+                                tender_name=st.session_state.tender_name,
+                                theme_name=st.session_state.proposal_theme,
+                                style=st.session_state.org_chart_style,
+                            ),
+                        )
+                        if st.download_button(
+                            "Download Org Chart (PPTX)",
+                            data=chart_bytes,
+                            file_name="Org_Chart.pptx",
+                            mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                         type="primary"):
+                            _mark_free_artifact_downloaded("org_chart_pptx")
+                        st.caption(
+                            "Built from this project's resourcing plan -- each discipline's lead plus "
+                            "anyone added under them, with red \"TBC\" for unassigned roles and "
+                            "[CONFIRM TITLE] where a support member has no title yet. The client's own "
+                            "PM and subconsultant firms aren't shown -- the app holds no data for them. "
+                            "Fill in the gaps, then paste the finished chart over the first-pass image "
+                            "in the DOCX."
+                        )
+                    except Exception:
+                        # Never let a chart-generation bug block the DOCX download that
+                        # actually matters -- just skip the org chart download this time.
+                        st.caption("Couldn't build the org chart this time -- the DOCX download above is unaffected.")
 
         # Same placeholder-in-DOCX / finish-in-PowerPoint pattern as the org chart
         # above (see export_docx._build_methodology_table). Four generic stage
@@ -325,51 +374,58 @@ with tabs[9]:
         # entered.
         if not _is_letter():
             with dcols[2]:
-                try:
-                    methodology_bytes = _cached_pptx(
-                        "methodology",
-                        (
-                            st.session_state.methodology_style,
-                            _methodology_stage_signature(),
-                            tuple((i.title, tuple(i.tasks))
-                                  for i in (getattr(st.session_state.analysis, "scope_items", None) or [])),
-                            tuple(st.session_state.program_week_labels or []),
-                            st.session_state.client_name, st.session_state.project_name,
-                            st.session_state.proposal_theme,
-                            bool(st.session_state.methodology_wvr_confirmed),
-                        ),
-                        lambda: methodology_pptx.populate_methodology(
-                            st.session_state.analysis,
-                            client_name=st.session_state.client_name,
-                            project_name=st.session_state.project_name,
-                            theme_name=st.session_state.proposal_theme,
-                            stages=st.session_state.methodology_stages,
-                            week_labels=st.session_state.program_week_labels,
-                            wvr_confirmed=bool(st.session_state.methodology_wvr_confirmed),
-                            style=st.session_state.methodology_style,
-                        ),
-                    )
-                    st.download_button(
-                        "Download Methodology Table (PPTX)",
-                        data=methodology_bytes,
-                        file_name="Methodology_Table.pptx",
-                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                     type="primary")
-                    st.caption(
-                        "Built from the design stages you reviewed on the Draft Responses step -- "
-                        "every column is real content, with red TBC where the brief didn't support a "
-                        "cell. Without a reviewed grid it falls back to the generic four-stage layout. "
-                        "Paste the finished table into the proposal where the red placeholder note "
-                        "marks its place."
-                        if st.session_state.methodology_stages else
-                        "No design stages reviewed yet, so this is the generic four-stage fallback: "
-                        "column 2 from your real scope items, the rest red placeholders. Run **Draft "
-                        "methodology stages** on the Draft Responses step to fill all four columns."
-                    )
-                except Exception:
-                    # Never let a chart-generation bug block the DOCX download that
-                    # actually matters -- just skip the methodology table download this time.
-                    st.caption("Couldn't build the methodology table this time -- the DOCX download above is unaffected.")
+                # Part B: NOT one of the three free-tier artifacts -- always
+                # paid-only, for every free-tier project, regardless of
+                # whether its one free download has been used yet.
+                if _free_artifact_download_blocked("methodology_pptx"):
+                    st.button("Download Methodology Table (PPTX)", disabled=True, type="primary", key="_dl_methodology_blocked")
+                    st.caption(i18n.t("free_tier_paid_only_caption"))
+                else:
+                    try:
+                        methodology_bytes = _cached_pptx(
+                            "methodology",
+                            (
+                                st.session_state.methodology_style,
+                                _methodology_stage_signature(),
+                                tuple((i.title, tuple(i.tasks))
+                                      for i in (getattr(st.session_state.analysis, "scope_items", None) or [])),
+                                tuple(st.session_state.program_week_labels or []),
+                                st.session_state.client_name, st.session_state.project_name,
+                                st.session_state.proposal_theme,
+                                bool(st.session_state.methodology_wvr_confirmed),
+                            ),
+                            lambda: methodology_pptx.populate_methodology(
+                                st.session_state.analysis,
+                                client_name=st.session_state.client_name,
+                                project_name=st.session_state.project_name,
+                                theme_name=st.session_state.proposal_theme,
+                                stages=st.session_state.methodology_stages,
+                                week_labels=st.session_state.program_week_labels,
+                                wvr_confirmed=bool(st.session_state.methodology_wvr_confirmed),
+                                style=st.session_state.methodology_style,
+                            ),
+                        )
+                        st.download_button(
+                            "Download Methodology Table (PPTX)",
+                            data=methodology_bytes,
+                            file_name="Methodology_Table.pptx",
+                            mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                         type="primary")
+                        st.caption(
+                            "Built from the design stages you reviewed on the Draft Responses step -- "
+                            "every column is real content, with red TBC where the brief didn't support a "
+                            "cell. Without a reviewed grid it falls back to the generic four-stage layout. "
+                            "Paste the finished table into the proposal where the red placeholder note "
+                            "marks its place."
+                            if st.session_state.methodology_stages else
+                            "No design stages reviewed yet, so this is the generic four-stage fallback: "
+                            "column 2 from your real scope items, the rest red placeholders. Run **Draft "
+                            "methodology stages** on the Draft Responses step to fill all four columns."
+                        )
+                    except Exception:
+                        # Never let a chart-generation bug block the DOCX download that
+                        # actually matters -- just skip the methodology table download this time.
+                        st.caption("Couldn't build the methodology table this time -- the DOCX download above is unaffected.")
 
         # Same PPTX-companion pattern as the org chart / methodology table above -- the
         # Large Scope pack's DOCX has no Program section of its own (unlike the Small
@@ -378,36 +434,41 @@ with tabs[9]:
         # program_pptx.populate_program) to paste into a program/methodology slide.
         if not _is_letter():
             with dcols[3]:
-                try:
-                    program_bytes = _cached_pptx(
-                        "program",
-                        _program_signature(st.session_state.program_style),
-                        lambda: program_pptx.populate_program(
-                            st.session_state.program_schedule or {},
-                            st.session_state.program_week_labels or [],
-                            client_name=st.session_state.client_name,
-                            project_name=st.session_state.project_name,
-                            theme_name=st.session_state.proposal_theme,
-                            style=st.session_state.program_style,
-                            methodology_stages=st.session_state.methodology_stages,
-                            start_date=st.session_state.program_start_date,
-                            analysis=st.session_state.analysis,
-                        ),
-                    )
-                    st.download_button(
-                        "Download Program (PPTX)",
-                        data=program_bytes,
-                        file_name="Delivery_Program.pptx",
-                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                     type="primary")
-                    st.caption(
-                        "Built from the delivery program entered in the Fee Estimate tab -- shows a red "
-                        "placeholder if no program has been generated there yet."
-                    )
-                except Exception:
-                    # Never let a chart-generation bug block the DOCX download that
-                    # actually matters -- just skip the program download this time.
-                    st.caption("Couldn't build the program this time -- the DOCX download above is unaffected.")
+                # Part B: also not on the free list -- always paid-only.
+                if _free_artifact_download_blocked("program_pptx"):
+                    st.button("Download Program (PPTX)", disabled=True, type="primary", key="_dl_program_blocked")
+                    st.caption(i18n.t("free_tier_paid_only_caption"))
+                else:
+                    try:
+                        program_bytes = _cached_pptx(
+                            "program",
+                            _program_signature(st.session_state.program_style),
+                            lambda: program_pptx.populate_program(
+                                st.session_state.program_schedule or {},
+                                st.session_state.program_week_labels or [],
+                                client_name=st.session_state.client_name,
+                                project_name=st.session_state.project_name,
+                                theme_name=st.session_state.proposal_theme,
+                                style=st.session_state.program_style,
+                                methodology_stages=st.session_state.methodology_stages,
+                                start_date=st.session_state.program_start_date,
+                                analysis=st.session_state.analysis,
+                            ),
+                        )
+                        st.download_button(
+                            "Download Program (PPTX)",
+                            data=program_bytes,
+                            file_name="Delivery_Program.pptx",
+                            mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                         type="primary")
+                        st.caption(
+                            "Built from the delivery program entered in the Fee Estimate tab -- shows a red "
+                            "placeholder if no program has been generated there yet."
+                        )
+                    except Exception:
+                        # Never let a chart-generation bug block the DOCX download that
+                        # actually matters -- just skip the program download this time.
+                        st.caption("Couldn't build the program this time -- the DOCX download above is unaffected.")
 
         # The Tender Summary is a separate document (see export_docx.build_tender_summary_docx),
         # generated in the same click as the Proposal DOCX above -- everything about how the
@@ -418,17 +479,23 @@ with tabs[9]:
         # weighting chart or (unless run manually in tab 4) a compliance matrix/gap analysis.
         with dcols[1 if _is_letter() else 4]:
             if st.session_state.tender_summary_buffer:
-                st.download_button(
-                    "Download Tender Summary (DOCX)",
-                    data=st.session_state.tender_summary_buffer,
-                    file_name=f"{filename}_tender_summary.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                 type="primary")
-                st.caption(
-                    "Companion internal document -- guidance on the brief's main requirements, plus "
-                    "the compliance matrix, gap analysis, review checklist, and user input list where "
-                    "generated. Not part of the proposal itself."
-                )
+                # Part B: the second free-tier artifact.
+                if _free_artifact_download_blocked("tender_summary_docx"):
+                    st.button("Download Tender Summary (DOCX)", disabled=True, type="primary", key="_dl_tendersummary_blocked")
+                    st.caption(i18n.t("free_tier_artifact_used"))
+                else:
+                    if st.download_button(
+                        "Download Tender Summary (DOCX)",
+                        data=st.session_state.tender_summary_buffer,
+                        file_name=f"{filename}_tender_summary.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                     type="primary"):
+                        _mark_free_artifact_downloaded("tender_summary_docx")
+                    st.caption(
+                        "Companion internal document -- guidance on the brief's main requirements, plus "
+                        "the compliance matrix, gap analysis, review checklist, and user input list where "
+                        "generated. Not part of the proposal itself."
+                    )
             else:
                 st.caption("Tender Summary document will be generated alongside the DOCX above.")
 
@@ -470,6 +537,8 @@ with tabs[9]:
     # -----------------------------------------------------------------------
     st.divider()
     st.markdown("#### Returnable schedules")
+    if _project_is_free_tier():
+        st.caption(i18n.t("free_tier_paid_only_caption"))
     st.caption(
         "Fill the client's own response forms from this project's data -- company and contact "
         "details, key personnel, reference projects, fee build-up -- inside their original "
@@ -533,16 +602,21 @@ with tabs[9]:
                 continue
             _fcol1, _fcol2 = st.columns([1, 3])
             with _fcol1:
-                st.download_button(
-                    "Download filled copy",
-                    data=_res.file_bytes,
-                    file_name=returnable_schedules.filled_filename(_res.filename),
-                    mime=("application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                          if _res.kind == "docx" else
-                          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
-                    key=f"_sched_dl_{_res.filename}",
-                    type="primary",
-                )
+                # Part B: filled returnable schedules aren't on the free
+                # list either -- always paid-only for a free-tier project.
+                if _free_artifact_download_blocked("returnable_schedule"):
+                    st.button("Download filled copy", disabled=True, type="primary", key=f"_sched_dl_blocked_{_res.filename}")
+                else:
+                    st.download_button(
+                        "Download filled copy",
+                        data=_res.file_bytes,
+                        file_name=returnable_schedules.filled_filename(_res.filename),
+                        mime=("application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                              if _res.kind == "docx" else
+                              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+                        key=f"_sched_dl_{_res.filename}",
+                        type="primary",
+                    )
             with _fcol2:
                 st.caption(
                     f"{len(_res.filled)} field(s) filled from project data, "

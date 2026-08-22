@@ -169,7 +169,86 @@ class ProposalUsage(Base):
     project_name = Column(String, default="")
     created_at = Column(DateTime, default=_now)
 
+    # Part B of the one-pass-free-tier brief: WHICH funding tier actually
+    # paid for this project's first Tender Analysis run -- one of "trial",
+    # "subscription", "credit" (mirrors the three branches in
+    # auth.record_proposal_usage(), and stays "" for older rows recorded
+    # before this column existed, or for UNLIMITED_ACCOUNTS runs, which
+    # don't spend from any tier at all). This is what "has this project
+    # actually been PAID for, in money, not just trial-recorded" means --
+    # see auth.project_funded_by() and its docstring for exactly how the
+    # free-tier artifact/download gating (Part B) and the pass allowance
+    # (Part B2) use it. Deliberately a separate column from the mere
+    # existence of this row (which already means "already counted toward
+    # SOME tier's usage", see the class docstring above) -- existence alone
+    # can't distinguish a trial-funded project (free-tier rules apply) from
+    # a subscription/credit-funded one (paid rules apply).
+    funded_by = Column(String, default="")
+
     user = relationship("User", back_populates="proposal_usage")
+
+
+class ArtifactEvent(Base):
+    """Part B of the one-pass-free-tier brief: records that a specific free-
+    tier artifact has already been DOWNLOADED once for a given (user,
+    project). Only ever written for artifacts on the free list
+    (see modules/pages/80_export.py's _FREE_TIER_ARTIFACTS --
+    "proposal_docx", "tender_summary_docx", "org_chart_pptx") on a project
+    whose ProposalUsage.funded_by == "trial" -- a paid project never writes
+    rows here at all, because paid projects get unlimited re-downloads (see
+    auth.project_funded_by() / Part B2's "unlimited downloads of current
+    docs"). Existence of a row is what "this free download has already been
+    used" means; the unique constraint gives the same double-click-safe
+    idempotency as ProposalUsage (see that class's docstring for why the
+    check-then-insert pattern alone isn't enough under concurrency)."""
+    __tablename__ = "artifact_events"
+    __table_args__ = (
+        UniqueConstraint("user_id", "project_key", "artifact_type",
+                          name="uq_artifact_events_user_project_artifact"),
+    )
+
+    id = Column(String, primary_key=True, default=_uid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    project_key = Column(String, nullable=False)
+    artifact_type = Column(String, nullable=False)
+    created_at = Column(DateTime, default=_now)
+
+
+class ProjectPasses(Base):
+    """Part B2 (owner-confirmed, supersedes Part B's flat "one generation
+    pass" wherever the two conflict): tracks the generation-pass allowance
+    for ONE paid project -- a "pass" is spent by a full generation cycle
+    (the initial Tender Analysis run, or a later regeneration after a
+    tracked input actually changed -- see
+    modules/pages/10_state_helpers.py's _export_input_signature()/
+    _analysis_input_signature()-style staleness check, NOT by re-downloading
+    already-generated, unchanged documents).
+
+    One row per (user_id, project_key), created the moment a project is
+    first funded by a real $50 bid (see auth.record_proposal_usage()) --
+    never for trial-funded projects, which are governed by the plain
+    trial_proposals_used/limit counters instead (a trial is, by definition,
+    exactly one pass, on one project, ever). passes_purchased starts at 5
+    (a single bid's allowance) and increases by 5 with each top-up
+    (billing.create_bid_checkout_session() reused for the same purpose --
+    see billing.py's Part B2 handling in handle_checkout_redirect()).
+    passes_used increments by auth.consume_project_pass() each time a pass
+    is actually spent; never decremented. "Passes remaining" is always
+    `passes_purchased - passes_used`, computed on read rather than stored,
+    so there's exactly one place that number can drift out of sync with
+    reality."""
+    __tablename__ = "project_passes"
+    __table_args__ = (
+        UniqueConstraint("user_id", "project_key", name="uq_project_passes_user_project_key"),
+    )
+
+    id = Column(String, primary_key=True, default=_uid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    project_key = Column(String, nullable=False)
+    passes_purchased = Column(Integer, default=5)
+    passes_used = Column(Integer, default=0)
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now)
 
 
 class ProcessedCheckoutSession(Base):
@@ -759,6 +838,10 @@ def _run_light_migrations() -> None:
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_proposal_usage_user_project_key "
                 "ON proposal_usage (user_id, project_key)"
             ))
+        _pu_columns = {c["name"] for c in inspector.get_columns("proposal_usage")}
+        if "funded_by" not in _pu_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE proposal_usage ADD COLUMN funded_by VARCHAR DEFAULT ''"))
 
 
 def get_session():

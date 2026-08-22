@@ -951,13 +951,20 @@ def render_password_reset_screen(token: str) -> None:
 
 DEFAULT_TRIAL_LIMIT = 1
 
-# The Monthly plan's advertised "3 bids included" (see the landing page
+# The Monthly plan's advertised bids-included figure (see the landing page
 # pricing card) -- an active subscription used to be treated as fully
 # unlimited in code, which didn't match that promise. Spent via
 # db.User.subscription_bids_used, reset each real Stripe billing period by
 # billing.refresh_subscription_status(); see get_access_status/
 # record_proposal_usage below for how it's actually enforced.
-SUBSCRIPTION_MONTHLY_BID_LIMIT = 3
+#
+# Part B2 (owner-confirmed) raised this from 3 to 4 proposal projects/month
+# -- every other copy surface that quotes this number (landing page pricing
+# card, signup caption, sidebar/paywall messages) reads it from here or
+# from modules/translations/*.py's {limit} format placeholders rather than
+# hardcoding "3" a second time, specifically so this is the only place the
+# figure needs to change again.
+SUBSCRIPTION_MONTHLY_BID_LIMIT = 4
 
 # Accounts that get real, unconditional unlimited access -- never blocked,
 # never shown a trial-limit or upgrade banner, no matter how many bids they
@@ -1125,21 +1132,59 @@ def record_proposal_usage(user: db.User, project_key: str, project_name: str = "
         if already:
             return False
 
-        s.add(db.ProposalUsage(user_id=db_user.id, project_key=project_key, project_name=project_name))
+        # Part B: which tier actually funds this project -- "unlimited" for
+        # UNLIMITED_ACCOUNTS (never subject to the free-tier artifact/
+        # download rules, see project_funded_by()), else whichever of
+        # trial/subscription/credit the branches below actually spend from.
+        # Set alongside the row insert (same transaction as the spend
+        # itself) so it can never disagree with what was actually charged.
+        _is_unlimited_account = (db_user.email or "").strip().lower() in UNLIMITED_ACCOUNTS
+        _funded_by = "unlimited" if _is_unlimited_account else ""
+
+        _usage_row = db.ProposalUsage(user_id=db_user.id, project_key=project_key, project_name=project_name)
+        s.add(_usage_row)
         _just_used_last_trial_bid = False
         if db_user.subscription_status in ("active", "past_due"):
             sub_remaining = max(0, SUBSCRIPTION_MONTHLY_BID_LIMIT - (db_user.subscription_bids_used or 0))
             if sub_remaining > 0:
                 db_user.subscription_bids_used = (db_user.subscription_bids_used or 0) + 1
+                _funded_by = _funded_by or "subscription"
             elif (db_user.bid_credits or 0) > 0:
                 db_user.bid_credits = db_user.bid_credits - 1
+                _funded_by = _funded_by or "credit"
+            else:
+                _funded_by = _funded_by or "subscription"
         else:
             trial_remaining = max(0, DEFAULT_TRIAL_LIMIT - (db_user.trial_proposals_used or 0))
             if trial_remaining > 0:
                 db_user.trial_proposals_used = (db_user.trial_proposals_used or 0) + 1
                 _just_used_last_trial_bid = (trial_remaining == 1) and (db_user.bid_credits or 0) == 0
+                _funded_by = _funded_by or "trial"
             elif (db_user.bid_credits or 0) > 0:
                 db_user.bid_credits = db_user.bid_credits - 1
+                _funded_by = _funded_by or "credit"
+            else:
+                _funded_by = _funded_by or "trial"
+        _usage_row.funded_by = _funded_by
+
+        # Part B2: a project funded by real money (subscription quota or a
+        # pay-as-you-go credit -- never "trial" or "unlimited") gets its
+        # 5-pass allowance opened right here, in the same transaction as the
+        # charge that earned it -- see db.ProjectPasses's docstring. This
+        # first pass (the analysis run that just got funded) is spent
+        # immediately, same as consume_project_pass() would do, so a fresh
+        # $50 bid reads as "4 of 5 passes left," not "5 of 5" with the
+        # analysis that was just paid for somehow free.
+        if _funded_by in ("subscription", "credit"):
+            _existing_passes = s.query(db.ProjectPasses).filter(
+                db.ProjectPasses.user_id == db_user.id,
+                db.ProjectPasses.project_key == project_key,
+            ).first()
+            if _existing_passes is None:
+                s.add(db.ProjectPasses(
+                    user_id=db_user.id, project_key=project_key,
+                    passes_purchased=5, passes_used=1,
+                ))
         try:
             s.commit()
         except IntegrityError:
@@ -1174,3 +1219,146 @@ def record_proposal_usage(user: db.User, project_key: str, project_name: str = "
             print(f"[trial_used_email] failed for {user_email}: {exc}", file=sys.stderr)
 
     return True
+
+
+def project_funded_by(user: db.User, project_key: str) -> str:
+    """Which tier actually funded THIS project's first Tender Analysis run
+    -- "trial", "subscription", "credit", "unlimited", or "" if it hasn't
+    been recorded at all yet (record_proposal_usage() hasn't run for it).
+    See db.ProposalUsage.funded_by's docstring for what each value means
+    and why this is a separate question from "does a ProposalUsage row
+    exist" (10_state_helpers.py's _current_project_already_paid()).
+
+    This is the single source of truth Part B's free-tier artifact/download
+    gating (modules/pages/80_export.py's _FREE_TIER_ARTIFACTS handling) and
+    Part B2's pass-allowance lookup (project_passes_remaining() below) both
+    build on: "trial" (or "") means free-tier rules apply; "subscription"/
+    "credit"/"unlimited" means paid rules apply."""
+    project_key = (project_key or "").strip().lower()
+    if not project_key:
+        return ""
+    with db.get_session() as s:
+        row = s.query(db.ProposalUsage).filter(
+            db.ProposalUsage.user_id == user.id,
+            db.ProposalUsage.project_key == project_key,
+        ).first()
+        return (row.funded_by or "") if row else ""
+
+
+def is_trial_funded_project(user: db.User, project_key: str) -> bool:
+    """True when THIS project's paid-analysis rules haven't kicked in --
+    i.e. it was funded by the free trial (or never funded at all yet).
+    Older ProposalUsage rows recorded before the funded_by column existed
+    read back as "" (see the migration in db._run_light_migrations()),
+    which this treats the same as "trial" -- the conservative choice, since
+    every row from before this column existed WAS necessarily either a
+    (single-use) trial bid or a real payment, and there's no way to tell
+    which after the fact; erring toward "still free-tier-restricted" is
+    safer than accidentally granting a pre-existing project unlimited
+    downloads it never actually paid for."""
+    funded_by = project_funded_by(user, project_key)
+    return funded_by in ("", "trial")
+
+
+# ---------------------------------------------------------------------------
+# Part B2 -- pass allowances per plan (owner-confirmed; supersedes Part B's
+# flat "one generation pass" description wherever the two disagree -- see
+# db.ProjectPasses's docstring). A "pass" is one full generation cycle
+# (the initial Tender Analysis run, or a later regeneration once a tracked
+# input has actually changed) on ONE paid project. Trial-funded projects
+# never get a ProjectPasses row at all -- DEFAULT_TRIAL_LIMIT (1) already
+# *is* their one-and-only pass, enforced by the existing trial counters
+# above, so there is nothing additional to track for them here.
+# ---------------------------------------------------------------------------
+
+def project_passes_status(user: db.User, project_key: str) -> dict:
+    """Returns {"has_passes": bool, "purchased": int, "used": int,
+    "remaining": int}. "has_passes" is False for a project that has no
+    ProjectPasses row yet -- either it's trial-funded (see
+    is_trial_funded_project() instead) or record_proposal_usage() simply
+    hasn't run for it yet. UNLIMITED_ACCOUNTS should check
+    get_access_status()['unlimited'] BEFORE consulting this -- this
+    function reports real database numbers only, no bypass baked in, so
+    callers stay in control of where the unlimited exemption applies."""
+    project_key = (project_key or "").strip().lower()
+    if not project_key:
+        return {"has_passes": False, "purchased": 0, "used": 0, "remaining": 0}
+    with db.get_session() as s:
+        row = s.query(db.ProjectPasses).filter(
+            db.ProjectPasses.user_id == user.id,
+            db.ProjectPasses.project_key == project_key,
+        ).first()
+        if row is None:
+            return {"has_passes": False, "purchased": 0, "used": 0, "remaining": 0}
+        remaining = max(0, (row.passes_purchased or 0) - (row.passes_used or 0))
+        return {
+            "has_passes": True, "purchased": row.passes_purchased or 0,
+            "used": row.passes_used or 0, "remaining": remaining,
+        }
+
+
+def consume_project_pass(user: db.User, project_key: str) -> bool:
+    """Spends one pass on this (already-paid) project -- call right before
+    a generation cycle actually runs (Tender Analysis, or a regeneration
+    once inputs have changed), mirroring record_proposal_usage()'s
+    "meter the action, then do the work" ordering. Returns False (and
+    spends nothing) if the project has no passes row yet, or has none
+    left -- the caller is expected to have already checked
+    project_passes_status()['remaining'] > 0 before letting the metered
+    action run at all, same contract as get_access_status()['allowed']
+    for the trial/subscription gate. Best-effort idempotency note: unlike
+    record_proposal_usage(), a spent pass has no natural per-call identity
+    to de-duplicate on (a regeneration is not idempotent the way "run
+    analysis on this exact document" is -- two distinct clicks are two
+    distinct passes by design), so this does not attempt double-click
+    protection beyond Streamlit's own button-disable-while-running
+    behaviour; callers should disable the triggering button while its
+    action is in flight."""
+    project_key = (project_key or "").strip().lower()
+    if not project_key:
+        return False
+    with db.get_session() as s:
+        row = s.query(db.ProjectPasses).filter(
+            db.ProjectPasses.user_id == user.id,
+            db.ProjectPasses.project_key == project_key,
+        ).first()
+        if row is None:
+            return False
+        remaining = max(0, (row.passes_purchased or 0) - (row.passes_used or 0))
+        if remaining <= 0:
+            return False
+        row.passes_used = (row.passes_used or 0) + 1
+        row.updated_at = datetime.now(timezone.utc)
+        s.commit()
+        return True
+
+
+def add_project_pass_topup(user: db.User, project_key: str, passes: int = 5) -> bool:
+    """+5 (default) passes on an existing paid project -- the "$50 top-up"
+    purchase flow (see billing.create_bid_checkout_session(), reused here
+    rather than a separate Stripe price: the brief specifies the SAME $50
+    bid price funds either a new project or a top-up on an existing one,
+    the choice is just which button the user clicked). If this project
+    somehow has no ProjectPasses row yet (funded_by wasn't "subscription"/
+    "credit" the first time -- e.g. a trial project being upgraded), this
+    creates a fresh 5-pass row rather than trying to graft a top-up onto a
+    trial project's non-existent allowance -- matches Part B's "buying a
+    bid unlocks everything, cleanly" acceptance criterion rather than a
+    confusing "1 already used + 5 more" figure the user never purchased
+    piecemeal."""
+    project_key = (project_key or "").strip().lower()
+    if not project_key:
+        return False
+    with db.get_session() as s:
+        row = s.query(db.ProjectPasses).filter(
+            db.ProjectPasses.user_id == user.id,
+            db.ProjectPasses.project_key == project_key,
+        ).first()
+        if row is None:
+            s.add(db.ProjectPasses(user_id=user.id, project_key=project_key,
+                                    passes_purchased=passes, passes_used=0))
+        else:
+            row.passes_purchased = (row.passes_purchased or 0) + passes
+            row.updated_at = datetime.now(timezone.utc)
+        s.commit()
+        return True
