@@ -34,6 +34,7 @@ STRINGS: dict[str, str] = {
     "sidebar_limit_reached": "Maximum number of free bids reached -- upgrade to keep going.",
     "sidebar_trial_used_has_credits": "Pay-as-you-go: {credits} bid credit(s) available",
     "sidebar_trial_remaining": "Free trial: {remaining} of {limit} bid(s) left",
+    "sidebar_passes_caption": "Passes: {remaining} of {total}",
     "sidebar_ai_disclaimer": "AI-generated content -- review before submitting. [Full Terms of Service](https://civilproposals.com/terms-of-service.html)",
 
     # Top-right banner.
@@ -1562,6 +1563,18 @@ STRINGS: dict[str, str] = {
         "{trial_limit:,}. Trim the package to the essentials (standard conditions of contract "
         "and similar boilerplate are usually safe to drop), or upgrade to a paid plan "
         "(up to {paid_limit:,} pages) to run this brief as-is."
+    ),
+    # Audit fix Part 8: paid-tier page limits, which the module comment
+    # already claimed existed but nothing actually enforced.
+    "limits_tender_page_soft_warn_message": (
+        "Heads up -- this brief runs to about {page_count:,} pages. Briefs over {soft_warn:,} pages "
+        "take longer to analyse and use more of your plan's AI usage. It'll still run fine, just "
+        "wanted you to know before you click Run."
+    ),
+    "limits_tender_page_hard_stop_paid_message": (
+        "This brief runs to about {page_count:,} pages, and your plan analyses up to {paid_limit:,}. "
+        "Trim the package to the essentials (standard conditions of contract and similar "
+        "boilerplate are usually safe to drop) to run this brief."
     ),
     "limits_trial_spend_ceiling_message": "Your free trial's AI allowance is used up -- upgrade to keep going; your work is saved.",
     "limits_ai_rate_limit_trial": "Give it a few minutes -- the trial has a fair-use speed limit.",

@@ -493,6 +493,50 @@ def test_unlimited_account_bypasses_everything(failures: list[str]) -> None:
         )
 
 
+def test_unlimited_bypasses_page_limits_and_rate_gate(failures: list[str]) -> None:
+    """Audit Round 2, Part 8: UNLIMITED_ACCOUNTS must bypass the paid-tier
+    200-page soft warn / 300-page hard stop (modules/limits.py) exactly like
+    every other gate in the app. Also pins down the rate-gate cap itself:
+    ai_rate_limit_peek()/record_ai_call() have no concept of "unlimited"
+    (they only take a bare is_trial bool), so a merely-paid account that
+    isn't in UNLIMITED_ACCOUNTS IS still expected to hit the paid cap -- the
+    bypass has to happen at the call site (00_init.py), not inside those
+    functions. This test can't exercise that call site directly (00_init.py
+    is a Streamlit page, exec'd in place rather than importable -- see the
+    module docstring above), so it instead pins the two building blocks the
+    bypass depends on: (a) an unlimited access dict makes both page-limit
+    functions return None no matter how large page_count is, and (b) calling
+    record_ai_call() past PAID_AI_CALLS_PER_5MIN times in a row for a fresh
+    (non-unlimited) user id DOES eventually block, confirming 00_init.py's
+    explicit `if _access.get('unlimited')` skip is doing real work and not
+    just guarding against a check that could never fire anyway."""
+    from modules import limits
+
+    unlimited_access = {"unlimited": True, "subscribed": False, "past_due": False, "bid_credits": 0}
+    for huge_pages in (250, 301, 10_000):
+        if limits.tender_page_cap_message(huge_pages, unlimited_access) is not None:
+            failures.append(
+                f"test_unlimited_bypasses_page_limits_and_rate_gate: tender_page_cap_message() blocked an "
+                f"unlimited account at {huge_pages} pages"
+            )
+        if limits.tender_page_soft_warn_message(huge_pages, unlimited_access) is not None:
+            failures.append(
+                f"test_unlimited_bypasses_page_limits_and_rate_gate: tender_page_soft_warn_message() warned an "
+                f"unlimited account at {huge_pages} pages"
+            )
+
+    probe_user_id = "test-rate-probe-" + uuid.uuid4().hex[:8]
+    blocked = None
+    for _ in range(limits.PAID_AI_CALLS_PER_5MIN + 1):
+        blocked = limits.record_ai_call(probe_user_id, is_trial=False)
+    if blocked is None:
+        failures.append(
+            "test_unlimited_bypasses_page_limits_and_rate_gate: expected a paid (non-unlimited) account to "
+            "eventually hit the fair-use rate cap after PAID_AI_CALLS_PER_5MIN+1 calls, got None every time -- "
+            "if this cap can never trip, 00_init.py's unlimited bypass would be pointless dead code"
+        )
+
+
 def test_subscription_monthly_bid_limit_is_four(failures: list[str]) -> None:
     """Part B2 (owner-confirmed): the Monthly plan raised from 3 to 4
     proposal projects/month. Pinning the constant directly so a future
@@ -617,6 +661,7 @@ def main() -> int:
     test_free_tier_rename_bypass_closed(failures)
     test_migrate_project_identity_on_rename(failures)
     test_unlimited_account_bypasses_everything(failures)
+    test_unlimited_bypasses_page_limits_and_rate_gate(failures)
     test_subscription_monthly_bid_limit_is_four(failures)
     test_email_bid_count_matches_subscription_limit(failures)
     test_i18n_catalogs_are_in_sync(failures)

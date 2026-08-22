@@ -880,7 +880,7 @@ def _render_swimlanes(model: ProgramModel, accent: str):
         flow.block(_SWIM_LANE_HEADER_H_REF, draw_lane_header)
 
         for item in members:
-            def draw_row(y_top, y_bottom, scale, item=item):
+            def draw_row(y_top, y_bottom, scale, item=item, colour=colour):
                 centre_y = (y_top + y_bottom) / 2
                 pt = max(_ROW_LABEL_PT_MIN, _ROW_LABEL_PT_REF * 0.92 * scale)
                 axes.text(CONTENT_LEFT_IN + 0.10 * scale, centre_y, item.label, fontsize=pt,

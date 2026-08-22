@@ -914,6 +914,49 @@ def check_generated_language_stale_notice(failures: list[str]) -> None:
         failures.append(f"[Part5] Spanish stale-language notice didn't substitute both language names: {es_filled!r}")
 
 
+def check_swimlane_bar_colours_match_stage(failures: list[str]) -> None:
+    """Audit Round 2, Part 8: program_render.py:883's draw_row() closure
+    captured `colour` by reference from the enclosing lane loop (only
+    `item=item` was bound as a default arg) -- since every draw_row callback
+    across every lane actually runs later, inside flow.render(), by the
+    time any of them ran `colour` had already advanced to the LAST lane's
+    value, so every swimlane bar drew in that one colour regardless of
+    which stage it belonged to, contradicting the legend right next to it.
+    The PPTX twin (program_pptx.py:668) already bound correctly. Renders
+    four stages' worth of bars and asserts each one's facecolor is its OWN
+    stage's colour, not all four collapsed to the last stage's."""
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.patches import FancyBboxPatch
+    import matplotlib.colors as mcolors
+
+    from modules.program_render import ProgramModel, ProgramItem, STAGE_COLOURS, _render_swimlanes
+
+    model = ProgramModel(
+        items=[
+            ProgramItem(label="Task A1", start_week=1, end_week=3, stage_index=0),
+            ProgramItem(label="Task B1", start_week=3, end_week=5, stage_index=1),
+            ProgramItem(label="Task C1", start_week=5, end_week=7, stage_index=2),
+            ProgramItem(label="Task D1", start_week=6, end_week=8, stage_index=3),
+        ],
+        week_labels=[f"Wk {i}" for i in range(1, 10)],
+        stages=["Stage A", "Stage B", "Stage C", "Stage D"],
+    )
+    fig = _render_swimlanes(model, "#1D4ED8")
+    axes = fig.axes[0]
+    bar_colours = [p.get_facecolor() for p in axes.patches if isinstance(p, FancyBboxPatch)]
+    expected = [mcolors.to_rgba(STAGE_COLOURS[i]) for i in (0, 1, 2, 3)]
+    if len(bar_colours) != len(expected):
+        failures.append(
+            f"[Part8] check_swimlane_bar_colours_match_stage: expected {len(expected)} bars, found {len(bar_colours)}")
+        return
+    for i, (got, want) in enumerate(zip(bar_colours, expected)):
+        if got != want:
+            failures.append(
+                f"[Part8] check_swimlane_bar_colours_match_stage: bar {i} (stage {i}) drew in "
+                f"{got} instead of its own stage's colour {want} -- the closure-capture bug is back")
+
+
 def main() -> int:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     out_dir = None
@@ -940,6 +983,7 @@ def main() -> int:
     check_spanish_pptx(failures)
     check_spanish_resourcing_reasons(failures)
     check_generated_language_stale_notice(failures)
+    check_swimlane_bar_colours_match_stage(failures)
 
     if failures:
         print("EXPORT TESTS FAILED:")

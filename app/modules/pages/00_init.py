@@ -436,8 +436,21 @@ if IS_SAAS_MODE:
     # per-click "this call counts" recording happens at each AI feature's
     # own click handler via limits.record_ai_call(), not here (this file
     # reruns on every interaction across the whole app, not just AI ones).
-    _ai_rate_blocked_msg = limits.ai_rate_limit_peek(
-        current_user.id if current_user else None, not limits.is_paid_tier(_access),
+    # UNLIMITED_ACCOUNTS bypass the rate gate entirely (Audit Round 2, Part
+    # 8) -- ai_rate_limit_peek() only knows trial-vs-paid (it takes a bare
+    # is_trial bool, not the access dict), so before this fix an unlimited
+    # account was still capped at PAID_AI_CALLS_PER_5MIN like any other paid
+    # tier, contradicting the "unlimited bypasses every gate" rule and the
+    # comment at 30_setup_upload_analysis.py's Tender Analysis block, which
+    # claimed _ai_gate_msg was "already None" for unlimited when it wasn't.
+    # Matches the bypass pattern in 10_state_helpers.py's
+    # _current_project_already_paid() (`if _access.get("unlimited"): return
+    # True`, checked before anything else).
+    _ai_rate_blocked_msg = (
+        None if _access.get("unlimited") else
+        limits.ai_rate_limit_peek(
+            current_user.id if current_user else None, not limits.is_paid_tier(_access),
+        )
     )
     # Spend ceiling takes priority in the message (worth explaining --
     # "upgrade"); the rate limit is purely transient ("try again shortly").

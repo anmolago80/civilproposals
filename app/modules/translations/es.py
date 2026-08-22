@@ -29,6 +29,7 @@ STRINGS: dict[str, str] = {
     "sidebar_limit_reached": "Se alcanzó el número máximo de propuestas gratuitas -- mejora tu plan para continuar.",
     "sidebar_trial_used_has_credits": "Pago por uso: {credits} crédito(s) de propuesta disponibles",
     "sidebar_trial_remaining": "Prueba gratuita: quedan {remaining} de {limit} propuesta(s)",
+    "sidebar_passes_caption": "Pasadas: {remaining} de {total}",
     "sidebar_ai_disclaimer": "Contenido generado por IA -- revísalo antes de enviarlo. [Términos de servicio completos](https://civilproposals.com/terms-of-service.html)",
 
     "btn_my_proposals": "📁 Mis propuestas",
@@ -1574,6 +1575,17 @@ STRINGS: dict[str, str] = {
         "hasta {trial_limit:,}. Recorta el paquete a lo esencial (las condiciones estándar del "
         "contrato y textos similares generalmente se pueden quitar sin problema), o mejora a "
         "un plan de pago (hasta {paid_limit:,} páginas) para ejecutar este brief tal cual."
+    ),
+    "limits_tender_page_soft_warn_message": (
+        "Aviso -- este brief tiene alrededor de {page_count:,} páginas. Los briefs de más de "
+        "{soft_warn:,} páginas tardan más en analizarse y usan más del uso de IA de tu plan. "
+        "Igualmente funcionará bien, solo queríamos que lo supieras antes de hacer clic en Ejecutar."
+    ),
+    "limits_tender_page_hard_stop_paid_message": (
+        "Este brief tiene alrededor de {page_count:,} páginas, y tu plan analiza hasta "
+        "{paid_limit:,}. Recorta el paquete a lo esencial (las condiciones estándar del "
+        "contrato y textos similares generalmente se pueden quitar sin problema) para "
+        "poder ejecutar este brief."
     ),
     "limits_trial_spend_ceiling_message": "Se agotó el límite de IA de tu prueba gratuita -- mejora tu plan para continuar; tu trabajo está guardado.",
     "limits_ai_rate_limit_trial": "Espera unos minutos -- la prueba tiene un límite de velocidad de uso razonable.",

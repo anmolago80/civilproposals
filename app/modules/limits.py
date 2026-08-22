@@ -39,7 +39,8 @@ from datetime import datetime, timezone
 UPLOAD_LIMITS = {
     # key: (trial_limit, paid_limit)
     "tender_files":        (3, 10),    # brief + addenda file count
-    "tender_pages":        (100, 300), # combined analysed pages (hard for trial; paid warns at 200 as today)
+    "tender_pages":        (100, 300), # combined analysed pages -- trial hard-blocks at 100; paid soft-warns at
+                                        # PAID_TENDER_PAGE_SOFT_WARN_PAGES (200) and hard-blocks at this 300 ceiling
     "cv_library":          (5, 25),
     "previous_proposals":  (2, 10),
     "project_references":  (5, 25),
@@ -147,17 +148,36 @@ def enforce_count_limit(items: list, key: str, access: dict | None, item_label_f
 
 
 def tender_page_cap_message(page_count: int, access: dict | None) -> str | None:
-    """Trial only: a HARD block once the combined brief+addenda page count
-    exceeds the trial cap -- unlike every other limit above, there's no
+    """A HARD block once the combined brief+addenda page count exceeds this
+    account's tier ceiling -- unlike every other limit above, there's no
     sane way to 'process up to the limit' for page count (truncating
     extracted text mid-document would corrupt the analysis), so this
     blocks the Tender Analysis action itself rather than trimming
-    anything. Returns None when clear to proceed (including for any paid
-    tier -- paid keeps the existing separate 200-page soft warn, unrelated
-    to this hard cap)."""
-    if is_paid_tier(access):
+    anything. Returns None when clear to proceed.
+
+    Trial: hard cap at UPLOAD_LIMITS['tender_pages'][0] (100) -- unchanged.
+    Paid: previously had NO ceiling at all here despite the module-level
+    comment claiming one existed (Audit Round 2, Part 8) -- now hard-blocks
+    at UPLOAD_LIMITS['tender_pages'][1] (300), same can't-truncate-mid-
+    document reasoning as the trial cap. See tender_page_soft_warn_message()
+    below for the non-blocking 200-page heads-up that applies before this
+    hard stop. UNLIMITED_ACCOUNTS always returns None here, same as every
+    other gate in the app -- is_paid_tier() alone would also be True for
+    unlimited, which would wrongly subject it to the new 300-page stop, so
+    that's checked and excluded FIRST."""
+    trial_limit, paid_limit = UPLOAD_LIMITS["tender_pages"]
+    if access and access.get("unlimited"):
         return None
-    trial_limit, _ = UPLOAD_LIMITS["tender_pages"]
+    if is_paid_tier(access):
+        if page_count <= paid_limit:
+            return None
+        # No PAID_PLAN_UPGRADE_NOTE here, unlike the trial message below --
+        # this account is already on the paid tier and 300 pages is the
+        # ceiling the whole app supports (a bigger plan wouldn't raise it),
+        # so "upgrade" isn't an actionable next step the way it is for a
+        # trial account. Trimming the brief is the only real fix.
+        from modules import i18n
+        return i18n.t("limits_tender_page_hard_stop_paid_message", page_count=page_count, paid_limit=paid_limit)
     if page_count <= trial_limit:
         return None
     from modules import i18n
@@ -165,9 +185,36 @@ def tender_page_cap_message(page_count: int, access: dict | None) -> str | None:
         i18n.t(
             "limits_tender_page_cap_message",
             page_count=page_count, trial_limit=trial_limit,
-            paid_limit=UPLOAD_LIMITS["tender_pages"][1],
+            paid_limit=paid_limit,
         )
         + " " + PAID_PLAN_UPGRADE_NOTE
+    )
+
+
+PAID_TENDER_PAGE_SOFT_WARN_PAGES = 200
+
+
+def tender_page_soft_warn_message(page_count: int, access: dict | None) -> str | None:
+    """Non-blocking heads-up for a paid/unlimited account whose brief is
+    over PAID_TENDER_PAGE_SOFT_WARN_PAGES (200) but still under the hard
+    stop in tender_page_cap_message() (300) -- large briefs like this take
+    longer to analyse and cost more in AI usage, worth knowing before
+    clicking Run, but never a reason to block the run itself. None for a
+    trial account (which has its own, lower, hard cap -- nothing between
+    100 and 300 is ever reachable there), None for UNLIMITED_ACCOUNTS (no
+    ceiling applies to them at all -- see tender_page_cap_message()), and
+    None once the hard stop above has already taken over."""
+    if access and access.get("unlimited"):
+        return None
+    if not is_paid_tier(access):
+        return None
+    _, paid_limit = UPLOAD_LIMITS["tender_pages"]
+    if page_count <= PAID_TENDER_PAGE_SOFT_WARN_PAGES or page_count > paid_limit:
+        return None
+    from modules import i18n
+    return i18n.t(
+        "limits_tender_page_soft_warn_message",
+        page_count=page_count, soft_warn=PAID_TENDER_PAGE_SOFT_WARN_PAGES,
     )
 
 

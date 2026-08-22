@@ -686,11 +686,22 @@ with tabs[2]:
     # _ai_gate_msg computed once per script run in 00_init.py) -- both
     # apply to Tender Analysis too, alongside the bid-count paywall above.
     # UNLIMITED_ACCOUNTS bypass both (_ai_gate_msg is already None for them;
-    # tender_page_cap_message() returns None for any paid/unlimited tier).
+    # tender_page_cap_message() returns None for UNLIMITED_ACCOUNTS and any
+    # paid tier under its own 300-page ceiling -- Audit Round 2, Part 8
+    # added that paid ceiling; it used to be trial-only despite the module
+    # comment claiming otherwise).
     _page_cap_msg = None
+    _page_soft_warn_msg = None
     if IS_SAAS_MODE and current_user and st.session_state.tender_extracted and st.session_state.tender_extracted.page_count:
         _page_cap_msg = limits.tender_page_cap_message(st.session_state.tender_extracted.page_count, _access)
+        # Non-blocking -- deliberately NOT folded into _extra_blocked_msg
+        # below, so it never disables the Run button. Only ever returns
+        # something when _page_cap_msg above is None (200-300 pages, paid,
+        # not yet at the hard stop), so the two are never shown together.
+        _page_soft_warn_msg = limits.tender_page_soft_warn_message(st.session_state.tender_extracted.page_count, _access)
     _extra_blocked_msg = _page_cap_msg or _ai_gate_msg
+    if _page_soft_warn_msg:
+        st.info(_page_soft_warn_msg)
 
     if _repeat_blocked and _repeat_is_trial:
         # Part B: the free trial's one-and-only generation pass on this
@@ -708,12 +719,18 @@ with tabs[2]:
     elif _repeat_blocked:
         # Paid project, but its 5-pass allowance (Part B2) is used up.
         st.warning(i18n.t("passes_exhausted"))
-        if st.button(i18n.t("passes_topup_button"), key="_tab3_passes_topup_btn", type="primary"):
-            try:
-                _checkout_url = billing.create_bid_checkout_session(current_user, topup_project_key=_project_key)
-                st.link_button(i18n.t("export_continue_to_payment_button"), _checkout_url, type="primary")
-            except Exception as exc:
-                _show_error(i18n.t("analysis_checkout_failed_error"), exc)
+        # Audit fix Part 8: was a two-step button-then-link_button flow --
+        # the exact vanishing-link bug 00_init.py's own comment documents
+        # and _render_upgrade_buttons() was rewritten to avoid (see that
+        # function's docstring), and the same fix already applied to this
+        # same button in 80_export.py. A single link_button, backed by the
+        # cached-URL helper, removes the round trip and stops minting a
+        # fresh Stripe Checkout Session on every rerun.
+        try:
+            _checkout_url = _get_or_create_checkout_url(current_user, "bid", topup_project_key=_project_key)
+            st.link_button(i18n.t("passes_topup_button"), _checkout_url, key="_tab3_passes_topup_btn", type="primary")
+        except Exception as exc:
+            _show_error(i18n.t("analysis_checkout_failed_error"), exc)
     elif _trial_blocked or (IS_SAAS_MODE and current_user and _access["limit_reached"] and not _already_counted):
         if _access["past_due"]:
             # Same monthly quota as an active subscriber (see

@@ -123,6 +123,23 @@ with st.sidebar:
                 remaining=_access["trial_remaining"], limit=_access["trial_limit"],
             ))
 
+        # Audit Round 2, Part 8 ("accepted deviations" note): the real
+        # per-project pass indicator lives on the Export tab (see
+        # _project_passes_status() usage in 80_export.py), not here -- that
+        # placement itself is an accepted deviation from the original brief
+        # and stays. This is the cheap compromise the brief still asks for:
+        # a one-line "Passes: X of Y" visible from ANY tab, not just Export,
+        # for a paid project that has passes purchased. Silent (no output)
+        # for a trial-funded project, UNLIMITED_ACCOUNTS, or a project with
+        # no passes at all -- _project_passes_status() already collapses all
+        # of those to has_passes=False, same guard 80_export.py relies on.
+        _sidebar_passes = _project_passes_status()
+        if _sidebar_passes["has_passes"]:
+            st.caption("🎫 " + i18n.t(
+                "sidebar_passes_caption",
+                remaining=_sidebar_passes["remaining"], total=_sidebar_passes["purchased"],
+            ))
+
     # Vertical progress list -- the sidebar's main focus (see
     # branding.vertical_steps_component_html()). It's also the app's real
     # navigation -- the native tab strip is

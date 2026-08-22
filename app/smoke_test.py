@@ -389,8 +389,27 @@ def main() -> int:
             failures.append("[limits] 100 pages (exactly the trial cap) was incorrectly blocked")
         if limits.tender_page_cap_message(101, TRIAL_ACCESS) is None:
             failures.append("[limits] 101st page didn't block analysis for a trial account")
-        if limits.tender_page_cap_message(500, PAID_ACCESS) is not None:
-            failures.append("[limits] a paid account's page count was incorrectly hard-blocked")
+        # Audit Round 2, Part 8: the paid tier previously had NO ceiling at
+        # all here despite the module-level comment claiming one existed --
+        # a paid account now soft-warns at 200 pages and hard-blocks at 300
+        # (see tender_page_cap_message()/tender_page_soft_warn_message()'s
+        # own docstrings). UNLIMITED_ACCOUNTS bypass both, at any page count.
+        if limits.tender_page_cap_message(150, PAID_ACCESS) is not None:
+            failures.append("[limits] a paid account under the 200-page soft-warn threshold was incorrectly hard-blocked")
+        if limits.tender_page_soft_warn_message(150, PAID_ACCESS) is not None:
+            failures.append("[limits] a paid account under the 200-page soft-warn threshold was incorrectly soft-warned")
+        if limits.tender_page_cap_message(250, PAID_ACCESS) is not None:
+            failures.append("[limits] a paid account between 200 and 300 pages was incorrectly hard-blocked")
+        if limits.tender_page_soft_warn_message(250, PAID_ACCESS) is None:
+            failures.append("[limits] a paid account between 200 and 300 pages wasn't soft-warned")
+        if limits.tender_page_cap_message(301, PAID_ACCESS) is None:
+            failures.append("[limits] a paid account over the 300-page ceiling wasn't hard-blocked")
+        if limits.tender_page_soft_warn_message(301, PAID_ACCESS) is not None:
+            failures.append("[limits] a paid account already past the 300-page hard stop was also (redundantly) soft-warned")
+        if limits.tender_page_cap_message(500, UNLIMITED_ACCESS) is not None:
+            failures.append("[limits] an unlimited account's page count was incorrectly hard-blocked")
+        if limits.tender_page_soft_warn_message(500, UNLIMITED_ACCESS) is not None:
+            failures.append("[limits] an unlimited account's page count was incorrectly soft-warned")
 
         # AI-spend ceiling, backed by a real (SQLite fallback) AiCallLog row.
         from modules import db
