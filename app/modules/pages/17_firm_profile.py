@@ -48,36 +48,26 @@ if st.session_state.get("_firm_profile_mode"):
         # never see a traceback -- and this page is optional, so failing it
         # cleanly costs them nothing except this screen.
         print(f"[firm profile] {exc}", file=sys.stderr)
-        st.error(
-            "**Couldn't open your firm profile just now.** Nothing has been lost -- your "
-            "profile is stored separately from your projects. Try again in a moment, and if it "
-            "keeps happening email hello@civilproposals.com."
-        )
-        if st.button("← Back to the app", key="_firm_exit_error"):
+        st.error(i18n.t("firmprofile_load_failed_error"))  # noqa: F821
+        if st.button(i18n.t("firmprofile_back_to_app_button"), key="_firm_exit_error"):  # noqa: F821
             _exit_firm_profile()
             st.rerun()
         st.stop()
 
     _hl, _hr = st.columns([4, 1])
     with _hl:
-        st.title("🏢 Firm profile")
-        st.caption(
-            "Your firm's standing facts, entered once and reused on every bid. Everything "
-            "here fills in placeholders that would otherwise be red in every exported pack "
-            "-- the ABN and address in the footer, the logo on the cover, the insurance and "
-            "certification rows on a client's returnable schedules. Anything you leave blank "
-            "keeps showing its placeholder, exactly as it does today: nothing here is ever "
-            "guessed or filled in for you."
-        )
+        st.title(i18n.t("firmprofile_title"))
+        st.caption(i18n.t("firmprofile_intro_caption"))
     with _hr:
         st.write("")
-        if st.button("← Back to the app", use_container_width=True, key="_firm_exit"):
+        if st.button(i18n.t("firmprofile_back_to_app_button"), use_container_width=True, key="_firm_exit"):
             _exit_firm_profile()
             st.rerun()
 
-    _tab_identity, _tab_insurance, _tab_commercial, _tab_narrative = st.tabs(
-        ["🏢 Identity", "🛡️ Insurance & certifications", "💲 Commercial", "📝 Standing text"]
-    )
+    _tab_identity, _tab_insurance, _tab_commercial, _tab_narrative = st.tabs([
+        i18n.t("firmprofile_tab_identity"), i18n.t("firmprofile_tab_insurance"),
+        i18n.t("firmprofile_tab_commercial"), i18n.t("firmprofile_tab_narrative"),
+    ])
 
     # -----------------------------------------------------------------
     # Identity
@@ -85,62 +75,52 @@ if st.session_state.get("_firm_profile_mode"):
     with _tab_identity:
         _c1, _c2 = st.columns(2)
         with _c1:
-            _company_name = st.text_input("Legal entity name", value=_profile.company_name or "",
+            _company_name = st.text_input(i18n.t("firmprofile_legal_entity_name_label"), value=_profile.company_name or "",
                                           key="_fp_company_name",
-                                          placeholder="e.g. Example Engineering Pty Ltd")
-            _abn = st.text_input("ABN", value=_profile.abn or "", key="_fp_abn",
+                                          placeholder=i18n.t("firmprofile_legal_entity_name_placeholder"))
+            _abn = st.text_input(i18n.t("firmprofile_abn_label"), value=_profile.abn or "", key="_fp_abn",
                                  placeholder="12 345 678 901")
-            _acn = st.text_input("ACN (optional)", value=_profile.acn or "", key="_fp_acn")
+            _acn = st.text_input(i18n.t("firmprofile_acn_label"), value=_profile.acn or "", key="_fp_acn")
         with _c2:
             _registered_address = st.text_area(
-                "Registered address", value=_profile.registered_address or "",
+                i18n.t("firmprofile_registered_address_label"), value=_profile.registered_address or "",
                 key="_fp_address", height=100,
                 placeholder="Level 3, 100 Example St\nBrisbane QLD 4000",
             )
 
-        st.markdown("**Company logo**")
-        st.caption(
-            "Rendered on the cover page of every pack. Without one the cover keeps its red "
-            "[COMPANY LOGO] box."
-        )
+        st.markdown(i18n.t("firmprofile_company_logo_heading"))
+        st.caption(i18n.t("firmprofile_company_logo_caption"))
         if _profile.logo_bytes:
             _lc1, _lc2 = st.columns([1, 3])
             with _lc1:
                 try:
                     st.image(_profile.logo_bytes, width=180)
                 except Exception:
-                    st.caption("(the stored logo couldn't be displayed -- upload it again)")
+                    st.caption(i18n.t("firmprofile_logo_display_failed_caption"))
             with _lc2:
-                st.caption(f"Current: {_profile.logo_filename or 'uploaded logo'}")
-                if st.button("Remove logo", key="_fp_logo_remove"):
+                st.caption(i18n.t("firmprofile_current_logo_caption", filename=_profile.logo_filename or i18n.t("firmprofile_uploaded_logo_fallback")))
+                if st.button(i18n.t("firmprofile_remove_logo_button"), key="_fp_logo_remove"):
                     firm_profile.save_profile(_profile_user_id, logo_bytes=None, logo_filename="")
                     st.rerun()
-        _logo_upload = st.file_uploader("Upload a logo (PNG or JPG)", type=["png", "jpg", "jpeg"],
+        _logo_upload = st.file_uploader(i18n.t("firmprofile_upload_logo_label"), type=["png", "jpg", "jpeg"],
                                         key="_fp_logo_upload")
 
         st.divider()
-        st.markdown("**Standard signatory**")
-        st.caption(
-            "Seeded into each new project's sign-off and contact details. You can still "
-            "override it per bid -- seeding only ever fills a field that is empty."
-        )
+        st.markdown(i18n.t("firmprofile_signatory_heading"))
+        st.caption(i18n.t("firmprofile_signatory_caption"))
         _s1, _s2 = st.columns(2)
         with _s1:
-            _signatory_name = st.text_input("Name", value=_profile.signatory_name or "", key="_fp_sig_name")
-            _signatory_title = st.text_input("Title", value=_profile.signatory_title or "", key="_fp_sig_title")
+            _signatory_name = st.text_input(i18n.t("firmprofile_name_label"), value=_profile.signatory_name or "", key="_fp_sig_name")
+            _signatory_title = st.text_input(i18n.t("firmprofile_title_label"), value=_profile.signatory_title or "", key="_fp_sig_title")
         with _s2:
-            _signatory_phone = st.text_input("Phone", value=_profile.signatory_phone or "", key="_fp_sig_phone")
-            _signatory_email = st.text_input("Email", value=_profile.signatory_email or "", key="_fp_sig_email")
+            _signatory_phone = st.text_input(i18n.t("firmprofile_phone_label"), value=_profile.signatory_phone or "", key="_fp_sig_phone")
+            _signatory_email = st.text_input(i18n.t("firmprofile_email_label"), value=_profile.signatory_email or "", key="_fp_sig_email")
 
     # -----------------------------------------------------------------
     # Insurance & certifications
     # -----------------------------------------------------------------
     with _tab_insurance:
-        st.caption(
-            "These answer the insurance and certification labels on a client's returnable "
-            "schedules, and the matching rows of the compliance matrix. A blank row is "
-            "ignored, not exported as an empty insurance."
-        )
+        st.caption(i18n.t("firmprofile_insurance_caption"))
         _existing = {row["type"]: row for row in firm_profile.insurances(_profile)}
         _insurance_rows = []
         for _kind in firm_profile.INSURANCE_TYPES:
@@ -148,21 +128,21 @@ if st.session_state.get("_firm_profile_mode"):
             with st.expander(_kind, expanded=bool(_row)):
                 _i1, _i2 = st.columns(2)
                 with _i1:
-                    _insurer = st.text_input("Insurer", value=_row.get("insurer", ""), key=f"_fp_ins_{_kind}_insurer")
-                    _policy = st.text_input("Policy number", value=_row.get("policy_no", ""), key=f"_fp_ins_{_kind}_policy")
+                    _insurer = st.text_input(i18n.t("firmprofile_insurer_label"), value=_row.get("insurer", ""), key=f"_fp_ins_{_kind}_insurer")
+                    _policy = st.text_input(i18n.t("firmprofile_policy_number_label"), value=_row.get("policy_no", ""), key=f"_fp_ins_{_kind}_policy")
                 with _i2:
-                    _cover = st.text_input("Cover / limit", value=_row.get("cover", ""),
-                                           key=f"_fp_ins_{_kind}_cover", placeholder="e.g. $10,000,000")
-                    _expiry = st.text_input("Expiry", value=_row.get("expiry", ""),
-                                            key=f"_fp_ins_{_kind}_expiry", placeholder="e.g. 30 June 2027")
+                    _cover = st.text_input(i18n.t("firmprofile_cover_limit_label"), value=_row.get("cover", ""),
+                                           key=f"_fp_ins_{_kind}_cover", placeholder=i18n.t("firmprofile_cover_placeholder"))
+                    _expiry = st.text_input(i18n.t("firmprofile_expiry_label"), value=_row.get("expiry", ""),
+                                            key=f"_fp_ins_{_kind}_expiry", placeholder=i18n.t("firmprofile_expiry_placeholder"))
             _insurance_rows.append({
                 "type": _kind, "insurer": _insurer, "policy_no": _policy,
                 "cover": _cover, "expiry": _expiry,
             })
 
-        st.markdown("**Certifications**")
+        st.markdown(i18n.t("firmprofile_certifications_heading"))
         _certifications_text = st.text_area(
-            "One per line", value="\n".join(firm_profile.certifications(_profile)),
+            i18n.t("firmprofile_one_per_line_label"), value="\n".join(firm_profile.certifications(_profile)),
             key="_fp_certs", height=100,
             placeholder="ISO 9001:2015 Quality Management\nISO 45001:2018 Occupational Health & Safety",
         )
@@ -171,10 +151,7 @@ if st.session_state.get("_firm_profile_mode"):
     # Commercial
     # -----------------------------------------------------------------
     with _tab_commercial:
-        st.caption(
-            "Your standard charge-out rates, used to seed a new project's fee build-up. "
-            "Hours always stay yours to enter -- only the rate is carried over."
-        )
+        st.caption(i18n.t("firmprofile_commercial_caption"))
         _rate_rows = [{"Discipline": d, "Rate ($/hr)": r}
                       for d, r in sorted(firm_profile.rate_card(_profile).items())]
         if not _rate_rows:
@@ -182,8 +159,8 @@ if st.session_state.get("_firm_profile_mode"):
         _edited_rates = st.data_editor(
             _rate_rows, key="_fp_rates", num_rows="dynamic", use_container_width=True,
             column_config={
-                "Discipline": st.column_config.TextColumn("Discipline"),
-                "Rate ($/hr)": st.column_config.NumberColumn("Rate ($/hr)", min_value=0.0, step=5.0),
+                "Discipline": st.column_config.TextColumn(i18n.t("firmprofile_discipline_column")),
+                "Rate ($/hr)": st.column_config.NumberColumn(i18n.t("firmprofile_rate_column"), min_value=0.0, step=5.0),
             },
         )
 
@@ -191,44 +168,37 @@ if st.session_state.get("_firm_profile_mode"):
     # Standing text
     # -----------------------------------------------------------------
     with _tab_narrative:
-        st.caption(
-            "Standing narrative reused across bids. Each of these replaces a red placeholder "
-            "in the exported pack when filled in, and leaves it exactly as it is when blank."
-        )
+        st.caption(i18n.t("firmprofile_narrative_caption"))
         _offices_text = st.text_area(
-            "Offices and local presence", value=_profile.offices_text or "", key="_fp_offices",
+            i18n.t("firmprofile_offices_label"), value=_profile.offices_text or "", key="_fp_offices",
             height=110,
-            placeholder="Where your offices are and how long you've been in the region -- "
-                        "fills the Local Content section's placeholders.",
+            placeholder=i18n.t("firmprofile_offices_placeholder"),
         )
         _community_text = st.text_area(
-            "Community and reinvestment programs", value=_profile.community_text or "",
+            i18n.t("firmprofile_community_label"), value=_profile.community_text or "",
             key="_fp_community", height=110,
         )
         _leadership_text = st.text_area(
-            "Standing leadership team", value=_profile.leadership_text or "", key="_fp_leadership",
+            i18n.t("firmprofile_leadership_label"), value=_profile.leadership_text or "", key="_fp_leadership",
             height=90,
-            placeholder="Names and roles of the leadership who oversee delivery -- used in "
-                        "the relationship-management section.",
+            placeholder=i18n.t("firmprofile_leadership_placeholder"),
         )
         _terms_text = st.text_area(
-            "Standard terms of engagement", value=_profile.terms_of_engagement_text or "",
+            i18n.t("firmprofile_terms_label"), value=_profile.terms_of_engagement_text or "",
             key="_fp_terms", height=110,
-            placeholder="e.g. This offer is made under AS 4122-2010 General Conditions of "
-                        "Contract for Consultants.",
+            placeholder=i18n.t("firmprofile_terms_placeholder"),
         )
         _qa_statement = st.text_area(
-            "QA / Work Verification statement", value=_profile.qa_statement or "",
+            i18n.t("firmprofile_qa_label"), value=_profile.qa_statement or "",
             key="_fp_qa", height=80,
-            placeholder="e.g. All design deliverables are issued with completed Work "
-                        "Verification Records (WVRs).",
+            placeholder=i18n.t("firmprofile_qa_placeholder"),
         )
 
     # -----------------------------------------------------------------
     # Save
     # -----------------------------------------------------------------
     st.divider()
-    if st.button("Save firm profile", type="primary", key="_fp_save"):
+    if st.button(i18n.t("firmprofile_save_button"), type="primary", key="_fp_save"):
         _fields = dict(
             company_name=_company_name.strip(),
             abn=_abn.strip(),
@@ -260,11 +230,8 @@ if st.session_state.get("_firm_profile_mode"):
             # every rerun); drop the cache so an edited rate takes effect now
             # rather than at the next login.
             st.session_state.pop("_firm_rate_card_cache", None)
-            st.success("Firm profile saved. New projects will start from it.")
+            st.success(i18n.t("firmprofile_save_success"))
         except Exception as exc:  # noqa: BLE001 -- never show a stack trace mid-bid
-            st.error(
-                f"**Couldn't save the firm profile.** {exc} Nothing was changed -- try again, "
-                "and if it keeps failing email hello@civilproposals.com."
-            )
+            st.error(i18n.t("firmprofile_save_failed_error", exc=exc))
 
     st.stop()

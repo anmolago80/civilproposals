@@ -163,11 +163,21 @@ def send_purchase_receipt_email(to_email: str, kind: str) -> None:
     the purchase actually unlocked). `kind` is "subscription" or "bid",
     matching the same distinction handle_checkout_redirect() already makes
     off the Checkout Session's own `mode` field."""
+    # Deferred import: auth.py imports email_utils at module level (for
+    # send_password_reset_email etc.), so importing auth back at module
+    # level here would be circular. auth.SUBSCRIPTION_MONTHLY_BID_LIMIT is
+    # the single source of truth for this number -- Audit Round 2, Part 6
+    # found it had drifted to a stale hardcoded "3" here (and below in
+    # send_trial_used_email) after the limit moved to 4; importing it
+    # instead of hardcoding again means the two can't drift apart a second
+    # time.
+    from modules.auth import SUBSCRIPTION_MONTHLY_BID_LIMIT
     if kind == "subscription":
         subject = "You're subscribed to CivilProposals"
         detail = (
-            "<p>Your Monthly plan is active -- $120/month, 3 tender analyses included per billing "
-            "period. You can manage or cancel anytime from the account menu in the app.</p>"
+            f"<p>Your Monthly plan is active -- $120/month, {SUBSCRIPTION_MONTHLY_BID_LIMIT} tender "
+            "analyses included per billing period. You can manage or cancel anytime from the "
+            "account menu in the app.</p>"
         )
     else:
         subject = "Your CivilProposals bid credit"
@@ -186,12 +196,15 @@ def send_trial_used_email(to_email: str) -> None:
     anyone who closed the tab right after their one free analysis had no
     reminder to come back and no clear next step. This is the "$50/bid,
     here's how to keep going" follow-up called out as missing."""
+    # See send_purchase_receipt_email()'s docstring for why this is a
+    # deferred, function-local import.
+    from modules.auth import SUBSCRIPTION_MONTHLY_BID_LIMIT
     html = _wrap(
         "<p>You just used your free trial analysis on CivilProposals. Hope it was useful --"
         " here's how to keep going when you're ready for the next tender:</p>"
         "<ul style='color:#0F172A;'>"
         "<li><strong>Pay as you go</strong> -- $50 per bid, no subscription.</li>"
-        "<li><strong>Monthly</strong> -- $120/month, 3 bids included.</li>"
+        f"<li><strong>Monthly</strong> -- $120/month, {SUBSCRIPTION_MONTHLY_BID_LIMIT} bids included.</li>"
         "</ul>"
         + _button("See pricing & upgrade", f"{APP_BASE_URL.rstrip('/')}")
     )

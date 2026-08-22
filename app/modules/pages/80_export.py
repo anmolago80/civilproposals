@@ -68,7 +68,7 @@ with tabs[9]:
                 _topup_url = _get_or_create_checkout_url(current_user, "bid", topup_project_key=_current_project_key())
                 st.link_button(i18n.t("passes_topup_button"), _topup_url, key="_export_passes_topup_btn", type="primary")
             except Exception as exc:
-                _show_error("Couldn't start checkout", exc)
+                _show_error(i18n.t("init_checkout_start_failed_action"), exc)
     elif _project_is_free_tier():
         # Audit fix Part 1a: a trial-funded project whose one free pass is
         # already spent gets the SAME "buy a bid, unlock this project"
@@ -80,11 +80,11 @@ with tabs[9]:
         try:
             _unlock_url = _get_or_create_checkout_url(current_user, "bid", topup_project_key=_current_project_key())
             st.link_button(
-                "Buy 1 bid -- $50, to unlock this project →", _unlock_url,
+                i18n.t("init_buy_bid_unlock_project_button"), _unlock_url,
                 key="_export_free_tier_unlock_btn", type="primary",
             )
         except Exception as exc:
-            _show_error("Couldn't start checkout", exc)
+            _show_error(i18n.t("init_checkout_start_failed_action"), exc)
 
     # Readiness checklist. Most of the red in an exported pack is not missing
     # information -- it is a step that hasn't been run. Listing those here,
@@ -286,6 +286,16 @@ with tabs[9]:
     if st.session_state.docx_buffer:
         if _export_is_stale():
             st.warning(i18n.t("export_stale_files_warning"))
+        # Audit fix Part 6: free_tier_whats_included_title/_body were defined
+        # (en.py/es.py) but never rendered anywhere -- the warm "here's what
+        # your one free download covers" explainer the design called for.
+        # Shown once, right above the download buttons it explains, only for
+        # a still-unblocked trial project (once the free pass is used,
+        # free_tier_generate_used above already covers the "what now"
+        # messaging, so this would be redundant).
+        if _project_is_free_tier():
+            with st.expander(i18n.t("free_tier_whats_included_title")):
+                st.caption(i18n.t("free_tier_whats_included_body"))
         filename = (st.session_state.tender_name or "tender_response_pack").replace(" ", "_")
         suffix = "small_scope_pack" if _is_letter() else "large_scope_pack"
         # Small Scope: DOCX + Tender Summary. Large Scope: DOCX + Org Chart + Methodology
@@ -415,6 +425,14 @@ with tabs[9]:
                 if _free_artifact_download_blocked("methodology_pptx"):
                     st.button(i18n.t("export_download_methodology_button"), disabled=True, type="primary", key="_dl_methodology_blocked")
                     st.caption(i18n.t("free_tier_paid_only_caption"))
+                    # Audit fix Part 6: the caption alone told a trial user
+                    # this needs a paid bid, but gave them nothing to click --
+                    # same purchase CTA already used at the passes-exhausted
+                    # and Tender Analysis blocked-repeat-run call sites.
+                    # _free_artifact_download_blocked() only reaches True here
+                    # via _project_is_free_tier(), so current_user is always
+                    # set (SaaS mode, trial-funded project).
+                    _render_upgrade_buttons(current_user, key_prefix="_export_methodology_cta")
                 else:
                     try:
                         methodology_bytes = _cached_pptx(
@@ -469,6 +487,8 @@ with tabs[9]:
                 if _free_artifact_download_blocked("program_pptx"):
                     st.button(i18n.t("export_download_program_button"), disabled=True, type="primary", key="_dl_program_blocked")
                     st.caption(i18n.t("free_tier_paid_only_caption"))
+                    # Audit fix Part 6: see the methodology block above.
+                    _render_upgrade_buttons(current_user, key_prefix="_export_program_cta")
                 else:
                     try:
                         program_bytes = _cached_pptx(

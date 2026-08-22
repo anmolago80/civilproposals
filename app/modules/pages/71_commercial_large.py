@@ -126,7 +126,7 @@ with tabs[8]:
             # The two tick_seen bookkeeping keys this used to need are gone
             # with it: a button is only True on the run it is clicked, which
             # is the semantic the checkbox was being made to fake.
-            disc_apply_now = _fee_apply_control("_disc_fee_", _disc_pending, "totals & chart")
+            disc_apply_now = _fee_apply_control("_disc_fee_", _disc_pending, i18n.t("fee_indent_note_totals_chart"))
 
             if _disc_first_load or (disc_apply_now and _disc_pending):
                 # Rebuild from the editor, dropping blank-discipline rows, then guarantee
@@ -307,7 +307,7 @@ with tabs[8]:
                 # The two tick_seen bookkeeping keys this used to need are gone
                 # with it: a button is only True on the run it is clicked, which
                 # is the semantic the checkbox was being made to fake.
-                large_scope_apply_now = _fee_apply_control("_large_scope_fee_", _large_scope_pending, "total")
+                large_scope_apply_now = _fee_apply_control("_large_scope_fee_", _large_scope_pending, i18n.t("fee_indent_note_total"))
 
                 if _large_scope_first_load or (large_scope_apply_now and _large_scope_pending):
                     _large_rebuilt_scope_fees = [
@@ -547,7 +547,7 @@ with tabs[8]:
             # The two tick_seen bookkeeping keys this used to need are gone
             # with it: a button is only True on the run it is clicked, which
             # is the semantic the checkbox was being made to fake.
-            pct_apply_now = _fee_apply_control("_pct_fee_", pct_pending, "totals & chart")
+            pct_apply_now = _fee_apply_control("_pct_fee_", pct_pending, i18n.t("fee_indent_note_totals_chart"))
 
             if pct_first_load or (pct_apply_now and pct_pending):
                 # The typical range describes the BENCHMARK's percentage. Keep

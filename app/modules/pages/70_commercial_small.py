@@ -126,7 +126,7 @@ with tabs[8]:
                 # The two tick_seen bookkeeping keys this used to need are gone
                 # with it: a button is only True on the run it is clicked, which
                 # is the semantic the checkbox was being made to fake.
-                scope_apply_now = _fee_apply_control("_scope_fee_", _scope_pending, "total")
+                scope_apply_now = _fee_apply_control("_scope_fee_", _scope_pending, i18n.t("fee_indent_note_total"))
 
                 if _scope_first_load or (scope_apply_now and _scope_pending):
                     rebuilt_scope_fees = [
@@ -246,7 +246,7 @@ with tabs[8]:
                 # The two tick_seen bookkeeping keys this used to need are gone
                 # with it: a button is only True on the run it is clicked, which
                 # is the semantic the checkbox was being made to fake.
-                letter_apply_now = _fee_apply_control("_letter_disc_fee_", letter_pending, "totals & chart")
+                letter_apply_now = _fee_apply_control("_letter_disc_fee_", letter_pending, i18n.t("fee_indent_note_totals_chart"))
 
                 if letter_first_load or (letter_apply_now and letter_pending):
                     letter_rebuilt = [
@@ -532,7 +532,7 @@ with tabs[8]:
                 # The two tick_seen bookkeeping keys this used to need are gone
                 # with it: a button is only True on the run it is clicked, which
                 # is the semantic the checkbox was being made to fake.
-                letter_pct_apply_now = _fee_apply_control("_letter_pct_fee_", letter_pct_pending, "totals & chart")
+                letter_pct_apply_now = _fee_apply_control("_letter_pct_fee_", letter_pct_pending, i18n.t("fee_indent_note_totals_chart"))
 
                 if letter_pct_first_load or (letter_pct_apply_now and letter_pct_pending):
                     # See the same note on the Large Scope tab: the range

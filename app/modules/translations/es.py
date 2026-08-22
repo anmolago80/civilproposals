@@ -38,6 +38,200 @@ STRINGS: dict[str, str] = {
     "btn_upgrade": "Mejorar plan",
     "btn_log_out": "Cerrar sesión",
 
+    "btn_open": "Abrir",
+    "btn_delete": "Eliminar",
+    "btn_download": "Descargar",
+    "chrome_autosave_checkbox_label": "Guardar automáticamente mientras trabajo",
+    "chrome_autosave_help_local": (
+        "Guarda en una carpeta 'projects' junto a la aplicación, como máximo cada {seconds}s de "
+        "actividad -- comienza en cuanto se ingresa un nombre de proyecto (Configuración del "
+        "proyecto) o se sube un brief de licitación, lo que ocurra primero."
+    ),
+    "chrome_autosave_help_cloud": (
+        "Guarda en tu cuenta, como máximo cada {seconds}s de actividad -- comienza en cuanto se "
+        "ingresa un nombre de proyecto (Configuración del proyecto) o se sube un brief de "
+        "licitación, lo que ocurra primero (se guarda como \"Proyecto sin título\" hasta que lo "
+        "nombres). Te permite retomarlo más tarde, incluso después de cerrar la pestaña o "
+        "actualizar la página."
+    ),
+    "chrome_autosave_failed_warning": (
+        "El guardado automático falló: {error} -- tu trabajo en esta pestaña AÚN NO está guardado "
+        "en tu cuenta. Usa \"Exportar / Importar\" abajo como respaldo, y avisa a soporte si esto "
+        "sigue ocurriendo."
+    ),
+    "chrome_autosave_last_saved": "Último guardado {time}",
+    "chrome_autosave_enable_hint": "Ingresa un nombre de proyecto o licitación (Configuración del proyecto), o sube un brief de licitación, para habilitar el guardado automático.",
+    "chrome_recent_projects_label": "Proyectos recientes",
+    "chrome_no_local_saves": "Aún no hay guardados locales.",
+    "chrome_no_cloud_saves": (
+        "Aún no hay proyectos guardados -- aparecerá uno aquí poco después de que comiences uno "
+        "(el guardado automático se activa en cuanto ingresas un nombre de proyecto en "
+        "Configuración del proyecto, o en cuanto subes un brief de licitación)."
+    ),
+    "chrome_export_import_expander": "⇅ Exportar / Importar",
+    "chrome_export_import_caption": "Para compartir un proyecto o mantener un respaldo fuera de este equipo.",
+    "chrome_load_project_file_label": "Cargar un archivo de proyecto",
+    "chrome_prepare_save_button": "Preparar archivo de guardado del proyecto",
+    "chrome_download_project_file_button": "💾 Descargar archivo del proyecto",
+    "chrome_upload_proposal_expander": "⬆️ Subir una propuesta a la Biblioteca",
+    "chrome_upload_proposal_caption": (
+        "Añade una propuesta terminada (.docx) directamente a la Biblioteca, archivada bajo la "
+        "disciplina que elijas abajo -- el mismo lugar donde llegan automáticamente las "
+        "propuestas vía Paquete de exportación -> 'Archivar en la Biblioteca'."
+    ),
+    "chrome_proposal_file_label": "Archivo de propuesta (.docx)",
+    "chrome_discipline_label": "Disciplina",
+    "chrome_pack_size_label": "Tamaño del paquete",
+    "chrome_project_name_optional_label": "Nombre del proyecto (opcional -- por defecto usa el nombre del archivo)",
+    "chrome_add_to_library_button": "Añadir a la Biblioteca",
+    "chrome_added_to_library_success": "Se añadió '{name}' a la Biblioteca de propuestas bajo {type}.",
+    "chrome_couldnt_upload_action": "No se pudo subir",
+    "chrome_browse_library_caption": (
+        "Explora las propuestas de la Biblioteca -- archivadas desde el Paquete de exportación, o "
+        "subidas directamente arriba. Descarga cualquier entrada, o añádela como material de "
+        "referencia al proyecto en el que estás trabajando actualmente."
+    ),
+    "chrome_filter_by_discipline_label": "Filtrar por disciplina",
+    "chrome_all_disciplines_label": "todas las disciplinas",
+    "chrome_showing_pack_caption": (
+        "Mostrando propuestas de **{pack_label}** para **{discipline}** -- coincide con el formato "
+        "de propuesta seleccionado actualmente en Configuración del proyecto ('¿Qué necesita esta "
+        "licitación?'). Cambia esa opción para ver el archivo del otro tamaño de paquete."
+    ),
+    "chrome_library_empty_all": "Aún no hay nada en la Biblioteca ({pack_label}).",
+    "chrome_library_empty_filtered": "Aún no hay nada en la Biblioteca para {discipline} ({pack_label}).",
+    "chrome_file_unavailable": "Archivo no disponible",
+    "chrome_add_as_reference_button": "Añadir como referencia al proyecto",
+    "chrome_added_as_reference_success": "Se añadió '{filename}' como referencia al proyecto actual.",
+    "chrome_extract_failed_warning": "No se pudo extraer ningún texto de ese archivo.",
+    "chrome_couldnt_add_as_reference_action": "No se pudo añadir como referencia",
+    "chrome_upload_reference_expander": "⬆️ Subir un proyecto de referencia",
+    "chrome_upload_reference_caption": (
+        "Añade un proyecto de referencia / caso de estudio de la firma (PDF, DOCX o TXT) a la "
+        "Biblioteca, archivado bajo la disciplina que elijas abajo."
+    ),
+    "chrome_reference_file_label": "Archivo del proyecto de referencia",
+    "chrome_title_optional_label": "Título (opcional -- por defecto usa el nombre del archivo)",
+    "chrome_add_to_reference_library_button": "Añadir a la Biblioteca de referencia",
+    "chrome_added_to_reference_library_success": "Se añadió '{name}' a la Biblioteca de referencia de proyectos bajo {type}.",
+    "chrome_browse_reference_library_caption": (
+        "Explora los proyectos de referencia subidos. Descarga cualquier entrada, o añádela como "
+        "material de referencia al proyecto en el que estás trabajando actualmente."
+    ),
+    "chrome_reference_library_empty_all": "Aún no hay nada en la Biblioteca de referencia.",
+    "chrome_reference_library_empty_filtered": "Aún no hay nada en la Biblioteca de referencia para {discipline}.",
+    "chrome_add_to_project_references_button": "Añadir a las referencias del proyecto",
+    "chrome_added_to_project_references_success": "Se añadió '{filename}' a las referencias del proyecto actual.",
+    "chrome_couldnt_add_to_project_references_action": "No se pudo añadir a las referencias del proyecto",
+    "chrome_loaded_project_success": "Proyecto cargado desde {source}.",
+    "chrome_loaded_project_reenter_ai_success": "Proyecto cargado desde {source}. Vuelve a ingresar la configuración de tu proveedor de IA en la barra lateral para continuar.",
+
+    "fee_include_presentation_checkbox": "Incluir esta presentación de honorarios en la propuesta",
+    "fee_enter_figures_first_caption": "Primero ingresa las cifras -- una tabla vacía no se puede incluir.",
+    "fee_label_pct_split": "reparto % por disciplina",
+    "fee_label_discipline_buildup": "desglose por disciplina",
+    "fee_label_scope_buildup": "desglose por partida de alcance",
+    "fee_included_in_proposal_caption": "**Incluido en la propuesta:**",
+    "fee_none_ticked_warning": (
+        "**No hay ninguna presentación de honorarios marcada**, por lo que la sección de "
+        "honorarios de la propuesta se exportará como un marcador rojo. Marca al menos una de "
+        "las tablas de abajo."
+    ),
+    "fee_table_edited_warning": (
+        "**Tabla editada -- {indent_note} aún no actualizado(s).** Haz clic en **Aplicar cambios** "
+        "para recalcular a partir de lo que hay ahora en la tabla."
+    ),
+    "fee_apply_changes_button": "Aplicar cambios",
+    "fee_nothing_to_apply_help": "Nada que aplicar -- la tabla coincide con las cifras de abajo.",
+    "fee_indent_note_total": "el total",
+    "fee_indent_note_totals_chart": "los totales y el gráfico",
+
+    "init_payment_confirmed_toast": "Pago confirmado -- ¡gracias!",
+    "init_checkout_confirm_failed_error": (
+        "No pudimos confirmar tu pago en este momento, así que aún no se ha aplicado nada a tu "
+        "cuenta. Si te acaban de cobrar, actualiza esta página para reintentarlo. Si sigue "
+        "fallando, escribe a hello@civilproposals.com con esta referencia para que podamos "
+        "aplicarlo manualmente: `{session_id}`"
+    ),
+    "init_checkout_cancelled_toast": "Pago cancelado -- no se realizó ningún cargo.",
+    "init_ai_unavailable_error": (
+        "Las funciones de IA no están disponibles temporalmente -- ya lo sabemos y lo estamos "
+        "revisando. No se ha perdido nada de lo que ingresaste; por favor vuelve a intentarlo en "
+        "un momento o escribe a hello@civilproposals.com si esto no se resuelve pronto."
+    ),
+    "init_buy_bid_button": "Comprar 1 propuesta -- $50 →",
+    "init_buy_bid_unlock_project_button": "Comprar 1 propuesta -- $50, para desbloquear este proyecto →",
+    "init_subscribe_button": "Suscribirse -- $120/mes →",
+    "init_checkout_start_failed_error": "No se pudo iniciar el pago -- por favor inténtalo de nuevo. Si sigue ocurriendo, escribe a hello@civilproposals.com.",
+    "init_checkout_start_failed_action": "No se pudo iniciar el pago",
+
+    "firmprofile_load_failed_error": (
+        "**No se pudo abrir tu perfil de firma en este momento.** No se ha perdido nada -- tu "
+        "perfil se guarda por separado de tus proyectos. Inténtalo de nuevo en un momento, y si "
+        "sigue ocurriendo escribe a hello@civilproposals.com."
+    ),
+    "firmprofile_back_to_app_button": "← Volver a la aplicación",
+    "firmprofile_title": "🏢 Perfil de la firma",
+    "firmprofile_intro_caption": (
+        "Los datos permanentes de tu firma, ingresados una vez y reutilizados en cada "
+        "propuesta. Todo esto completa los marcadores que de otro modo aparecerían en rojo en "
+        "cada paquete exportado -- el ABN y la dirección en el pie de página, el logo en la "
+        "portada, las filas de seguros y certificaciones en las listas retornables del "
+        "cliente. Todo lo que dejes en blanco seguirá mostrando su marcador, exactamente como "
+        "ocurre hoy: nada aquí se adivina ni se completa por ti."
+    ),
+    "firmprofile_tab_identity": "🏢 Identidad",
+    "firmprofile_tab_insurance": "🛡️ Seguros y certificaciones",
+    "firmprofile_tab_commercial": "💲 Comercial",
+    "firmprofile_tab_narrative": "📝 Texto permanente",
+    "firmprofile_legal_entity_name_label": "Razón social",
+    "firmprofile_legal_entity_name_placeholder": "p. ej. Example Engineering Pty Ltd",
+    "firmprofile_abn_label": "ABN",
+    "firmprofile_acn_label": "ACN (opcional)",
+    "firmprofile_registered_address_label": "Domicilio social",
+    "firmprofile_company_logo_heading": "**Logo de la empresa**",
+    "firmprofile_company_logo_caption": "Se muestra en la portada de cada paquete. Sin uno, la portada mantiene su recuadro rojo [LOGO DE LA EMPRESA].",
+    "firmprofile_logo_display_failed_caption": "(no se pudo mostrar el logo guardado -- vuelve a subirlo)",
+    "firmprofile_current_logo_caption": "Actual: {filename}",
+    "firmprofile_uploaded_logo_fallback": "logo subido",
+    "firmprofile_remove_logo_button": "Quitar logo",
+    "firmprofile_upload_logo_label": "Subir un logo (PNG o JPG)",
+    "firmprofile_signatory_heading": "**Firmante estándar**",
+    "firmprofile_signatory_caption": "Se usa para completar los datos de cierre y contacto de cada proyecto nuevo. Aún puedes cambiarlo por propuesta -- este dato solo completa un campo que esté vacío.",
+    "firmprofile_name_label": "Nombre",
+    "firmprofile_title_label": "Cargo",
+    "firmprofile_phone_label": "Teléfono",
+    "firmprofile_email_label": "Correo electrónico",
+    "firmprofile_insurance_caption": (
+        "Estos datos completan las etiquetas de seguros y certificaciones en las listas "
+        "retornables del cliente, y las filas correspondientes de la matriz de cumplimiento. "
+        "Una fila en blanco se ignora, no se exporta como un seguro vacío."
+    ),
+    "firmprofile_insurer_label": "Aseguradora",
+    "firmprofile_policy_number_label": "Número de póliza",
+    "firmprofile_cover_limit_label": "Cobertura / límite",
+    "firmprofile_cover_placeholder": "p. ej. $10.000.000",
+    "firmprofile_expiry_label": "Vencimiento",
+    "firmprofile_expiry_placeholder": "p. ej. 30 de junio de 2027",
+    "firmprofile_certifications_heading": "**Certificaciones**",
+    "firmprofile_one_per_line_label": "Una por línea",
+    "firmprofile_commercial_caption": "Tus tarifas estándar de facturación, usadas para completar el desglose de honorarios de un proyecto nuevo. Las horas siempre las ingresas tú -- solo se traslada la tarifa.",
+    "firmprofile_discipline_column": "Disciplina",
+    "firmprofile_rate_column": "Tarifa ($/h)",
+    "firmprofile_narrative_caption": "Texto narrativo permanente reutilizado en las propuestas. Cada uno de estos reemplaza un marcador rojo en el paquete exportado cuando se completa, y lo deja exactamente igual cuando está en blanco.",
+    "firmprofile_offices_label": "Oficinas y presencia local",
+    "firmprofile_offices_placeholder": "Dónde están tus oficinas y desde cuándo tienes presencia en la región -- completa los marcadores de la sección de Contenido local.",
+    "firmprofile_community_label": "Programas comunitarios y de reinversión",
+    "firmprofile_leadership_label": "Equipo de liderazgo permanente",
+    "firmprofile_leadership_placeholder": "Nombres y cargos del liderazgo que supervisa la ejecución -- usado en la sección de gestión de relaciones.",
+    "firmprofile_terms_label": "Términos de contratación estándar",
+    "firmprofile_terms_placeholder": "p. ej. Esta oferta se realiza bajo las Condiciones Generales AS 4122-2010 para Consultores.",
+    "firmprofile_qa_label": "Declaración de Control de Calidad / Verificación de Trabajo",
+    "firmprofile_qa_placeholder": "p. ej. Todos los entregables de diseño se emiten con Registros de Verificación de Trabajo (WVR) completados.",
+    "firmprofile_save_button": "Guardar perfil de la firma",
+    "firmprofile_save_success": "Perfil de la firma guardado. Los proyectos nuevos partirán desde ahí.",
+    "firmprofile_save_failed_error": "**No se pudo guardar el perfil de la firma.** {exc} No se cambió nada -- inténtalo de nuevo, y si sigue fallando escribe a hello@civilproposals.com.",
+
     "auth_headline": "Creado por ingenieros civiles, para ingenieros civiles",
     "auth_subhead": (
         "Conocemos los desafíos que enfrentas cada día porque nosotros también los enfrentamos. Ya sea un "

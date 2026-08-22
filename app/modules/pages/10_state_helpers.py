@@ -991,6 +991,15 @@ FEE_PRESENTATION_LABELS = {
     "discipline_buildup": "discipline build-up",
     "scope_buildup": "scope-item build-up",
 }
+# Audit fix Part 6: i18n.t() keys for the same three labels, used wherever
+# they're shown to the user (_fee_inclusion_summary) -- FEE_PRESENTATION_LABELS
+# itself stays English-only since it's also used as plain internal dict keys
+# in a couple of places that don't want translated text.
+FEE_PRESENTATION_LABEL_KEYS = {
+    "pct_split": "fee_label_pct_split",
+    "discipline_buildup": "fee_label_discipline_buildup",
+    "scope_buildup": "fee_label_scope_buildup",
+}
 
 
 def _fee_presentation_has_data(key: str) -> bool:
@@ -1017,27 +1026,24 @@ def _fee_include_checkbox(key: str, widget_key: str) -> None:
     included = st.session_state.fee_sections_included
     has_data = _fee_presentation_has_data(key)
     ticked = st.checkbox(
-        "Include this fee presentation in the proposal",
+        i18n.t("fee_include_presentation_checkbox"),
         value=bool(included.get(key)), key=widget_key, disabled=not has_data,
     )
     if has_data:
         included[key] = ticked
     else:
-        st.caption("Enter figures first -- an empty table can't be included.")
+        st.caption(i18n.t("fee_enter_figures_first_caption"))
 
 
 def _fee_inclusion_summary() -> None:
     """Standing line under the Fee tab header naming what will be exported."""
     included = st.session_state.fee_sections_included
-    chosen = [FEE_PRESENTATION_LABELS[k] for k in ("pct_split", "discipline_buildup", "scope_buildup")
+    chosen = [i18n.t(FEE_PRESENTATION_LABEL_KEYS[k]) for k in ("pct_split", "discipline_buildup", "scope_buildup")
               if included.get(k)]
     if chosen:
-        st.caption("**Included in the proposal:** " + " + ".join(chosen))
+        st.caption(i18n.t("fee_included_in_proposal_caption") + " " + " + ".join(chosen))
     else:
-        st.warning(
-            "**No fee presentation is ticked**, so the proposal's fee section will export as a "
-            "red placeholder. Tick at least one of the tables below."
-        )
+        st.warning(i18n.t("fee_none_ticked_warning"))
 
 
 def _program_model_from_state():
@@ -1168,14 +1174,11 @@ def _fee_apply_control(state_prefix: str, pending: bool, indent_note: str = "tot
     that quietly disagreed with the table above it.
     """
     if pending:
-        st.warning(
-            f"**Table edited -- {indent_note} not yet updated.** Click **Apply changes** to "
-            f"recalculate from what's in the table now."
-        )
+        st.warning(i18n.t("fee_table_edited_warning", indent_note=indent_note))
     return st.button(
-        "Apply changes", type="primary", key=f"{state_prefix}apply_btn",
+        i18n.t("fee_apply_changes_button"), type="primary", key=f"{state_prefix}apply_btn",
         disabled=not pending,
-        help=None if pending else "Nothing to apply -- the table matches the figures below.",
+        help=None if pending else i18n.t("fee_nothing_to_apply_help"),
     )
 
 
@@ -2209,9 +2212,9 @@ def _apply_loaded_project(loaded_state: dict, source_label: str) -> None:
     # and never needs re-entering, so telling a SaaS customer to go do that
     # in a sidebar field that doesn't exist for them was just wrong.
     if IS_SAAS_MODE:
-        st.success(f"Loaded project from {source_label}.")
+        st.success(i18n.t("chrome_loaded_project_success", source=source_label))
     else:
-        st.success(f"Loaded project from {source_label}. Re-enter your AI provider settings in the sidebar to continue.")
+        st.success(i18n.t("chrome_loaded_project_reenter_ai_success", source=source_label))
     st.rerun()
 
 

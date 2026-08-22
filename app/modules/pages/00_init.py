@@ -361,18 +361,13 @@ if IS_SAAS_MODE:
 
         if _checkout_user is not None:
             st.query_params.clear()
-            st.toast("Payment confirmed -- thanks!", icon="✅")
+            st.toast(i18n.t("init_payment_confirmed_toast"), icon="✅")
         elif _checkout_error is not None:
             # A genuine verification error, not just "this session wasn't
             # actually paid" -- keep the query params so refreshing the page
             # retries, and tell the customer exactly what to do if it keeps
             # happening instead of leaving them with no signal at all.
-            st.error(
-                "We couldn't confirm your payment just now, so nothing's been applied to your "
-                "account yet. If you were just charged, please refresh this page to retry. If it "
-                "keeps failing, email hello@civilproposals.com with this reference so we can apply "
-                f"it manually: `{_checkout_session_id}`"
-            )
+            st.error(i18n.t("init_checkout_confirm_failed_error", session_id=_checkout_session_id))
         else:
             # handle_checkout_redirect() returned None without raising --
             # e.g. the Checkout Session genuinely wasn't paid (someone
@@ -390,7 +385,7 @@ if IS_SAAS_MODE:
     # low-key confirmation and clearing the param so it doesn't linger.
     elif _qp.get("checkout") == "cancelled":
         st.query_params.clear()
-        st.toast("Checkout cancelled -- no charge was made.", icon="ℹ️")
+        st.toast(i18n.t("init_checkout_cancelled_toast"), icon="ℹ️")
 
     # Password-reset link (see auth.request_password_reset /
     # render_password_reset_screen) -- checked BEFORE require_login()
@@ -409,11 +404,7 @@ if IS_SAAS_MODE:
         # logged in right now, since "every AI button is just silently
         # disabled" with no on-screen explanation is its own broken
         # experience even once the server-side log exists.
-        st.error(
-            "AI features are temporarily unavailable -- we're aware and looking into it. "
-            "Nothing you've entered has been lost; please check back shortly or email "
-            "hello@civilproposals.com if this doesn't resolve soon."
-        )
+        st.error(i18n.t("init_ai_unavailable_error"))
 
     # Throttled per SUBSCRIPTION_REFRESH_INTERVAL_SECONDS (see that
     # constant's comment) -- was an unconditional live Stripe call on every
@@ -540,7 +531,7 @@ def _render_upgrade_buttons(user, key_prefix: str, already_subscribed: bool = Fa
     removes that round trip entirely: one click opens Stripe directly. The
     URL itself comes from _get_or_create_checkout_url() above, which caches
     it instead of creating a fresh live Checkout Session on every render."""
-    _bid_label = "Buy 1 bid -- $50, to unlock this project →" if topup_project_key else "Buy 1 bid -- $50 →"
+    _bid_label = i18n.t("init_buy_bid_unlock_project_button") if topup_project_key else i18n.t("init_buy_bid_button")
 
     if already_subscribed:
         try:
@@ -554,24 +545,29 @@ def _render_upgrade_buttons(user, key_prefix: str, already_subscribed: bool = Fa
             # see. Logged server-side instead; see debug_key_info()'s own
             # docstring if this needs diagnosing again later.
             print(f"[checkout] {exc} | {billing.debug_key_info()}", file=sys.stderr)
-            st.error("Couldn't start checkout -- please try again. If it keeps happening, email hello@civilproposals.com.")
+            st.error(i18n.t("init_checkout_start_failed_error"))
         return
 
     ucol1, ucol2 = st.columns(2)
     with ucol1:
         try:
             sub_url = _get_or_create_checkout_url(user, "sub")
-            st.link_button("Subscribe -- $120/mo →", sub_url, key=f"{key_prefix}_sub_btn", type="primary")
+            st.link_button(i18n.t("init_subscribe_button"), sub_url, key=f"{key_prefix}_sub_btn", type="primary")
+            # Audit fix Part 6: subscription_bid_limit_caption was defined
+            # but never rendered anywhere -- the Subscribe button is exactly
+            # where a shopper needs to know what the $120/month actually
+            # includes before clicking through to Stripe.
+            st.caption(i18n.t("subscription_bid_limit_caption", limit=auth.SUBSCRIPTION_MONTHLY_BID_LIMIT))
         except Exception as exc:
             print(f"[checkout] {exc} | {billing.debug_key_info()}", file=sys.stderr)
-            st.error("Couldn't start checkout -- please try again. If it keeps happening, email hello@civilproposals.com.")
+            st.error(i18n.t("init_checkout_start_failed_error"))
     with ucol2:
         try:
             bid_url = _get_or_create_checkout_url(user, "bid", topup_project_key=topup_project_key)
             st.link_button(_bid_label, bid_url, key=f"{key_prefix}_bid_btn")
         except Exception as exc:
             print(f"[checkout] {exc} | {billing.debug_key_info()}", file=sys.stderr)
-            st.error("Couldn't start checkout -- please try again. If it keeps happening, email hello@civilproposals.com.")
+            st.error(i18n.t("init_checkout_start_failed_error"))
 
 
 def _extract_plain_text_from_bytes(file_bytes: bytes, filename: str):

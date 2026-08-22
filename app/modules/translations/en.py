@@ -44,6 +44,214 @@ STRINGS: dict[str, str] = {
     "btn_upgrade": "Upgrade",
     "btn_log_out": "Log out",
 
+    # Audit fix Part 6: top-banner popover bodies (20_chrome.py) -- "My
+    # Proposals" (autosave status + recent projects + Export/Import),
+    # "Proposal Library" and "Project Reference Library". Generic
+    # Open/Delete/Download button labels are shared with other pickers in
+    # this same file, so they're plain btn_* keys rather than chrome_*.
+    "btn_open": "Open",
+    "btn_delete": "Delete",
+    "btn_download": "Download",
+    "chrome_autosave_checkbox_label": "Auto-save as I work",
+    "chrome_autosave_help_local": (
+        "Saves to a 'projects' folder next to the app, at most every {seconds}s of activity -- "
+        "starts once a project name is entered (Project Setup), or once you've uploaded a "
+        "tender brief, whichever comes first."
+    ),
+    "chrome_autosave_help_cloud": (
+        "Saves to your account, at most every {seconds}s of activity -- starts once a project "
+        "name is entered (Project Setup), or once you've uploaded a tender brief, whichever "
+        "comes first (saved as \"Untitled project\" until you name it). Lets you pick back up "
+        "later, even after closing the tab or a refresh."
+    ),
+    "chrome_autosave_failed_warning": (
+        "Auto-save failed: {error} -- your work in this tab is NOT saved to your account yet. "
+        "Use \"Export / Import\" below as a backup, and let support know if this keeps happening."
+    ),
+    "chrome_autosave_last_saved": "Last saved {time}",
+    "chrome_autosave_enable_hint": "Enter a project or tender name (Project Setup), or upload a tender brief, to enable auto-save.",
+    "chrome_recent_projects_label": "Recent projects",
+    "chrome_no_local_saves": "No local saves yet.",
+    "chrome_no_cloud_saves": (
+        "No saved projects yet -- one will appear here shortly after you start one (auto-save "
+        "kicks in once you enter a project name on Project Setup, or as soon as you upload a "
+        "tender brief)."
+    ),
+    "chrome_export_import_expander": "⇅ Export / Import",
+    "chrome_export_import_caption": "For sharing a project or keeping a backup outside this computer.",
+    "chrome_load_project_file_label": "Load a project file",
+    "chrome_prepare_save_button": "Prepare project save file",
+    "chrome_download_project_file_button": "💾 Download project file",
+    "chrome_upload_proposal_expander": "⬆️ Upload a proposal to the Library",
+    "chrome_upload_proposal_caption": (
+        "Add a finished proposal (.docx) straight into the Library, filed under whichever "
+        "discipline you choose below -- the same place proposals land automatically via "
+        "Export Pack -> 'Archive to Library'."
+    ),
+    "chrome_proposal_file_label": "Proposal file (.docx)",
+    "chrome_discipline_label": "Discipline",
+    "chrome_pack_size_label": "Pack size",
+    "chrome_project_name_optional_label": "Project name (optional -- defaults to the filename)",
+    "chrome_add_to_library_button": "Add to Library",
+    "chrome_added_to_library_success": "Added '{name}' to the Proposal Library under {type}.",
+    "chrome_couldnt_upload_action": "Couldn't upload",
+    "chrome_browse_library_caption": (
+        "Browse proposals in the Library -- archived from Export Pack, or uploaded directly "
+        "above. Download any entry, or add it as reference material to the project you're "
+        "currently working on."
+    ),
+    "chrome_filter_by_discipline_label": "Filter by discipline",
+    "chrome_all_disciplines_label": "all disciplines",
+    "chrome_showing_pack_caption": (
+        "Showing **{pack_label}** proposals for **{discipline}** -- matches the proposal format "
+        "currently selected in Project Setup ('Which does this pursuit need?'). Switch that to "
+        "see the other pack size's archive instead."
+    ),
+    "chrome_library_empty_all": "Nothing in the Library yet ({pack_label}).",
+    "chrome_library_empty_filtered": "Nothing in the Library yet for {discipline} ({pack_label}).",
+    "chrome_file_unavailable": "File unavailable",
+    "chrome_add_as_reference_button": "Add as reference to project",
+    "chrome_added_as_reference_success": "Added '{filename}' as a reference to the current project.",
+    "chrome_extract_failed_warning": "Couldn't extract any text from that file.",
+    "chrome_couldnt_add_as_reference_action": "Couldn't add as reference",
+    "chrome_upload_reference_expander": "⬆️ Upload a reference project",
+    "chrome_upload_reference_caption": (
+        "Add a firm reference project / case study (PDF, DOCX, or TXT) to the Library, filed "
+        "under whichever discipline you choose below."
+    ),
+    "chrome_reference_file_label": "Reference project file",
+    "chrome_title_optional_label": "Title (optional -- defaults to the filename)",
+    "chrome_add_to_reference_library_button": "Add to Reference Library",
+    "chrome_added_to_reference_library_success": "Added '{name}' to the Project Reference Library under {type}.",
+    "chrome_browse_reference_library_caption": (
+        "Browse uploaded reference projects. Download any entry, or add it as reference "
+        "material to the project you're currently working on."
+    ),
+    "chrome_reference_library_empty_all": "Nothing in the Reference Library yet.",
+    "chrome_reference_library_empty_filtered": "Nothing in the Reference Library yet for {discipline}.",
+    "chrome_add_to_project_references_button": "Add to project references",
+    "chrome_added_to_project_references_success": "Added '{filename}' to the current project's references.",
+    "chrome_couldnt_add_to_project_references_action": "Couldn't add to project references",
+    "chrome_loaded_project_success": "Loaded project from {source}.",
+    "chrome_loaded_project_reenter_ai_success": "Loaded project from {source}. Re-enter your AI provider settings in the sidebar to continue.",
+
+    # Audit fix Part 6: fee-table helpers shared across the commercial tabs
+    # (10_state_helpers.py) and the "totals"/"totals & chart" fragment each
+    # call site fills into fee_table_edited_warning.
+    "fee_include_presentation_checkbox": "Include this fee presentation in the proposal",
+    "fee_enter_figures_first_caption": "Enter figures first -- an empty table can't be included.",
+    "fee_label_pct_split": "% split by discipline",
+    "fee_label_discipline_buildup": "discipline build-up",
+    "fee_label_scope_buildup": "scope-item build-up",
+    "fee_included_in_proposal_caption": "**Included in the proposal:**",
+    "fee_none_ticked_warning": (
+        "**No fee presentation is ticked**, so the proposal's fee section will export as a red "
+        "placeholder. Tick at least one of the tables below."
+    ),
+    "fee_table_edited_warning": (
+        "**Table edited -- {indent_note} not yet updated.** Click **Apply changes** to "
+        "recalculate from what's in the table now."
+    ),
+    "fee_apply_changes_button": "Apply changes",
+    "fee_nothing_to_apply_help": "Nothing to apply -- the table matches the figures below.",
+    "fee_indent_note_total": "total",
+    "fee_indent_note_totals_chart": "totals & chart",
+
+    # Audit fix Part 6: 00_init.py's checkout redirect handling and the
+    # Buy-a-bid/Subscribe buttons (_render_upgrade_buttons).
+    "init_payment_confirmed_toast": "Payment confirmed -- thanks!",
+    "init_checkout_confirm_failed_error": (
+        "We couldn't confirm your payment just now, so nothing's been applied to your account "
+        "yet. If you were just charged, please refresh this page to retry. If it keeps failing, "
+        "email hello@civilproposals.com with this reference so we can apply it manually: `{session_id}`"
+    ),
+    "init_checkout_cancelled_toast": "Checkout cancelled -- no charge was made.",
+    "init_ai_unavailable_error": (
+        "AI features are temporarily unavailable -- we're aware and looking into it. Nothing "
+        "you've entered has been lost; please check back shortly or email "
+        "hello@civilproposals.com if this doesn't resolve soon."
+    ),
+    "init_buy_bid_button": "Buy 1 bid -- $50 →",
+    "init_buy_bid_unlock_project_button": "Buy 1 bid -- $50, to unlock this project →",
+    "init_subscribe_button": "Subscribe -- $120/mo →",
+    "init_checkout_start_failed_error": "Couldn't start checkout -- please try again. If it keeps happening, email hello@civilproposals.com.",
+    # Short action-only phrase for _show_error(action, exc), which appends its
+    # own "-- please try again..." trailer -- distinct from the full sentence
+    # above (used where st.error() is called directly, no _show_error wrapper).
+    "init_checkout_start_failed_action": "Couldn't start checkout",
+
+    # Audit fix Part 6: the whole Firm Profile tab (17_firm_profile.py) was
+    # untranslated. Sample-value placeholders that are illustrative formats
+    # rather than English prose (the ABN digit example, the address example)
+    # are deliberately left as-is, same scope-boundary reasoning as Part 5's
+    # export_docx.py pass.
+    "firmprofile_load_failed_error": (
+        "**Couldn't open your firm profile just now.** Nothing has been lost -- your profile is "
+        "stored separately from your projects. Try again in a moment, and if it keeps happening "
+        "email hello@civilproposals.com."
+    ),
+    "firmprofile_back_to_app_button": "← Back to the app",
+    "firmprofile_title": "🏢 Firm profile",
+    "firmprofile_intro_caption": (
+        "Your firm's standing facts, entered once and reused on every bid. Everything here "
+        "fills in placeholders that would otherwise be red in every exported pack -- the ABN "
+        "and address in the footer, the logo on the cover, the insurance and certification "
+        "rows on a client's returnable schedules. Anything you leave blank keeps showing its "
+        "placeholder, exactly as it does today: nothing here is ever guessed or filled in for "
+        "you."
+    ),
+    "firmprofile_tab_identity": "🏢 Identity",
+    "firmprofile_tab_insurance": "🛡️ Insurance & certifications",
+    "firmprofile_tab_commercial": "💲 Commercial",
+    "firmprofile_tab_narrative": "📝 Standing text",
+    "firmprofile_legal_entity_name_label": "Legal entity name",
+    "firmprofile_legal_entity_name_placeholder": "e.g. Example Engineering Pty Ltd",
+    "firmprofile_abn_label": "ABN",
+    "firmprofile_acn_label": "ACN (optional)",
+    "firmprofile_registered_address_label": "Registered address",
+    "firmprofile_company_logo_heading": "**Company logo**",
+    "firmprofile_company_logo_caption": "Rendered on the cover page of every pack. Without one the cover keeps its red [COMPANY LOGO] box.",
+    "firmprofile_logo_display_failed_caption": "(the stored logo couldn't be displayed -- upload it again)",
+    "firmprofile_current_logo_caption": "Current: {filename}",
+    "firmprofile_uploaded_logo_fallback": "uploaded logo",
+    "firmprofile_remove_logo_button": "Remove logo",
+    "firmprofile_upload_logo_label": "Upload a logo (PNG or JPG)",
+    "firmprofile_signatory_heading": "**Standard signatory**",
+    "firmprofile_signatory_caption": "Seeded into each new project's sign-off and contact details. You can still override it per bid -- seeding only ever fills a field that is empty.",
+    "firmprofile_name_label": "Name",
+    "firmprofile_title_label": "Title",
+    "firmprofile_phone_label": "Phone",
+    "firmprofile_email_label": "Email",
+    "firmprofile_insurance_caption": (
+        "These answer the insurance and certification labels on a client's returnable "
+        "schedules, and the matching rows of the compliance matrix. A blank row is ignored, "
+        "not exported as an empty insurance."
+    ),
+    "firmprofile_insurer_label": "Insurer",
+    "firmprofile_policy_number_label": "Policy number",
+    "firmprofile_cover_limit_label": "Cover / limit",
+    "firmprofile_cover_placeholder": "e.g. $10,000,000",
+    "firmprofile_expiry_label": "Expiry",
+    "firmprofile_expiry_placeholder": "e.g. 30 June 2027",
+    "firmprofile_certifications_heading": "**Certifications**",
+    "firmprofile_one_per_line_label": "One per line",
+    "firmprofile_commercial_caption": "Your standard charge-out rates, used to seed a new project's fee build-up. Hours always stay yours to enter -- only the rate is carried over.",
+    "firmprofile_discipline_column": "Discipline",
+    "firmprofile_rate_column": "Rate ($/hr)",
+    "firmprofile_narrative_caption": "Standing narrative reused across bids. Each of these replaces a red placeholder in the exported pack when filled in, and leaves it exactly as it is when blank.",
+    "firmprofile_offices_label": "Offices and local presence",
+    "firmprofile_offices_placeholder": "Where your offices are and how long you've been in the region -- fills the Local Content section's placeholders.",
+    "firmprofile_community_label": "Community and reinvestment programs",
+    "firmprofile_leadership_label": "Standing leadership team",
+    "firmprofile_leadership_placeholder": "Names and roles of the leadership who oversee delivery -- used in the relationship-management section.",
+    "firmprofile_terms_label": "Standard terms of engagement",
+    "firmprofile_terms_placeholder": "e.g. This offer is made under AS 4122-2010 General Conditions of Contract for Consultants.",
+    "firmprofile_qa_label": "QA / Work Verification statement",
+    "firmprofile_qa_placeholder": "e.g. All design deliverables are issued with completed Work Verification Records (WVRs).",
+    "firmprofile_save_button": "Save firm profile",
+    "firmprofile_save_success": "Firm profile saved. New projects will start from it.",
+    "firmprofile_save_failed_error": "**Couldn't save the firm profile.** {exc} Nothing was changed -- try again, and if it keeps failing email hello@civilproposals.com.",
+
     # Login / signup screen.
     "auth_headline": "Built by Civil Engineers, for Civil Engineers",
     "auth_subhead": (

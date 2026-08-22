@@ -555,35 +555,36 @@ def _render_my_projects_popover_body() -> None:
         # user's browser sessions (a real data leak, not just a rough edge),
         # and Railway's container disk is wiped on every redeploy regardless.
         st.checkbox(
-            "Auto-save as I work", key="_autosave_enabled",
-            help=f"Saves to a 'projects' folder next to the app, at most every {AUTOSAVE_INTERVAL_SECONDS}s "
-                 "of activity -- starts once a project name is entered (Project Setup), or once you've "
-                 "uploaded a tender brief, whichever comes first.",
+            i18n.t("chrome_autosave_checkbox_label"), key="_autosave_enabled",
+            help=i18n.t("chrome_autosave_help_local", seconds=AUTOSAVE_INTERVAL_SECONDS),
         )
         if st.session_state._last_autosave_path:
-            st.caption(f"Last saved {datetime.fromtimestamp(st.session_state._last_autosave_ts).strftime('%H:%M:%S')}")
+            st.caption(i18n.t(
+                "chrome_autosave_last_saved",
+                time=datetime.fromtimestamp(st.session_state._last_autosave_ts).strftime('%H:%M:%S'),
+            ))
         elif not _project_identifier() and st.session_state.tender_extracted is None:
-            st.caption("Enter a project or tender name (Project Setup), or upload a tender brief, to enable auto-save.")
+            st.caption(i18n.t("chrome_autosave_enable_hint"))
 
         local_projects = local_project_store.list_local_projects()
         if local_projects:
             options = [p["display_name"] for p in local_projects]
-            chosen = st.selectbox("Recent projects", options, key="_local_project_pick")
+            chosen = st.selectbox(i18n.t("chrome_recent_projects_label"), options, key="_local_project_pick")
             chosen_entry = next(p for p in local_projects if p["display_name"] == chosen)
             lcol1, lcol2 = st.columns(2)
             with lcol1:
-                if st.button("Open", key="_open_local_project", type="primary"):
+                if st.button(i18n.t("btn_open"), key="_open_local_project", type="primary"):
                     try:
                         loaded_state = local_project_store.load_local(chosen_entry["path"])
                         _apply_loaded_project(loaded_state, f"'{chosen_entry['display_name']}'")
                     except project_store.ProjectLoadError as exc:
                         st.error(str(exc))
             with lcol2:
-                if st.button("Delete", key="_delete_local_project", type="primary"):
+                if st.button(i18n.t("btn_delete"), key="_delete_local_project", type="primary"):
                     local_project_store.delete_local(chosen_entry["path"])
                     st.rerun()
         else:
-            st.caption("No local saves yet.")
+            st.caption(i18n.t("chrome_no_local_saves"))
 
     elif current_user:
         # DB-backed equivalent of the local-disk branch above, scoped to
@@ -592,47 +593,41 @@ def _render_my_projects_popover_body() -> None:
         # refresh, a dropped connection, or the app being redeployed,
         # instead of living only in this one browser tab's live session.
         st.checkbox(
-            "Auto-save as I work", key="_autosave_enabled",
-            help=f"Saves to your account, at most every {AUTOSAVE_INTERVAL_SECONDS}s of activity -- "
-                 "starts once a project name is entered (Project Setup), or once you've uploaded a "
-                 "tender brief, whichever comes first (saved as \"Untitled project\" until you name "
-                 "it). Lets you pick back up later, even after closing the tab or a refresh.",
+            i18n.t("chrome_autosave_checkbox_label"), key="_autosave_enabled",
+            help=i18n.t("chrome_autosave_help_cloud", seconds=AUTOSAVE_INTERVAL_SECONDS),
         )
         if st.session_state._last_autosave_error:
-            st.warning(
-                f"Auto-save failed: {st.session_state._last_autosave_error} -- your work in this "
-                "tab is NOT saved to your account yet. Use \"Export / Import\" below as a backup, "
-                "and let support know if this keeps happening."
-            )
+            st.warning(i18n.t("chrome_autosave_failed_warning", error=st.session_state._last_autosave_error))
         elif st.session_state._last_autosave_path:
-            st.caption(f"Last saved {datetime.fromtimestamp(st.session_state._last_autosave_ts).strftime('%H:%M:%S')}")
+            st.caption(i18n.t(
+                "chrome_autosave_last_saved",
+                time=datetime.fromtimestamp(st.session_state._last_autosave_ts).strftime('%H:%M:%S'),
+            ))
         elif not _project_identifier() and st.session_state.tender_extracted is None:
-            st.caption("Enter a project or tender name (Project Setup), or upload a tender brief, to enable auto-save.")
+            st.caption(i18n.t("chrome_autosave_enable_hint"))
 
         cloud_projects = cloud_project_store.list_cloud_projects(current_user.id)
         if cloud_projects:
             options = [p["display_name"] for p in cloud_projects]
-            chosen = st.selectbox("Recent projects", options, key="_cloud_project_pick")
+            chosen = st.selectbox(i18n.t("chrome_recent_projects_label"), options, key="_cloud_project_pick")
             chosen_entry = next(p for p in cloud_projects if p["display_name"] == chosen)
             lcol1, lcol2 = st.columns(2)
             with lcol1:
-                if st.button("Open", key="_open_cloud_project", type="primary"):
+                if st.button(i18n.t("btn_open"), key="_open_cloud_project", type="primary"):
                     try:
                         loaded_state = cloud_project_store.load_cloud(current_user.id, chosen_entry["id"])
                         _apply_loaded_project(loaded_state, f"'{chosen_entry['display_name']}'")
                     except project_store.ProjectLoadError as exc:
                         st.error(str(exc))
             with lcol2:
-                if st.button("Delete", key="_delete_cloud_project", type="primary"):
+                if st.button(i18n.t("btn_delete"), key="_delete_cloud_project", type="primary"):
                     cloud_project_store.delete_cloud(current_user.id, chosen_entry["id"])
                     st.rerun()
         else:
-            st.caption("No saved projects yet -- one will appear here shortly after you start "
-                       "one (auto-save kicks in once you enter a project name on Project Setup, "
-                       "or as soon as you upload a tender brief).")
+            st.caption(i18n.t("chrome_no_cloud_saves"))
 
     st.divider()
-    with st.expander("⇅ Export / Import"):
+    with st.expander(i18n.t("chrome_export_import_expander")):
         _render_export_import_popover_body()
 
 
@@ -642,8 +637,8 @@ def _render_export_import_popover_body() -> None:
     behaviour from when this was its own top-banner popover, just folded
     in one level so the top banner only shows My Proposals / Proposal
     Library / Project Reference Library."""
-    st.caption("For sharing a project or keeping a backup outside this computer.")
-    loaded_file = st.file_uploader("Load a project file", type=["zip"], key="project_loader")
+    st.caption(i18n.t("chrome_export_import_caption"))
+    loaded_file = st.file_uploader(i18n.t("chrome_load_project_file_label"), type=["zip"], key="project_loader")
     if loaded_file is not None and st.session_state._last_loaded_project_name != loaded_file.name:
         try:
             loaded_state = project_store.load_project(loaded_file.getvalue())
@@ -652,12 +647,12 @@ def _render_export_import_popover_body() -> None:
         except project_store.ProjectLoadError as exc:
             st.error(str(exc))
 
-    if st.button("Prepare project save file", type="primary"):
+    if st.button(i18n.t("chrome_prepare_save_button"), type="primary"):
         st.session_state._project_save_bytes = project_store.save_project(st.session_state)
     if st.session_state._project_save_bytes:
         save_filename = (st.session_state.tender_name or "untitled_project").replace(" ", "_")
         st.download_button(
-            "💾 Download project file", data=st.session_state._project_save_bytes,
+            i18n.t("chrome_download_project_file_button"), data=st.session_state._project_save_bytes,
             file_name=f"{save_filename}.tenderproj.zip", mime="application/zip",
          type="primary")
 
@@ -670,24 +665,20 @@ def _render_proposal_library_popover_body() -> None:
     always-collapsed expander at the bottom of Project Setup; moved up here
     (same popover treatment as "My Proposals" / "Project Reference Library")
     so it's reachable from any tab."""
-    with st.expander("⬆️ Upload a proposal to the Library"):
-        st.caption(
-            "Add a finished proposal (.docx) straight into the Library, filed under "
-            "whichever discipline you choose below -- the same place proposals land "
-            "automatically via Export Pack -> 'Archive to Library'."
-        )
+    with st.expander(i18n.t("chrome_upload_proposal_expander")):
+        st.caption(i18n.t("chrome_upload_proposal_caption"))
         _lib_up_file = st.file_uploader(
-            "Proposal file (.docx)", type=["docx"], key="lib_upload_proposal_file",
+            i18n.t("chrome_proposal_file_label"), type=["docx"], key="lib_upload_proposal_file",
         )
         _lib_up_col1, _lib_up_col2 = st.columns(2)
         with _lib_up_col1:
-            _lib_up_type = st.selectbox("Discipline", PROJECT_TYPES, key="lib_upload_proposal_type")
+            _lib_up_type = st.selectbox(i18n.t("chrome_discipline_label"), PROJECT_TYPES, key="lib_upload_proposal_type")
         with _lib_up_col2:
-            _lib_up_pack = st.selectbox("Pack size", ["Large Scope", "Small Scope"], key="lib_upload_proposal_pack")
+            _lib_up_pack = st.selectbox(i18n.t("chrome_pack_size_label"), ["Large Scope", "Small Scope"], key="lib_upload_proposal_pack")
         _lib_up_name = st.text_input(
-            "Project name (optional -- defaults to the filename)", key="lib_upload_proposal_name",
+            i18n.t("chrome_project_name_optional_label"), key="lib_upload_proposal_name",
         )
-        if st.button("Add to Library", key="lib_upload_proposal_btn", disabled=_lib_up_file is None, type="primary"):
+        if st.button(i18n.t("chrome_add_to_library_button"), key="lib_upload_proposal_btn", disabled=_lib_up_file is None, type="primary"):
             try:
                 _default_name = _lib_up_file.name.rsplit(".", 1)[0] if _lib_up_file else ""
                 proposal_library.archive_proposal(
@@ -697,38 +688,32 @@ def _render_proposal_library_popover_body() -> None:
                     pack_type="small_scope" if _lib_up_pack == "Small Scope" else "large_scope",
                     project_name=(_lib_up_name or "").strip() or _default_name,
                 )
-                st.success(f"Added '{_lib_up_file.name}' to the Proposal Library under {_lib_up_type}.")
+                st.success(i18n.t("chrome_added_to_library_success", name=_lib_up_file.name, type=_lib_up_type))
                 st.rerun()
             except Exception as exc:
-                _show_error("Couldn't upload", exc)
+                _show_error(i18n.t("chrome_couldnt_upload_action"), exc)
 
     st.divider()
-    st.caption(
-        "Browse proposals in the Library -- archived from Export Pack, or uploaded "
-        "directly above. Download any entry, or add it as reference material to "
-        "the project you're currently working on."
-    )
+    st.caption(i18n.t("chrome_browse_library_caption"))
     _lib_pack_type = "small_scope" if _is_letter() else "large_scope"
     _lib_pack_label = "Small Scope" if _is_letter() else "Large Scope"
     _lib_type_filter = st.selectbox(
-        "Filter by discipline", ["All"] + PROJECT_TYPES, key="lib_setup_type_filter",
+        i18n.t("chrome_filter_by_discipline_label"), ["All"] + PROJECT_TYPES, key="lib_setup_type_filter",
     )
-    st.caption(
-        f"Showing **{_lib_pack_label}** proposals for "
-        f"**{'all disciplines' if _lib_type_filter == 'All' else _lib_type_filter}** -- "
-        "matches the proposal format currently selected in Project Setup ('Which does "
-        "this pursuit need?'). Switch that to see the other pack size's archive instead."
-    )
+    st.caption(i18n.t(
+        "chrome_showing_pack_caption", pack_label=_lib_pack_label,
+        discipline=(i18n.t("chrome_all_disciplines_label") if _lib_type_filter == "All" else _lib_type_filter),
+    ))
     _lib_entries = proposal_library.list_library(
         _lib_user_id(),
         None if _lib_type_filter == "All" else _lib_type_filter,
         pack_type=_lib_pack_type,
     )
     if not _lib_entries:
-        st.caption(
-            "Nothing in the Library yet" + ("" if _lib_type_filter == "All" else f" for {_lib_type_filter}")
-            + f" ({_lib_pack_label})."
-        )
+        if _lib_type_filter == "All":
+            st.caption(i18n.t("chrome_library_empty_all", pack_label=_lib_pack_label))
+        else:
+            st.caption(i18n.t("chrome_library_empty_filtered", discipline=_lib_type_filter, pack_label=_lib_pack_label))
     else:
         for _e in _lib_entries:
             _client_bit = f" | client: {_e['client_name']}" if _e.get("client_name") else ""
@@ -743,19 +728,19 @@ def _render_proposal_library_popover_body() -> None:
                 try:
                     _lib_bytes = proposal_library.read_entry_bytes(_lib_user_id(), _e["path"])
                     st.download_button(
-                        "Download", data=_lib_bytes, file_name=_e.get("filename", "proposal.docx"),
+                        i18n.t("btn_download"), data=_lib_bytes, file_name=_e.get("filename", "proposal.docx"),
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         key=f"lib_dl_{_e.get('path')}", width="stretch",
                      type="primary")
                 except Exception:
-                    st.caption("File unavailable")
+                    st.caption(i18n.t("chrome_file_unavailable"))
             with _lcol2:
                 # "Add as reference to project" -- pulls this proposal's text into
                 # the CURRENT project's "Previous proposals" company material
                 # (Upload Docs), same effect as uploading it there by hand. Used
                 # to be its own picker buried in Upload Docs; moved here so it
                 # sits right next to the entry it applies to.
-                if st.button("Add as reference to project", key=f"lib_addref_{_e.get('path')}", width="stretch", type="primary"):
+                if st.button(i18n.t("chrome_add_as_reference_button"), key=f"lib_addref_{_e.get('path')}", width="stretch", type="primary"):
                     try:
                         _bytes_for_ref = _lib_bytes if _lib_bytes is not None else proposal_library.read_entry_bytes(_lib_user_id(), _e["path"])
                         _doc = document_processor.extract_text_from_docx(_bytes_for_ref, _e.get("filename", "proposal.docx"))
@@ -768,12 +753,12 @@ def _render_proposal_library_popover_body() -> None:
                             st.session_state.company_material_text[_key] = "\n\n".join(
                                 st.session_state.company_material_files[_key].values()
                             )
-                            st.success(f"Added '{_e.get('filename')}' as a reference to the current project.")
+                            st.success(i18n.t("chrome_added_as_reference_success", filename=_e.get('filename')))
                             st.rerun()
                         else:
-                            st.warning("Couldn't extract any text from that file.")
+                            st.warning(i18n.t("chrome_extract_failed_warning"))
                     except Exception as exc:
-                        _show_error("Couldn't add as reference", exc)
+                        _show_error(i18n.t("chrome_couldnt_add_as_reference_action"), exc)
             st.divider()
 
 
@@ -784,19 +769,16 @@ def _render_project_reference_library_popover_body() -> None:
     by discipline the same way Proposal Library is. Nothing lands here
     automatically -- there's no "generate a reference project" step in the
     app to archive from, so upload is the only way in."""
-    with st.expander("⬆️ Upload a reference project"):
-        st.caption(
-            "Add a firm reference project / case study (PDF, DOCX, or TXT) to the "
-            "Library, filed under whichever discipline you choose below."
-        )
+    with st.expander(i18n.t("chrome_upload_reference_expander")):
+        st.caption(i18n.t("chrome_upload_reference_caption"))
         _ref_up_file = st.file_uploader(
-            "Reference project file", type=["pdf", "docx", "txt"], key="reflib_upload_file",
+            i18n.t("chrome_reference_file_label"), type=["pdf", "docx", "txt"], key="reflib_upload_file",
         )
-        _ref_up_type = st.selectbox("Discipline", PROJECT_TYPES, key="reflib_upload_type")
+        _ref_up_type = st.selectbox(i18n.t("chrome_discipline_label"), PROJECT_TYPES, key="reflib_upload_type")
         _ref_up_title = st.text_input(
-            "Title (optional -- defaults to the filename)", key="reflib_upload_title",
+            i18n.t("chrome_title_optional_label"), key="reflib_upload_title",
         )
-        if st.button("Add to Reference Library", key="reflib_upload_btn", disabled=_ref_up_file is None, type="primary"):
+        if st.button(i18n.t("chrome_add_to_reference_library_button"), key="reflib_upload_btn", disabled=_ref_up_file is None, type="primary"):
             try:
                 _default_title = _ref_up_file.name.rsplit(".", 1)[0] if _ref_up_file else ""
                 reference_library.upload_reference(
@@ -806,28 +788,25 @@ def _render_project_reference_library_popover_body() -> None:
                     filename=_ref_up_file.name,
                     title=(_ref_up_title or "").strip() or _default_title,
                 )
-                st.success(f"Added '{_ref_up_file.name}' to the Project Reference Library under {_ref_up_type}.")
+                st.success(i18n.t("chrome_added_to_reference_library_success", name=_ref_up_file.name, type=_ref_up_type))
                 st.rerun()
             except Exception as exc:
-                _show_error("Couldn't upload", exc)
+                _show_error(i18n.t("chrome_couldnt_upload_action"), exc)
 
     st.divider()
-    st.caption(
-        "Browse uploaded reference projects. Download any entry, or add it as "
-        "reference material to the project you're currently working on."
-    )
+    st.caption(i18n.t("chrome_browse_reference_library_caption"))
     _ref_type_filter = st.selectbox(
-        "Filter by discipline", ["All"] + PROJECT_TYPES, key="reflib_type_filter",
+        i18n.t("chrome_filter_by_discipline_label"), ["All"] + PROJECT_TYPES, key="reflib_type_filter",
     )
     _ref_entries = reference_library.list_library(
         _lib_user_id(),
         None if _ref_type_filter == "All" else _ref_type_filter,
     )
     if not _ref_entries:
-        st.caption(
-            "Nothing in the Reference Library yet"
-            + ("" if _ref_type_filter == "All" else f" for {_ref_type_filter}") + "."
-        )
+        if _ref_type_filter == "All":
+            st.caption(i18n.t("chrome_reference_library_empty_all"))
+        else:
+            st.caption(i18n.t("chrome_reference_library_empty_filtered", discipline=_ref_type_filter))
     else:
         for _e in _ref_entries:
             st.markdown(
@@ -840,16 +819,16 @@ def _render_project_reference_library_popover_body() -> None:
                 try:
                     _ref_bytes = reference_library.read_entry_bytes(_lib_user_id(), _e["path"])
                     st.download_button(
-                        "Download", data=_ref_bytes, file_name=_e.get("filename", "reference_project"),
+                        i18n.t("btn_download"), data=_ref_bytes, file_name=_e.get("filename", "reference_project"),
                         key=f"reflib_dl_{_e.get('path')}", width="stretch",
                      type="primary")
                 except Exception:
-                    st.caption("File unavailable")
+                    st.caption(i18n.t("chrome_file_unavailable"))
             with _rcol2:
                 # "Add to project references" -- pulls this reference project's text
                 # into the CURRENT project's "Project references" company material
                 # (Upload Docs), same effect as uploading it there by hand.
-                if st.button("Add to project references", key=f"reflib_addref_{_e.get('path')}", width="stretch", type="primary"):
+                if st.button(i18n.t("chrome_add_to_project_references_button"), key=f"reflib_addref_{_e.get('path')}", width="stretch", type="primary"):
                     try:
                         _bytes_for_ref = _ref_bytes if _ref_bytes is not None else reference_library.read_entry_bytes(_lib_user_id(), _e["path"])
                         _doc = _extract_plain_text_from_bytes(_bytes_for_ref, _e.get("filename", "reference_project"))
@@ -862,12 +841,12 @@ def _render_project_reference_library_popover_body() -> None:
                             st.session_state.company_material_text[_key] = "\n\n".join(
                                 st.session_state.company_material_files[_key].values()
                             )
-                            st.success(f"Added '{_e.get('filename')}' to the current project's references.")
+                            st.success(i18n.t("chrome_added_to_project_references_success", filename=_e.get('filename')))
                             st.rerun()
                         else:
-                            st.warning(_doc.warning or "Couldn't extract any text from that file.")
+                            st.warning(_doc.warning or i18n.t("chrome_extract_failed_warning"))
                     except Exception as exc:
-                        _show_error("Couldn't add to project references", exc)
+                        _show_error(i18n.t("chrome_couldnt_add_to_project_references_action"), exc)
             st.divider()
 
 

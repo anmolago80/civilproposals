@@ -505,6 +505,39 @@ def test_subscription_monthly_bid_limit_is_four(failures: list[str]) -> None:
         )
 
 
+def test_email_bid_count_matches_subscription_limit(failures: list[str]) -> None:
+    """Audit Round 2, Part 6: email_utils.py's purchase-receipt and trial-
+    used emails had hardcoded "3 bids"/"3 tender analyses" copy that drifted
+    stale after SUBSCRIPTION_MONTHLY_BID_LIMIT moved to 4 (test above).
+    Both now read the constant via a deferred import instead of a second
+    hardcoded number, specifically so they can't drift apart from it again --
+    this pins that by generating both emails and asserting the live constant's
+    value appears, and the number it replaced does not."""
+    from modules import auth, email_utils
+
+    sent = []
+    original_send = email_utils._send
+    email_utils._send = lambda to, subject, html: sent.append(html)
+    try:
+        email_utils.send_purchase_receipt_email("test@example.invalid", "subscription")
+        email_utils.send_trial_used_email("test@example.invalid")
+    finally:
+        email_utils._send = original_send
+
+    limit = auth.SUBSCRIPTION_MONTHLY_BID_LIMIT
+    for html in sent:
+        if f"{limit} " not in html:
+            failures.append(
+                f"test_email_bid_count_matches_subscription_limit: expected the live "
+                f"SUBSCRIPTION_MONTHLY_BID_LIMIT ({limit}) in the email body, not found: {html[:200]!r}"
+            )
+        if "3 bids" in html or "3 tender analyses" in html:
+            failures.append(
+                f"test_email_bid_count_matches_subscription_limit: stale hardcoded '3' copy "
+                f"survived in the email body: {html[:200]!r}"
+            )
+
+
 def test_i18n_catalogs_are_in_sync(failures: list[str]) -> None:
     """Every key defined in the English catalog must also exist in the
     Spanish one and vice versa -- modules/i18n.t() silently falls back to
@@ -585,6 +618,7 @@ def main() -> int:
     test_migrate_project_identity_on_rename(failures)
     test_unlimited_account_bypasses_everything(failures)
     test_subscription_monthly_bid_limit_is_four(failures)
+    test_email_bid_count_matches_subscription_limit(failures)
     test_i18n_catalogs_are_in_sync(failures)
     test_i18n_t_fallback_behaviour(failures)
     test_export_i18n_headings_differ_by_language(failures)
