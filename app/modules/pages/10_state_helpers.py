@@ -2200,6 +2200,19 @@ def _apply_loaded_project(loaded_state: dict, source_label: str) -> None:
     newly-loaded project, and reruns so every tab reflects it immediately."""
     for k, v in loaded_state.items():
         st.session_state[k] = v
+    # Round 3, Part 3: _last_draft_metered_signature now travels with the
+    # project (see project_store.PLAIN_KEYS), so a normal save/load round
+    # trip preserves the metering baseline and a page refresh can no longer
+    # reset a paid project back to "first free generation". But an OLDER
+    # project file saved before this key existed -- or any other path that
+    # lands here with drafts already generated but no baseline in the
+    # payload -- must NOT be silently treated as a free first-ever
+    # generation (that's exactly what a missing baseline normally signals,
+    # see _draft_would_consume_pass()). Stamp the CURRENT signature as the
+    # baseline right here instead, so the very next regenerate compares
+    # against what was actually loaded, not against nothing.
+    if st.session_state.get("drafts") and not st.session_state.get("_last_draft_metered_signature"):
+        st.session_state["_last_draft_metered_signature"] = _draft_generation_input_signature()
     st.session_state._project_save_bytes = None
     st.session_state.docx_buffer = None
     for prefix in _FEE_TABLE_APPLY_STATE_PREFIXES:

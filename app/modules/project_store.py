@@ -82,6 +82,17 @@ PLAIN_KEYS = [
     "fee_estimate_manual_total", "project_differentiator", "project_sales_pitch",
     "methodology_wvr_confirmed", "cover_photo_index", "fee_sections_included",
     "program_style", "org_chart_style", "org_chart_png_style", "methodology_style",
+    # Round 3, Part 3 (money): the paid-drafting metering baseline (a sha256
+    # signature of the drafting inputs, stamped by 50_drafting.py after
+    # every metered generation -- see _draft_would_consume_pass() in
+    # modules/pages/10_state_helpers.py). Was NOT in this list, so a browser
+    # refresh, dropped connection, or "load a saved project" always lost it
+    # -- and a missing baseline means "no pass spent yet", so a paid user
+    # could regenerate for free indefinitely just by reloading. Loading an
+    # OLDER project file (saved before this key existed) still needs
+    # _apply_loaded_project()'s own fallback -- see its comment -- since
+    # this key simply won't be in that payload at all.
+    "_last_draft_metered_signature",
     # Bookkeeping app.py uses to detect a stale Proposal Structure (see
     # _structure_format_stale() there) -- MUST travel with "sections" and
     # "proposal_format" or a reopened project falsely looks stale: without

@@ -639,6 +639,77 @@ def test_export_i18n_headings_differ_by_language(failures: list[str]) -> None:
         failures.append("test_export_i18n_headings_differ_by_language: export_t() returned falsy for an unknown key instead of a fallback marker")
 
 
+def test_last_draft_metered_signature_round_trip(failures: list[str]) -> None:
+    """Round 3, Part 3 (money): _last_draft_metered_signature is the paid-
+    drafting metering baseline (see _draft_would_consume_pass() in
+    modules/pages/10_state_helpers.py) -- a missing baseline means "no pass
+    spent yet, the next regenerate is free" (deliberately, for a genuinely
+    fresh project's first-ever generation). It was NOT in
+    project_store.PLAIN_KEYS, so ANY save/load round trip -- a saved project
+    reopened later, a page refresh that lands on a fresh session and
+    restores from cloud auto-save, handing a project to a colleague -- reset
+    a PAID project's baseline back to missing, letting a paid regeneration
+    run free indefinitely just by reloading.
+
+    Covers the two pieces that don't require the Streamlit page-script
+    machinery those tabs run in (same boundary
+    check_generated_language_stale_notice() in test_exports.py already
+    draws for its own companion PLAIN_KEYS entry): the key's own save/load
+    round trip (the normal case, now fixed), and confirming an OLDER
+    project file -- saved before this key existed -- still round-trips with
+    the key genuinely ABSENT rather than defaulted to some value. That
+    absent-vs-None distinction is exactly the signal
+    _apply_loaded_project() checks (`not st.session_state.get(...)`) before
+    deciding whether a reload with drafts already present must stamp the
+    CURRENT signature as the baseline instead of leaving it looking like a
+    free first-ever generation -- that decision itself needs a live
+    Streamlit session (current_user, _access, real st.session_state) to
+    exercise directly, so it isn't re-tested here."""
+    import io
+    import json
+    import zipfile
+
+    from modules import project_store
+
+    if "_last_draft_metered_signature" not in project_store.PLAIN_KEYS:
+        failures.append(
+            "test_last_draft_metered_signature_round_trip: _last_draft_metered_signature "
+            "is not registered in project_store.PLAIN_KEYS")
+        return
+
+    # The normal case, going forward: a real signature survives a save/load
+    # round trip -- e.g. paid project, generate (baseline B stamped), save,
+    # reload, change an input, regenerate -- should compare against B, not
+    # against nothing.
+    saved = project_store.save_project({
+        "output_language": "en", "_last_draft_metered_signature": "abc123deadbeef",
+    })
+    loaded = project_store.load_project(saved)
+    if loaded.get("_last_draft_metered_signature") != "abc123deadbeef":
+        failures.append(
+            f"test_last_draft_metered_signature_round_trip: didn't round-trip through "
+            f"save/load: {loaded.get('_last_draft_metered_signature')!r}")
+
+    # An older project file, saved before this key existed, never wrote it
+    # at all -- simulate that by stripping it back out of an otherwise-real
+    # saved payload (rather than a hand-built one, so every other field
+    # save_project() writes is still realistic), then confirm
+    # load_project() reports the key as genuinely missing from its result,
+    # not present with a None/empty default.
+    with zipfile.ZipFile(io.BytesIO(saved)) as zf:
+        payload = json.loads(zf.read("project.json"))
+    del payload["_last_draft_metered_signature"]
+    old_format_buffer = io.BytesIO()
+    with zipfile.ZipFile(old_format_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("project.json", json.dumps(payload))
+    old_loaded = project_store.load_project(old_format_buffer.getvalue())
+    if "_last_draft_metered_signature" in old_loaded:
+        failures.append(
+            "test_last_draft_metered_signature_round_trip: an older project file without "
+            "_last_draft_metered_signature should load with the key absent, not defaulted "
+            "to a value -- _apply_loaded_project()'s fallback relies on that absence")
+
+
 def main() -> int:
     import logging
     logging.disable(logging.WARNING)
@@ -667,6 +738,7 @@ def main() -> int:
     test_i18n_catalogs_are_in_sync(failures)
     test_i18n_t_fallback_behaviour(failures)
     test_export_i18n_headings_differ_by_language(failures)
+    test_last_draft_metered_signature_round_trip(failures)
 
     if failures:
         print("BILLING + I18N TESTS FAILED:")
