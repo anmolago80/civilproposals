@@ -198,6 +198,7 @@ def review_pitch(
     config: dict | None = None,
     differentiator_qa: list[tuple[str, str]] | None = None,
     sales_pitch_qa: list[tuple[str, str]] | None = None,
+    output_language: str = "en",
 ) -> PitchReview:
     """differentiator/sales_pitch: the user's own raw text from the Draft
     Responses tab. analysis (tender_analyser.TenderAnalysis) is optional --
@@ -206,7 +207,11 @@ def review_pitch(
     differentiator_qa/sales_pitch_qa: optional list of (question, answer)
     pairs from generate_pitch_questions -- the user's own answers to the
     "sharpen further" follow-up questions, folded into the prompt as
-    additional genuine input (see _format_followup)."""
+    additional genuine input (see _format_followup).
+
+    `output_language`: language for all four returned strings (both comments
+    and both refined rewrites) -- "en" (default) or "es". Independent of the
+    app's own UI language; see modules/i18n.py's module docstring."""
     project_info = project_info or {}
     project_scope = (getattr(analysis, "project_scope", "") or "").strip() if analysis else ""
     client_objectives = (getattr(analysis, "client_objectives", None) or []) if analysis else []
@@ -231,6 +236,14 @@ def review_pitch(
         sales_pitch=(sales_pitch or "").strip() or "(not supplied)",
         sales_pitch_followup=_format_followup(sales_pitch_qa),
     )
+    if output_language == "es":
+        prompt += (
+            "\n\nWrite \"differentiator_comment\", \"differentiator_refined\", "
+            "\"sales_pitch_comment\", and \"sales_pitch_refined\" all in Spanish (Español). Keep "
+            "the JSON field names above exactly as given, in English. Translate only the "
+            "language, not the substance -- do not invent, omit, or alter any claim, number, or "
+            "fact because of this instruction."
+        )
 
     data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=1500)
 
@@ -248,10 +261,15 @@ def generate_pitch_questions(
     analysis=None,
     project_info: dict | None = None,
     config: dict | None = None,
+    output_language: str = "en",
 ) -> PitchQuestions:
     """Button-triggered only (never on every keystroke) -- generates up to 4
     targeted follow-up questions per field, based on whatever is currently
-    typed into Differentiator/Sales pitch. See module docstring."""
+    typed into Differentiator/Sales pitch. See module docstring.
+
+    `output_language`: language for the returned questions -- "en" (default)
+    or "es". Independent of the app's own UI language; see modules/i18n.py's
+    module docstring."""
     project_info = project_info or {}
     project_scope = (getattr(analysis, "project_scope", "") or "").strip() if analysis else ""
     client_objectives = (getattr(analysis, "client_objectives", None) or []) if analysis else []
@@ -264,6 +282,13 @@ def generate_pitch_questions(
         differentiator=(differentiator or "").strip() or "(not supplied)",
         sales_pitch=(sales_pitch or "").strip() or "(not supplied)",
     )
+    if output_language == "es":
+        prompt += (
+            "\n\nWrite every question in \"differentiator_questions\" and "
+            "\"sales_pitch_questions\" in Spanish (Español). Keep the JSON field names above "
+            "exactly as given, in English. Translate only the language, not the substance -- do "
+            "not invent, omit, or alter what is being asked because of this instruction."
+        )
 
     data = call_ai_json(prompt, system_message=QUESTIONS_SYSTEM_MESSAGE, config=config, max_tokens=700)
 

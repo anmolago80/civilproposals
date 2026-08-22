@@ -285,10 +285,16 @@ def draft_methodology_stages(
     program_week_labels: list | None = None,
     project_info: dict | None = None,
     config: dict | None = None,
+    output_language: str = "en",
 ) -> list[MethodologyStage]:
     """One AI call producing the reviewable stage grid. Raises whatever
     call_ai_json raises (AIConfigError) -- the caller shows it verbatim and
-    offers the blank grid instead."""
+    offers the blank grid instead.
+
+    `output_language`: language for the narrative/prose fields ("name",
+    "key_tasks", "engagement_activities", "outcome", "deliverables") -- "en"
+    (default) or "es". Independent of the app's own UI language; see
+    modules/i18n.py's module docstring."""
     project_info = project_info or {}
     week_count = len(program_week_labels or [])
 
@@ -308,6 +314,16 @@ def draft_methodology_stages(
         week_count=week_count or 0,
         default_stages=", ".join(DEFAULT_STAGE_NAMES),
     )
+    if output_language == "es":
+        prompt += (
+            "\n\nWrite the narrative/prose string VALUES in your JSON response (\"name\", the "
+            "entries of \"key_tasks\", \"engagement_activities\", \"outcome\", and the entries of "
+            "\"deliverables\") in Spanish (Español). Keep the JSON field names above exactly as "
+            "given, in English, and keep the literal marker \"TBC\" exactly as \"TBC\" -- do not "
+            "translate it, it is a structural placeholder the rest of the app matches on. "
+            "Translate only the language, not the substance -- do not invent, omit, or alter any "
+            "task, deliverable, date, or fact because of this instruction."
+        )
 
     data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=4000)
     return _scrub_stages(data.get("stages"), week_count)

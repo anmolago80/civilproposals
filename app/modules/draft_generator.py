@@ -220,13 +220,19 @@ def generate_draft_section(
     compliance_items: list | None = None,
     win_themes: str = "",
     structured_material: str = "",
+    output_language: str = "en",
 ) -> SectionDraft:
     """`structured_material`: user-reviewed structured content that should
     REPLACE the raw uploaded blob for this section -- the edited reference
     projects for a Relevant Experience section, the personnel profiles for a
     Key Personnel one. Without it those sections drafted from truncated raw
     upload text while the cards beside them showed the user's corrected
-    version, so the two disagreed in the same document."""
+    version, so the two disagreed in the same document.
+
+    `output_language`: language for the drafted prose ("draft_heading",
+    "draft_text", "required_user_inputs") -- "en" (default) or "es".
+    Independent of the app's own UI language; see modules/i18n.py's module
+    docstring. Never changes what's drafted, only what language it's written in."""
     company_material_text = company_material_text or {}
     project_info = project_info or {}
     material_block = structured_material.strip() or _format_company_material(company_material_text)
@@ -254,6 +260,17 @@ def generate_draft_section(
         team_context=(team_context or "").strip() or "(no team assigned yet -- use bracketed placeholders for any named roles)",
         company_material=material_block,
     )
+    if output_language == "es":
+        prompt += (
+            "\n\nWrite \"draft_heading\", \"draft_text\", and the entries of "
+            "\"required_user_inputs\" in Spanish (Español) -- the full drafted prose, not just a "
+            "summary. Keep the JSON field names above exactly as given, in English. Translate only "
+            "the language, not the substance: do not invent, omit, or alter any fact, name, figure, "
+            "deliverable, or placeholder because of this instruction, and keep bracketed "
+            "placeholders like [USER TO INSERT PROJECT-SPECIFIC DETAIL] recognisable (translate the "
+            "placeholder text itself into Spanish too, e.g. [EL USUARIO DEBE INSERTAR EL DETALLE "
+            "ESPECÍFICO DEL PROYECTO], so a reviewer scanning the Spanish draft still spots every gap)."
+        )
 
     data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config,
                         max_tokens=draft_token_budget(section))
@@ -278,6 +295,7 @@ def generate_all_drafts(
     compliance_items: list | None = None,
     win_themes: str = "",
     structured_material: dict[str, str] | None = None,
+    output_language: str = "en",
 ) -> dict[str, SectionDraft]:
     """Drafts every section, one AI call each, run concurrently (up to
     MAX_CONCURRENT_DRAFTS at a time) rather than one-at-a-time -- each
@@ -293,7 +311,10 @@ def generate_all_drafts(
     partial dict). progress_callback still fires once per completed
     section with a running count, but since sections may finish in any
     order now, the (i, total, title) it receives reflects completion
-    order, not each section's position in the original list."""
+    order, not each section's position in the original list.
+
+    `output_language`: passed through to each generate_draft_section() call --
+    "en" (default) or "es". See that function's docstring."""
     drafts: dict[str, SectionDraft] = {}
     total = len(sections)
     completed = 0
@@ -307,6 +328,7 @@ def generate_all_drafts(
                 compliance_items=compliance_items,
                 win_themes=win_themes,
                 structured_material=(structured_material or {}).get(section.title, ""),
+                output_language=output_language,
             ): section
             for section in sections
         }

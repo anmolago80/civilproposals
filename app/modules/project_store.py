@@ -68,7 +68,7 @@ PROJECT_FILE_VERSION = 1
 # or a list/dict made only of those).
 PLAIN_KEYS = [
     "project_name", "client_name", "tender_name", "submission_date_input", "bidder_name",
-    "proposal_theme", "project_type", "company_material_text", "company_material_files",
+    "proposal_theme", "project_type", "output_language", "company_material_text", "company_material_files",
     "company_uploaded_flags",
     "quotes", "section_divider_config", "proposal_format",
     "letter_sender_name", "letter_sender_title", "letter_sender_phone", "letter_sender_email",

@@ -35,6 +35,7 @@ from docx.oxml import OxmlElement
 from docx.shared import Pt, RGBColor, Cm, Emu
 
 from modules import divider_designer
+from modules import export_i18n
 
 DEFAULT_FONT = "Arial"
 
@@ -92,6 +93,7 @@ def build_docx(
     firm: dict | None = None,
     fee_sections_included: dict | None = None,
     scope_item_fees: list | None = None,
+    output_language: str = "en",
 ) -> io.BytesIO:
     theme = _theme_colours(project_info.get("proposal_theme"))
     firm = firm or {}
@@ -106,20 +108,22 @@ def build_docx(
 
     _add_ocr_notice(doc, ocr_note)
 
-    _add_toc(doc)
+    _add_toc(doc, output_language)
     doc.add_page_break()
 
-    _build_executive_summary(doc, executive_summary, project_info, theme, differentiator_text=differentiator_text)
+    _build_executive_summary(doc, executive_summary, project_info, theme,
+                             differentiator_text=differentiator_text, output_language=output_language)
     doc.add_page_break()
 
-    _build_page_allocation_plan(doc, sections, theme)
+    _build_page_allocation_plan(doc, sections, theme, output_language)
     doc.add_page_break()
 
     # Which fee presentations reach the proposal is the user's choice now
     # (Fee Estimate tab) rather than hardcoded per pack format.
     _fee_included = fee_sections(fee_sections_included)
     if fee_estimates and _fee_included["pct_split"]:
-        _build_fee_estimate(doc, fee_estimates, analysis.fee_cap, theme, fee_estimate_indicative_amounts)
+        _build_fee_estimate(doc, fee_estimates, analysis.fee_cap, theme, fee_estimate_indicative_amounts,
+                            output_language=output_language)
         doc.add_page_break()
 
     _build_proposal_response(doc, sections, guidance_notes, drafts, graphics, divider_images,
@@ -136,7 +140,8 @@ def build_docx(
                              program_week_labels=program_week_labels,
                              firm=firm,
                              fee_sections_included=_fee_included,
-                             scope_item_fees=scope_item_fees)
+                             scope_item_fees=scope_item_fees,
+                             output_language=output_language)
 
     buffer = io.BytesIO()
     doc.save(buffer)
@@ -155,6 +160,7 @@ def build_tender_summary_docx(
     body_font: str | None = None,
     ocr_note: str | None = None,
     document_placeholders: list | None = None,
+    output_language: str = "en",
 ) -> io.BytesIO:
     """Builds the companion Tender Summary document -- everything about how the
     brief was read and how this response pack was put together, kept OUT of the
@@ -170,27 +176,28 @@ def build_tender_summary_docx(
     _set_base_styles(doc, theme, font)
     _add_page_numbers(doc)
 
-    _build_tender_summary_title_page(doc, project_info, theme)
+    _build_tender_summary_title_page(doc, project_info, theme, output_language)
     doc.add_page_break()
 
     _add_ocr_notice(doc, ocr_note)
 
-    _add_toc(doc)
+    _add_toc(doc, output_language)
     doc.add_page_break()
 
-    _build_tender_summary(doc, analysis, weighting_chart_png, theme)
+    _build_tender_summary(doc, analysis, weighting_chart_png, theme, output_language)
     doc.add_page_break()
 
-    _build_compliance_matrix(doc, compliance_items, theme)
+    _build_compliance_matrix(doc, compliance_items, theme, output_language)
     doc.add_page_break()
 
-    _build_gap_analysis(doc, gap_items, theme)
+    _build_gap_analysis(doc, gap_items, theme, output_language)
     doc.add_page_break()
 
-    _build_review_checklist(doc, sections)
+    _build_review_checklist(doc, sections, output_language)
     doc.add_page_break()
 
-    _build_user_input_list(doc, compliance_items, gap_items, drafts, document_placeholders)
+    _build_user_input_list(doc, compliance_items, gap_items, drafts, document_placeholders,
+                           output_language=output_language)
 
     buffer = io.BytesIO()
     doc.save(buffer)
@@ -198,13 +205,14 @@ def build_tender_summary_docx(
     return buffer
 
 
-def _build_tender_summary_title_page(doc: Document, project_info: dict, theme: dict):
+def _build_tender_summary_title_page(doc: Document, project_info: dict, theme: dict,
+                                     output_language: str = "en"):
     for _ in range(4):
         doc.add_paragraph()
 
     title = doc.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = title.add_run("Tender Summary")
+    run = title.add_run(export_i18n.export_t("heading_tender_summary", output_language))
     run.font.size = Pt(28)
     run.font.bold = True
     run.font.color.rgb = theme["heading"]
@@ -259,6 +267,7 @@ def build_letter_docx(
     program_style: str | None = None,
     methodology_stages: list | None = None,
     program_start_date=None,
+    output_language: str = "en",
 ) -> io.BytesIO:
     """
     Builds the Small Scope Proposal Response Pack -- the leaner, content-agnostic
@@ -310,33 +319,34 @@ def build_letter_docx(
     _add_ocr_notice(doc, ocr_note)
     _add_company_footer_line(doc.sections[-1].footer, project_info, firm)
 
-    _build_executive_summary(doc, executive_summary, project_info, theme, differentiator_text=differentiator_text)
+    _build_executive_summary(doc, executive_summary, project_info, theme,
+                             differentiator_text=differentiator_text, output_language=output_language)
     doc.add_page_break()
 
-    doc.add_heading("1. Introduction", level=1)
+    doc.add_heading(export_i18n.export_t("heading_letter_intro", output_language), level=1)
     _add_letter_body_text(doc, understanding_text, "[NO INTRODUCTION DRAFTED YET -- generate a draft or write one in the Draft Responses step]", theme)
 
-    doc.add_heading("2. Scope of Work", level=1)
+    doc.add_heading(export_i18n.export_t("heading_letter_scope_of_work", output_language), level=1)
     _build_letter_scope_of_work(doc, analysis.scope_items)
 
-    doc.add_heading("3. Methodology and Deliverables", level=1)
+    doc.add_heading(export_i18n.export_t("heading_letter_methodology", output_language), level=1)
     _build_letter_methodology(doc, methodology_text, theme, sales_pitch_text=sales_pitch_text)
 
-    doc.add_heading("4. Project Team", level=1)
+    doc.add_heading(export_i18n.export_t("heading_letter_team", output_language), level=1)
     _build_letter_team(doc, resource_plan, personnel_photos, theme)
 
-    doc.add_heading("5. Fees", level=1)
+    doc.add_heading(export_i18n.export_t("heading_letter_fees", output_language), level=1)
     # Stable order, and only the presentations the user ticked on the Fee
     # Estimate tab. The defaults reproduce what this pack always exported.
     _letter_fee = fee_sections(fee_sections_included)
     if not any(_letter_fee.values()):
         _add_placeholder_paragraph(doc, FEE_NOTHING_SELECTED)
     if _letter_fee["pct_split"] and fee_estimates:
-        _build_letter_fee_split(doc, fee_estimates, theme)
+        _build_letter_fee_split(doc, fee_estimates, theme, output_language)
     if _letter_fee["discipline_buildup"] and discipline_fee_lines:
-        _build_letter_fee_buildup(doc, discipline_fee_lines, theme)
+        _build_letter_fee_buildup(doc, discipline_fee_lines, theme, output_language)
     if _letter_fee["scope_buildup"]:
-        _build_scope_item_fees(doc, scope_item_fees, theme)
+        _build_scope_item_fees(doc, scope_item_fees, theme, output_language=output_language)
     if any(_letter_fee.values()) and not discipline_fee_lines and not fee_estimates and not (
             _letter_fee["scope_buildup"] and scope_item_fees):
         # Both tables are optional, and with neither of them this heading
@@ -350,7 +360,7 @@ def build_letter_docx(
             "discipline fee split, in the Fees & Program step]",
         )
 
-    doc.add_heading("6. Program", level=1)
+    doc.add_heading(export_i18n.export_t("heading_letter_program", output_language), level=1)
     _build_letter_program(
         doc, program_schedule, program_week_labels, theme,
         style=program_style, methodology_stages=methodology_stages,
@@ -359,7 +369,7 @@ def build_letter_docx(
         client_name=project_info.get("client_name", ""),
     )
 
-    doc.add_heading("7. Assumptions and Clarifications", level=1)
+    doc.add_heading(export_i18n.export_t("heading_letter_assumptions", output_language), level=1)
     if analysis.assumptions:
         _add_bullets(doc, analysis.assumptions)
     else:
@@ -369,19 +379,19 @@ def build_letter_docx(
     # what they mean for delivery or what this firm would do about them. With
     # a reviewed register they become a real risk / impact / mitigation table.
     if getattr(risk_register, "entries", None):
-        doc.add_heading("Risks and mitigation", level=2)
+        doc.add_heading(export_i18n.export_t("heading_risks_mitigation", output_language), level=2)
         _build_risk_table(doc, risk_register, theme)
     elif analysis.risks:
-        doc.add_heading("Risks noted in the brief", level=2)
+        doc.add_heading(export_i18n.export_t("heading_risks_noted_in_brief", output_language), level=2)
         _add_bullets(doc, analysis.risks)
 
-    doc.add_heading("8. Terms of Engagement", level=1)
+    doc.add_heading(export_i18n.export_t("heading_letter_terms", output_language), level=1)
     _add_letter_body_text(doc, terms_of_engagement_text, "[NO TERMS OF ENGAGEMENT ENTERED -- reference the applicable contract/commercial conditions]")
 
     _build_letter_signoff(doc, sender)
 
     doc.add_page_break()
-    _build_letter_review_checklist(doc)
+    _build_letter_review_checklist(doc, output_language)
 
     buffer = io.BytesIO()
     doc.save(buffer)
@@ -547,13 +557,14 @@ def _build_letter_team(doc: Document, resource_plan: list, personnel_photos: dic
         doc.add_paragraph()
 
 
-def _build_letter_fee_buildup(doc: Document, discipline_fee_lines: list, theme: dict):
+def _build_letter_fee_buildup(doc: Document, discipline_fee_lines: list, theme: dict,
+                              output_language: str = "en"):
     """The discipline fee build-up (hours x rate, Fees & Program tab) as a
     per-discipline $ total -- same figures, same table shape as the Large
     Scope pack's "Fee summary" (_build_commercial_section), deliberately
     showing only the resulting $ total per discipline, never the underlying
     hours/rate a client shouldn't see in a client-facing document."""
-    doc.add_heading("Discipline fee build-up", level=2)
+    doc.add_heading(export_i18n.export_t("heading_discipline_fee_buildup", output_language), level=2)
     lines = discipline_fee_lines or []
     if not lines:
         _add_placeholder_paragraph(
@@ -609,7 +620,8 @@ def format_fee_percentages(values: list[float]) -> list[str]:
     return [f"{v}%" for v in floors]
 
 
-def _build_letter_fee_split(doc: Document, fee_estimates: list, theme: dict):
+def _build_letter_fee_split(doc: Document, fee_estimates: list, theme: dict,
+                            output_language: str = "en"):
     """Discipline fee % breakdown -- the table that replaced the old per-scope-item
     fee table as the one that actually goes into the pack. Deliberately
     percentage-only, no $ column: the underlying $ figures live in the discipline
@@ -618,7 +630,7 @@ def _build_letter_fee_split(doc: Document, fee_estimates: list, theme: dict):
     percentage breakdown (seeded either from that $ build-up or from the
     benchmark/AI buttons) before it's exported."""
     from modules.fee_estimation_engine import INDICATIVE_NOTE
-    doc.add_heading("Indicative fee split by discipline", level=2)
+    doc.add_heading(export_i18n.export_t("heading_fee_split_by_discipline", output_language), level=2)
     warn = doc.add_paragraph()
     run = warn.add_run(INDICATIVE_NOTE)
     run.font.bold = True
@@ -763,8 +775,8 @@ def _build_letter_signoff(doc: Document, sender: dict):
         doc.add_paragraph(sender["email"])
 
 
-def _build_letter_review_checklist(doc: Document):
-    doc.add_heading("Review Checklist (delete this page before sending)", level=1)
+def _build_letter_review_checklist(doc: Document, output_language: str = "en"):
+    doc.add_heading(export_i18n.export_t("heading_letter_review_checklist", output_language), level=1)
     items = [
         "Replace every red bracketed placeholder above with real, verified content.",
         "Confirm every fee figure is a real, reviewed number -- not a seeded estimate.",
@@ -874,8 +886,8 @@ def _add_ocr_notice(doc: Document, ocr_note: str | None):
     run.font.color.rgb = RED
 
 
-def _add_toc(doc: Document):
-    doc.add_heading("Table of Contents", level=1)
+def _add_toc(doc: Document, output_language: str = "en"):
+    doc.add_heading(export_i18n.export_t("heading_toc", output_language), level=1)
     p = doc.add_paragraph()
     p.add_run(
         "Right-click here and choose 'Update Field' (or Update Table) to generate the "
@@ -897,7 +909,7 @@ def _add_toc(doc: Document):
 
 
 def _build_executive_summary(doc: Document, exec_summary, project_info: dict | None, theme: dict | None,
-                              differentiator_text: str | None = None):
+                              differentiator_text: str | None = None, output_language: str = "en"):
     """Renders the unweighted Executive Summary as the first real content page
     after the cover/TOC -- a short warm intro, then catchy-titled, sales-forward
     blocks in a two-column magazine layout. exec_summary is an
@@ -907,7 +919,7 @@ def _build_executive_summary(doc: Document, exec_summary, project_info: dict | N
     wall when missing, so it renders (via _add_pull_quote_box) whenever present,
     independently of whether an AI executive summary has been drafted yet."""
     theme = theme or _theme_colours(None)
-    doc.add_heading("Executive summary", level=1)
+    doc.add_heading(export_i18n.export_t("heading_executive_summary", output_language), level=1)
 
     intro = getattr(exec_summary, "intro", "") if exec_summary else ""
     blocks = getattr(exec_summary, "blocks", None) if exec_summary else None
@@ -960,27 +972,28 @@ def _build_executive_summary(doc: Document, exec_summary, project_info: dict | N
     doc.add_paragraph()
 
 
-def _build_tender_summary(doc: Document, analysis, weighting_chart_png: bytes | None, theme: dict):
-    doc.add_heading("Tender Summary", level=1)
+def _build_tender_summary(doc: Document, analysis, weighting_chart_png: bytes | None, theme: dict,
+                          output_language: str = "en"):
+    doc.add_heading(export_i18n.export_t("heading_tender_summary", output_language), level=1)
     _add_labelled_paragraph(doc, "Project scope", analysis.project_scope or "(not extracted)")
     if analysis.client_objectives:
-        doc.add_heading("Client objectives", level=2)
+        doc.add_heading(export_i18n.export_t("heading_client_objectives", output_language), level=2)
         _add_bullets(doc, analysis.client_objectives)
     _add_labelled_paragraph(doc, "Submission date", analysis.submission_date or "(not stated)")
     if analysis.mandatory_requirements:
-        doc.add_heading("Mandatory requirements", level=2)
+        doc.add_heading(export_i18n.export_t("heading_mandatory_requirements", output_language), level=2)
         _add_bullets(doc, analysis.mandatory_requirements)
     if analysis.deliverables:
-        doc.add_heading("Deliverables", level=2)
+        doc.add_heading(export_i18n.export_t("heading_deliverables", output_language), level=2)
         _add_bullets(doc, analysis.deliverables)
     if analysis.required_forms:
-        doc.add_heading("Required forms / returnable schedules", level=2)
+        doc.add_heading(export_i18n.export_t("heading_required_forms", output_language), level=2)
         _add_bullets(doc, analysis.required_forms)
     if analysis.risks:
-        doc.add_heading("Risks noted in the brief", level=2)
+        doc.add_heading(export_i18n.export_t("heading_risks_noted_in_brief", output_language), level=2)
         _add_bullets(doc, analysis.risks)
     if analysis.assumptions:
-        doc.add_heading("Assumptions", level=2)
+        doc.add_heading(export_i18n.export_t("heading_assumptions", output_language), level=2)
         _add_bullets(doc, analysis.assumptions)
     if analysis.disciplines_involved:
         _add_labelled_paragraph(doc, "Disciplines involved", ", ".join(analysis.disciplines_involved))
@@ -988,19 +1001,19 @@ def _build_tender_summary(doc: Document, analysis, weighting_chart_png: bytes | 
         _add_labelled_paragraph(doc, "Stated fee cap / budget ceiling", analysis.fee_cap)
 
     if weighting_chart_png:
-        doc.add_heading("Evaluation weighting dashboard", level=2)
+        doc.add_heading(export_i18n.export_t("heading_evaluation_weighting_dashboard", output_language), level=2)
         try:
             doc.add_picture(io.BytesIO(weighting_chart_png), width=Cm(15))
         except Exception:
             _add_placeholder_paragraph(doc, "[EVALUATION WEIGHTING DASHBOARD PLACEHOLDER]")
 
     if analysis.analysis_warnings:
-        doc.add_heading("Extraction warnings -- verify manually", level=2)
+        doc.add_heading(export_i18n.export_t("heading_extraction_warnings", output_language), level=2)
         _add_bullets(doc, analysis.analysis_warnings, color=RED)
 
 
-def _build_compliance_matrix(doc: Document, compliance_items: list, theme: dict):
-    doc.add_heading("Compliance Matrix", level=1)
+def _build_compliance_matrix(doc: Document, compliance_items: list, theme: dict, output_language: str = "en"):
+    doc.add_heading(export_i18n.export_t("heading_compliance_matrix", output_language), level=1)
     doc.add_paragraph(
         "Every requirement identified in the brief, mapped to a proposal section and a status. "
         "'Missing' items need user input before this pack is usable."
@@ -1014,8 +1027,8 @@ def _build_compliance_matrix(doc: Document, compliance_items: list, theme: dict)
     _add_status_table(doc, headers, rows, status_col_index=5, theme=theme)
 
 
-def _build_gap_analysis(doc: Document, gap_items: list, theme: dict):
-    doc.add_heading("Gap Analysis", level=1)
+def _build_gap_analysis(doc: Document, gap_items: list, theme: dict, output_language: str = "en"):
+    doc.add_heading(export_i18n.export_t("heading_gap_analysis", output_language), level=1)
     doc.add_paragraph("Risks and gaps this pack could identify automatically -- nothing here is invented.")
     headers = ["Risk", "Issue", "Impact", "Recommended Action", "Mapped Section"]
     rows = [[g.risk_level, g.issue, g.impact, g.recommended_action, g.mapped_section or "-"] for g in gap_items]
@@ -1031,8 +1044,8 @@ _PAGE_LIMIT_REASONS = {
 }
 
 
-def _build_page_allocation_plan(doc: Document, sections: list, theme: dict):
-    doc.add_heading("Page Allocation Plan", level=1)
+def _build_page_allocation_plan(doc: Document, sections: list, theme: dict, output_language: str = "en"):
+    doc.add_heading(export_i18n.export_t("heading_page_allocation_plan", output_language), level=1)
     headers = ["Section", "Weighting", "Page Limit Source", "Allocated Pages", "Reason"]
     rows = [
         [s.title, f"{s.weighting:.0f}%", _friendly_source(s.page_limit_source),
@@ -1065,7 +1078,7 @@ def fee_sections(included: dict | None) -> dict:
 
 
 def _build_scope_item_fees(doc: Document, scope_item_fees: list | None, theme: dict | None,
-                           heading_level: int = 2):
+                           heading_level: int = 2, output_language: str = "en"):
     """The scope-item fee build-up.
 
     Never exported by either pack until the user could tick it: its own
@@ -1073,7 +1086,7 @@ def _build_scope_item_fees(doc: Document, scope_item_fees: list | None, theme: d
     other two -- real figures where priced, an explicit red [ENTER FEE] where
     not, never a $0 that reads as free."""
     theme = theme or _theme_colours(None)
-    doc.add_heading("Fee by scope item", level=heading_level)
+    doc.add_heading(export_i18n.export_t("heading_fee_by_scope_item", output_language), level=heading_level)
     rows_in = scope_item_fees or []
     if not rows_in:
         _add_placeholder_paragraph(
@@ -1102,7 +1115,7 @@ def _build_scope_item_fees(doc: Document, scope_item_fees: list | None, theme: d
 
 def _build_fee_estimate(
     doc: Document, fee_estimates: list, fee_cap_text: str | None, theme: dict,
-    indicative_amounts: dict | None = None,
+    indicative_amounts: dict | None = None, output_language: str = "en",
 ):
     """indicative_amounts, if given, overrides each estimate's stored fee_amount --
     same override the Fee Estimate tab's "Indicative benchmark split" section
@@ -1113,7 +1126,7 @@ def _build_fee_estimate(
     export, so this table showed "-" for every discipline even though the app's
     own Fee Estimate tab was showing real dollar figures."""
     from modules.fee_estimation_engine import INDICATIVE_NOTE
-    doc.add_heading("Indicative Fee Estimate by Discipline", level=1)
+    doc.add_heading(export_i18n.export_t("heading_fee_estimate_by_discipline", output_language), level=1)
     warn = doc.add_paragraph()
     run = warn.add_run(INDICATIVE_NOTE)
     run.font.bold = True
@@ -1200,6 +1213,7 @@ def _build_proposal_response(
     firm: dict | None = None,
     fee_sections_included: dict | None = None,
     scope_item_fees: list | None = None,
+    output_language: str = "en",
 ):
     firm = firm or {}
     fee_included = fee_sections(fee_sections_included)
@@ -1280,30 +1294,34 @@ def _build_proposal_response(
             is_personnel and not has_dedicated_experience_section and bool(reference_projects)
         )
         if is_personnel and resource_plan:
-            _build_personnel_block(doc, resource_plan, org_chart_png, theme, personnel_photos, team_intro)
+            _build_personnel_block(doc, resource_plan, org_chart_png, theme, personnel_photos, team_intro,
+                                   output_language=output_language)
         if fold_experience_into_personnel:
             _build_sc1_project_experience_compact(
                 doc, reference_projects, reference_project_photos, theme, experience_intro,
+                output_language=output_language,
             )
         if is_experience:
             _build_reference_experience(
                 doc, reference_projects, reference_project_photos, theme, experience_intro,
+                output_language=output_language,
             )
-            _build_personnel_project_matrix(doc, resource_plan, reference_projects, theme)
+            _build_personnel_project_matrix(doc, resource_plan, reference_projects, theme, output_language)
         if _is_methodology_section(section.title) and analysis is not None:
-            _build_methodology_table(doc, analysis, theme)
+            _build_methodology_table(doc, analysis, theme, output_language)
         if _is_relationship_section(section.title):
-            _build_relationship_management(doc, project_info, theme, firm)
+            _build_relationship_management(doc, project_info, theme, firm, output_language)
         if _is_commercial_section(section.title):
             _build_commercial_section(doc, discipline_fee_lines, theme,
                                       program_schedule=program_schedule,
                                       program_week_labels=program_week_labels,
                                       fee_included=fee_included,
-                                      scope_item_fees=scope_item_fees)
+                                      scope_item_fees=scope_item_fees,
+                                      output_language=output_language)
             if local_benefit_needed:
-                _build_local_benefits(doc, project_info, theme, firm)
+                _build_local_benefits(doc, project_info, theme, firm, output_language=output_language)
         elif _is_local_benefit_section(section.title):
-            _build_local_benefits(doc, project_info, theme, firm)
+            _build_local_benefits(doc, project_info, theme, firm, output_language=output_language)
 
         # 5. The first-pass draft body, in two columns like a real proposal --
         # skipped where structured, deterministic content already covers the
@@ -1354,6 +1372,8 @@ def _build_proposal_response(
         if is_personnel:
             section_graphics = [g for g in section_graphics if "org" not in g.graphic_title.lower()]
         if section_graphics:
+            # TODO A3 i18n: minor level-3 sub-heading, out of scope for this
+            # pass (major top-level/level-2 structural headings only).
             doc.add_heading("Graphics for this section", level=3)
             for g in section_graphics:
                 p = doc.add_paragraph(style="List Bullet")
@@ -1567,6 +1587,7 @@ def _build_team_intro(doc: Document, team_intro, theme: dict | None):
 def _build_personnel_block(
     doc: Document, resource_plan: list, org_chart_png: bytes | None, theme: dict | None,
     personnel_photos: dict[str, bytes] | None = None, team_intro=None,
+    output_language: str = "en",
 ):
     """Key Personnel built from the ACTUAL resourcing plan the user entered (real
     assigned names/roles) plus the generated org chart -- not AI-invented names.
@@ -1580,7 +1601,7 @@ def _build_personnel_block(
     below, using up a page for information already presented twice."""
     theme = theme or _theme_colours(None)
     _build_team_intro(doc, team_intro, theme)
-    doc.add_heading("Project organisation chart", level=2)
+    doc.add_heading(export_i18n.export_t("heading_org_chart", output_language), level=2)
     # The generated chart goes in as a FIRST PASS, and the red note below it
     # stays. Both matter. Previously org_chart_png was accepted here and
     # deliberately dropped, on the reasoning that the finished chart is built
@@ -1609,11 +1630,12 @@ def _build_personnel_block(
          "document; build the chart there, then paste it into this space.]"),
     )
 
-    _build_personnel_profiles(doc, resource_plan, personnel_photos, theme)
+    _build_personnel_profiles(doc, resource_plan, personnel_photos, theme, output_language)
 
 
 def _build_personnel_profiles(
     doc: Document, resource_plan: list, personnel_photos: dict[str, bytes] | None, theme: dict | None,
+    output_language: str = "en",
 ):
     """One numbered profile per key person, in a fixed, deterministic order --
     Project Director, Project Manager, Design Manager, then discipline leads
@@ -1651,7 +1673,7 @@ def _build_personnel_profiles(
         )
         return
 
-    doc.add_heading("Key personnel profiles", level=2)
+    doc.add_heading(export_i18n.export_t("heading_key_personnel_profiles", output_language), level=2)
     for i, entry in enumerate(people, start=1):
         name = (entry.get("name") or "").strip()
         role_label = ", ".join(entry.get("roles") or [])
@@ -1767,7 +1789,7 @@ METHODOLOGY_PLACEHOLDER_NOTE = (
 )
 
 
-def _build_methodology_table(doc: Document, analysis, theme: dict | None):
+def _build_methodology_table(doc: Document, analysis, theme: dict | None, output_language: str = "en"):
     """Deliberately NOT auto-building a one-column-per-scope-item methodology table
     here, and -- as of this revision -- deliberately NOT embedding a first-pass
     image of the reviewed stage grid either. That image used to sit above this
@@ -1778,7 +1800,7 @@ def _build_methodology_table(doc: Document, analysis, theme: dict | None):
     is pasted in by hand once finished. This function now does exactly one
     thing: leave the single red placeholder note marking where it goes."""
     theme = theme or _theme_colours(None)
-    doc.add_heading("Methodology summary", level=2)
+    doc.add_heading(export_i18n.export_t("heading_methodology_summary", output_language), level=2)
     _add_placeholder_paragraph(doc, METHODOLOGY_PLACEHOLDER_NOTE)
 
 
@@ -1802,7 +1824,7 @@ def _build_experience_intro(doc: Document, experience_intro, theme: dict | None)
 
 def _build_sc1_project_experience_compact(
     doc: Document, reference_projects: list, reference_project_photos: dict[str, bytes] | None, theme: dict | None,
-    experience_intro=None,
+    experience_intro=None, output_language: str = "en",
 ):
     """A compact, space-conscious companion to _build_reference_experience below --
     used ONLY when this brief's own section structure has folded Key Personnel and
@@ -1823,7 +1845,7 @@ def _build_sc1_project_experience_compact(
         return
 
     reference_project_photos = reference_project_photos or {}
-    doc.add_heading("Relevant project experience", level=2)
+    doc.add_heading(export_i18n.export_t("heading_relevant_experience_compact", output_language), level=2)
     if not _build_experience_intro(doc, experience_intro, theme):
         note = doc.add_paragraph()
         note.add_run(
@@ -1893,7 +1915,7 @@ def _build_sc1_project_experience_compact(
 
 def _build_reference_experience(
     doc: Document, reference_projects: list, reference_project_photos: dict[str, bytes] | None, theme: dict | None,
-    experience_intro=None,
+    experience_intro=None, output_language: str = "en",
 ):
     """Section 2 project experience, built from structured reference_projects
     entries (title/client/revised description/relevance/personnel, each with an
@@ -1909,7 +1931,7 @@ def _build_reference_experience(
         return
 
     reference_project_photos = reference_project_photos or {}
-    doc.add_heading("Our relevant project experience", level=2)
+    doc.add_heading(export_i18n.export_t("heading_relevant_experience", output_language), level=2)
     _build_experience_intro(doc, experience_intro, theme)
     # Two cards side by side, each sized from the page's REAL text width
     # rather than a fixed 7.8 cm. Two 7.8 cm images plus the gap between the
@@ -1998,7 +2020,8 @@ def _fill_reference_project_cell(cell, project, photos: dict[str, bytes], theme:
         r.italic = True
 
 
-def _build_personnel_project_matrix(doc: Document, resource_plan: list, reference_projects: list, theme: dict | None):
+def _build_personnel_project_matrix(doc: Document, resource_plan: list, reference_projects: list, theme: dict | None,
+                                    output_language: str = "en"):
     """Cross-references Section 3's nominated key personnel against Section 2's
     reference projects -- one row per reference project, one column per assigned
     key person, ticked where that project's personnel_involved names them."""
@@ -2018,7 +2041,7 @@ def _build_personnel_project_matrix(doc: Document, resource_plan: list, referenc
     if not people:
         return
 
-    doc.add_heading("Key personnel x relevant experience", level=2)
+    doc.add_heading(export_i18n.export_t("heading_personnel_experience_matrix", output_language), level=2)
     note = doc.add_paragraph()
     note.add_run("Cross-reference of which nominated key personnel worked on each reference project below.").italic = True
 
@@ -2107,7 +2130,7 @@ def _local_benefit_signal(analysis) -> bool:
 
 
 def _build_relationship_management(doc: Document, project_info: dict | None, theme: dict | None,
-                                   firm: dict | None = None):
+                                   firm: dict | None = None, output_language: str = "en"):
     """A standard relationship-management narrative + principles table, used as a
     more pertinent starting point than generic AI-drafted prose for this kind of
     section -- the structure and process language a firm actually uses across
@@ -2117,7 +2140,7 @@ def _build_relationship_management(doc: Document, project_info: dict | None, the
     theme = theme or _theme_colours(None)
     client = (project_info or {}).get("client_name") or "[CLIENT NAME]"
 
-    doc.add_heading("Our approach to relationship management", level=2)
+    doc.add_heading(export_i18n.export_t("heading_relationship_management", output_language), level=2)
     intro = doc.add_paragraph()
     intro.add_run(
         f"We focus on the moments that matter -- looking beyond the technical solution to foster "
@@ -2154,7 +2177,8 @@ def _build_commercial_section(doc: Document, discipline_fee_lines: list | None, 
                               program_schedule: dict[str, list[bool]] | None = None,
                               program_week_labels: list[str] | None = None,
                               fee_included: dict | None = None,
-                              scope_item_fees: list | None = None):
+                              scope_item_fees: list | None = None,
+                              output_language: str = "en"):
     """A punchier, structured commercial section -- a fee table by discipline/
     stage with a highlighted total, then short Cash flow / Contractual
     arrangements sub-sections -- instead of a single generic AI-drafted
@@ -2165,24 +2189,24 @@ def _build_commercial_section(doc: Document, discipline_fee_lines: list | None, 
 
     # Nothing ticked must never produce a silently fee-less proposal.
     if not any(fee_included.values()):
-        doc.add_heading("Fee summary", level=2)
+        doc.add_heading(export_i18n.export_t("heading_fee_summary", output_language), level=2)
         _add_placeholder_paragraph(doc, FEE_NOTHING_SELECTED)
         doc.add_paragraph()
         _build_cash_flow(doc, discipline_fee_lines, program_schedule, program_week_labels, theme)
-        _build_contractual_arrangements(doc)
+        _build_contractual_arrangements(doc, output_language)
         return
 
     if fee_included["scope_buildup"]:
-        _build_scope_item_fees(doc, scope_item_fees, theme)
+        _build_scope_item_fees(doc, scope_item_fees, theme, output_language=output_language)
 
     if not fee_included["discipline_buildup"]:
         # The other ticked presentation(s) have rendered; the cash flow below
         # still derives from the priced build-up whether or not it is shown.
         _build_cash_flow(doc, discipline_fee_lines, program_schedule, program_week_labels, theme)
-        _build_contractual_arrangements(doc)
+        _build_contractual_arrangements(doc, output_language)
         return
 
-    doc.add_heading("Fee summary", level=2)
+    doc.add_heading(export_i18n.export_t("heading_fee_summary", output_language), level=2)
     lines = discipline_fee_lines or []
     if not lines:
         _add_placeholder_paragraph(
@@ -2205,14 +2229,14 @@ def _build_commercial_section(doc: Document, discipline_fee_lines: list | None, 
             run.font.bold = True
             run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
 
-    doc.add_heading("Cash flow", level=3)
+    doc.add_heading(export_i18n.export_t("heading_cash_flow", output_language), level=3)
     _build_cash_flow(doc, discipline_fee_lines, program_schedule, program_week_labels, theme)
 
-    _build_contractual_arrangements(doc)
+    _build_contractual_arrangements(doc, output_language)
 
 
-def _build_contractual_arrangements(doc: Document) -> None:
-    doc.add_heading("Contractual arrangements", level=3)
+def _build_contractual_arrangements(doc: Document, output_language: str = "en") -> None:
+    doc.add_heading(export_i18n.export_t("heading_contractual_arrangements", output_language), level=3)
     p = doc.add_paragraph()
     r = p.add_run(
         "[CONFIRM THE PANEL / CONTRACT AND RATES THIS FEE IS BASED ON, AND ANY SUBCONSULTANT "
@@ -2325,7 +2349,7 @@ def _build_cash_flow(doc: Document, discipline_fee_lines: list | None,
 
 
 def _build_local_benefits(doc: Document, project_info: dict | None, theme: dict | None,
-                          firm: dict | None = None):
+                          firm: dict | None = None, output_language: str = "en"):
     """A Local Benefits sub-section, added only when the brief itself signals a
     local-benefit/local-content requirement (see _local_benefit_signal) or the
     section is explicitly a named local-benefit criterion. Structure only --
@@ -2336,7 +2360,7 @@ def _build_local_benefits(doc: Document, project_info: dict | None, theme: dict 
     firm = firm or {}
     client = (project_info or {}).get("client_name") or "the client"
 
-    doc.add_heading("Local benefits", level=2)
+    doc.add_heading(export_i18n.export_t("heading_local_benefits", output_language), level=2)
     note = doc.add_paragraph()
     r = note.add_run(
         "The brief calls for local-benefit / local-content commitments -- the headings below are "
@@ -2367,6 +2391,9 @@ def _build_local_benefits(doc: Document, project_info: dict | None, theme: dict 
          "[CONFIRM A REAL, CURRENT FIRM COMMUNITY/REINVESTMENT PROGRAM TO REFERENCE HERE]",
          firm.get("community_text")),
     ]:
+        # TODO A3 i18n: these 4 level-3 sub-headings are entangled with the
+        # firm-profile real_text/placeholder branching above -- left in
+        # English for this pass (minor structural headings, not top-level).
         doc.add_heading(heading, level=3)
         if (real_text or "").strip():
             for para in str(real_text).split("\n\n"):
@@ -2383,8 +2410,8 @@ def _build_local_benefits(doc: Document, project_info: dict | None, theme: dict 
     doc.add_paragraph()
 
 
-def _build_review_checklist(doc: Document, sections: list):
-    doc.add_heading("Review Checklist", level=1)
+def _build_review_checklist(doc: Document, sections: list, output_language: str = "en"):
+    doc.add_heading(export_i18n.export_t("heading_review_checklist", output_language), level=1)
     items = [
         "Delete every red 'DELETE BEFORE SUBMISSION' guidance box in this document.",
         # The marker format named here has to match what the exporters
@@ -2452,8 +2479,8 @@ def collect_placeholders(doc: Document, limit: int = 60) -> list[str]:
 
 
 def _build_user_input_list(doc: Document, compliance_items: list, gap_items: list, drafts: dict,
-                           document_placeholders: list | None = None):
-    doc.add_heading("User Input Required List", level=1)
+                           document_placeholders: list | None = None, output_language: str = "en"):
+    doc.add_heading(export_i18n.export_t("heading_user_input_required", output_language), level=1)
     doc.add_paragraph("Everything below still needs a human to supply real information.")
 
     seen = set()
@@ -2472,7 +2499,7 @@ def _build_user_input_list(doc: Document, compliance_items: list, gap_items: lis
                 entries.append(f"[{draft.section_title}] {req}")
 
     if document_placeholders:
-        doc.add_heading("Placeholders found in the proposal document itself", level=2)
+        doc.add_heading(export_i18n.export_t("heading_placeholders_in_document", output_language), level=2)
         _add_bullets(doc, document_placeholders, color=RED)
 
     _add_bullets(doc, entries or ["(none identified -- verify manually)"])

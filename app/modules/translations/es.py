@@ -1374,4 +1374,15 @@ STRINGS: dict[str, str] = {
     "limits_trial_spend_ceiling_message": "Se agotó el límite de IA de tu prueba gratuita -- mejora tu plan para continuar; tu trabajo está guardado.",
     "limits_ai_rate_limit_trial": "Espera unos minutos -- la prueba tiene un límite de velocidad de uso razonable.",
     "limits_ai_rate_limit_paid": "Espera unos minutos -- hay un breve límite de velocidad de uso razonable.",
+
+    # Part A3 -- pestaña Configuración del proyecto, selector de output_language
+    # (idioma del contenido GENERADO por IA, independiente del idioma de la
+    # interfaz de la propia app)
+    "setup_output_language_label": "Idioma del contenido generado",
+    "setup_output_language_help": (
+        "Idioma en el que se redacta el contenido de la propuesta generado por IA "
+        "(borradores, resumen ejecutivo y secciones similares) -- esto no cambia el "
+        "idioma de la propia interfaz de la app, que es el selector aparte en la barra "
+        "lateral."
+    ),
 }

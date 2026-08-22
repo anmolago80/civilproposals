@@ -100,9 +100,14 @@ def _bullets(values, empty: str = "(none)") -> str:
 
 
 def draft_risk_register(analysis, gap_items: list | None = None,
-                        config: dict | None = None) -> RiskRegister:
+                        config: dict | None = None,
+                        output_language: str = "en") -> RiskRegister:
     """One AI call. Raises whatever call_ai_json raises; the caller decides
-    whether to surface it or fall back to the raw bullets."""
+    whether to surface it or fall back to the raw bullets.
+
+    `output_language`: language for the "risk", "impact", and "mitigation"
+    text -- "en" (default) or "es". Independent of the app's own UI language;
+    see modules/i18n.py's module docstring."""
     risks = list(getattr(analysis, "risks", None) or [])
     gaps = [
         (getattr(item, "issue", "") or "").strip()
@@ -123,6 +128,16 @@ def draft_risk_register(analysis, gap_items: list | None = None,
             "(the brief states no mitigation approach -- every mitigation must be TBC)",
         ),
     )
+    if output_language == "es":
+        prompt += (
+            "\n\nWrite each entry's \"risk\", \"impact\", and \"mitigation\" in Spanish (Español), "
+            "including the literal marker \"TBC\" where one applies -- keep it exactly as \"TBC\", "
+            "unchanged, since it is a structural placeholder the rest of the app matches on, not a "
+            "word to translate. Keep the JSON field names above, and the \"source\" value itself "
+            "(\"Brief\" or \"Gap analysis\"), exactly as given, in English. Translate only the "
+            "language, not the substance -- do not invent, omit, or alter any risk, impact, or "
+            "mitigation because of this instruction."
+        )
     data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=2500)
 
     entries = []

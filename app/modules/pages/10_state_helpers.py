@@ -21,6 +21,10 @@ def _init_state():
         "project_name": "", "client_name": "", "tender_name": "",
         "submission_date_input": "", "bidder_name": "", "proposal_theme": "Corporate",
         "project_type": PROJECT_TYPES[0],
+        # Language of the AI-GENERATED proposal content itself (drafts, executive
+        # summary, team intro, etc.) -- a per-PROJECT choice, independent of the
+        # app's own UI language (modules/i18n.py's "_lang"). See Project Setup tab.
+        "output_language": "en",
         "tender_extracted": None,
         "company_material_text": {},
         "company_material_files": {},  # {category: {filename: extracted_text}} -- per-file, so a

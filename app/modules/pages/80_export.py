@@ -111,6 +111,7 @@ with tabs[9]:
                     program_style=st.session_state.program_style,
                     methodology_stages=st.session_state.methodology_stages,
                     program_start_date=st.session_state.program_start_date,
+                    output_language=st.session_state.get("output_language", "en"),
                 )
                 st.session_state.docx_buffer = buffer
                 _mark_export_generated()
@@ -137,6 +138,7 @@ with tabs[9]:
                     body_font=st.session_state.body_font,
                     ocr_note=_ocr_export_note(),
                     document_placeholders=_doc_placeholders,
+                    output_language=st.session_state.get("output_language", "en"),
                 )
             st.success(i18n.t("export_document_generated_success"))
     else:
@@ -212,6 +214,7 @@ with tabs[9]:
                     # The methodology body content is now just the red
                     # "paste the finished table here" placeholder note --
                     # build_docx no longer takes a stages image to embed.
+                    output_language=st.session_state.get("output_language", "en"),
                 )
                 st.session_state.docx_buffer = buffer
                 _mark_export_generated()
@@ -236,6 +239,7 @@ with tabs[9]:
                     body_font=st.session_state.body_font,
                     ocr_note=_ocr_export_note(),
                     document_placeholders=_doc_placeholders,
+                    output_language=st.session_state.get("output_language", "en"),
                 )
             st.success(i18n.t("export_document_generated_success"))
 

@@ -108,12 +108,17 @@ def draft_team_intro(
     analysis,
     project_info: dict | None = None,
     config: dict | None = None,
+    output_language: str = "en",
 ) -> TeamIntro:
     """people: resourcing.personnel_profiles_deduped(resource_plan), already
     filtered by the caller to entries with include_in_proposal=True and a
     real name -- see resourcing.excluded_personnel_names for the same filter
     used elsewhere (draft_generator.format_team_context, the CV material
-    handed to drafting, the personnel x experience matrix)."""
+    handed to drafting, the personnel x experience matrix).
+
+    `output_language`: language for the drafted "heading", "paragraphs", and
+    "pullquote" -- "en" (default) or "es". Independent of the app's own UI
+    language; see modules/i18n.py's module docstring."""
     project_info = project_info or {}
     team_context = _format_team_context(people)
 
@@ -124,6 +129,13 @@ def draft_team_intro(
         client_objectives="\n".join(f"- {o}" for o in (getattr(analysis, "client_objectives", None) or [])) or "- (none extracted)",
         team_context=team_context or "(no included personnel with real project experience yet)",
     )
+    if output_language == "es":
+        prompt += (
+            "\n\nWrite \"heading\", every entry of \"paragraphs\", and \"pullquote\" in Spanish "
+            "(Español). Keep the JSON field names above exactly as given, in English. Translate "
+            "only the language, not the substance -- do not invent, omit, or alter any name, "
+            "project, or claim because of this instruction."
+        )
 
     data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=1800)
 

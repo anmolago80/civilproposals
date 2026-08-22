@@ -222,12 +222,19 @@ def analyse_tender(
     config: dict | None = None,
     progress_callback=None,
     tables: list | None = None,
+    output_language: str = "en",
 ) -> TenderAnalysis:
     """
     Run the full extraction pipeline on tender brief text and return a
     validated TenderAnalysis. Raises on total AI failure; callers should
     surface `analysis_warnings` to the user rather than treat this as a
     black box.
+
+    output_language: language for the narrative/prose fields of the returned
+    analysis (e.g. "project_scope") -- "en" (default) or "es". Independent of
+    the app's own UI language; see modules/i18n.py's module docstring. Only
+    the written-out prose changes -- extracted facts, figures, and names are
+    never altered on account of this setting.
     """
     cleaned = clean_extracted_text(document_text)
     chunks = split_text_into_chunks(cleaned, chunk_size=12000, overlap=300)
@@ -254,6 +261,16 @@ def analyse_tender(
         tables_block=_format_tables(tables),
         annotation_block=annotation_block,
     )
+    if output_language == "es":
+        prompt += (
+            "\n\nWrite all narrative/prose string VALUES in your JSON response (e.g. "
+            "\"project_scope\", the entries of \"client_objectives\", \"mandatory_requirements\", "
+            "\"deliverables\", \"risks\", \"assumptions\", \"analysis_warnings\", and similar free-text "
+            "fields) in Spanish (Español). Keep every JSON field name and key exactly as specified "
+            "above, in English, unchanged. Translate only the language, not the substance -- do not "
+            "invent, omit, or alter any fact, number, date, weighting, or name because of this "
+            "instruction; extract exactly what the brief states, just written in Spanish."
+        )
     raw = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=4000)
 
     analysis = TenderAnalysis.model_validate(raw)

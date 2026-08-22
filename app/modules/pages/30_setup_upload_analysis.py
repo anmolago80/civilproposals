@@ -54,6 +54,20 @@ with tabs[0]:
         st.text_input(i18n.t("setup_bidder_name_label"), key="bidder_name")
         st.selectbox(i18n.t("setup_project_type_label"), PROJECT_TYPES, key="project_type")
         st.selectbox(i18n.t("setup_proposal_theme_label"), PROPOSAL_THEMES, key="proposal_theme")
+        # Language of the AI-GENERATED proposal content (drafts, executive summary,
+        # etc.) that ends up in the exported DOCX/PPTX -- a per-PROJECT choice,
+        # separate from the app's own UI language (the switcher in the sidebar).
+        # Always shows "English"/"Español" in their own language regardless of the
+        # current UI language, since this is a language-name picker, not a phrase
+        # to translate -- see modules/i18n.py's LANGUAGES dict.
+        _output_language_label = st.selectbox(
+            i18n.t("setup_output_language_label"),
+            list(i18n.LANGUAGES.values()),
+            index=list(i18n.LANGUAGES.keys()).index(st.session_state.get("output_language", "en")),
+            key="output_language_select",
+            help=i18n.t("setup_output_language_help"),
+        )
+        st.session_state.output_language = {v: k for k, v in i18n.LANGUAGES.items()}[_output_language_label]
     st.caption(i18n.t("setup_autosave_caption"))
 
     if IS_SAAS_MODE and current_user:
@@ -765,7 +779,10 @@ with tabs[2]:
                 # out (the upload panel even counts them) and the analysis
                 # never saw them -- which is where the evaluation criteria and
                 # their weightings usually live.
-                kwargs={"tables": getattr(extracted, "tables", None)},
+                kwargs={
+                    "tables": getattr(extracted, "tables", None),
+                    "output_language": st.session_state.get("output_language", "en"),
+                },
                 progress=progress,
                 queued_text=i18n.t("analysis_queued_text"), running_text=i18n.t("analysis_progress_text"),
                 inline_extra_kwargs={"progress_callback": _progress_cb},

@@ -1341,4 +1341,13 @@ STRINGS: dict[str, str] = {
     "limits_trial_spend_ceiling_message": "Your free trial's AI allowance is used up -- upgrade to keep going; your work is saved.",
     "limits_ai_rate_limit_trial": "Give it a few minutes -- the trial has a fair-use speed limit.",
     "limits_ai_rate_limit_paid": "Give it a few minutes -- there's a brief fair-use speed limit.",
+
+    # Part A3 -- Project Setup tab, output_language selector (language of the
+    # AI-GENERATED proposal content, separate from the app's own UI language)
+    "setup_output_language_label": "Output language for generated content",
+    "setup_output_language_help": (
+        "Language the AI-generated proposal content (drafts, executive summary, and "
+        "similar sections) is written in -- this does not change the app's own interface "
+        "language, which is the separate switcher in the sidebar."
+    ),
 }

@@ -126,6 +126,7 @@ def draft_executive_summary(
     drafted_section_titles: list[str] | None = None,
     win_themes: str = "",
     program_weeks: int | None = None,
+    output_language: str = "en",
 ) -> ExecutiveSummary:
     """Draft the Executive Summary. `analysis` is a tender_analyser.TenderAnalysis;
     `team_context` should already be filtered to only personnel actually going
@@ -136,7 +137,11 @@ def draft_executive_summary(
     been drafted. The executive summary introduces the document, and without
     knowing what is in it, it could promise an evaluator something the
     methodology never mentions -- so it is generated AFTER the drafts and
-    told what they cover."""
+    told what they cover.
+
+    `output_language`: language for the drafted "intro" and block "title"/
+    "body" text -- "en" (default) or "es". Independent of the app's own UI
+    language; see modules/i18n.py's module docstring."""
     project_info = project_info or {}
     scope_items = getattr(analysis, "scope_items", None) or []
     scope_lines = []
@@ -168,6 +173,13 @@ def draft_executive_summary(
         disciplines=", ".join(getattr(analysis, "disciplines_involved", None) or []) or "(none extracted)",
         team_context=(team_context or "").strip() or "(no team assigned yet -- refer to roles generically)",
     )
+    if output_language == "es":
+        prompt += (
+            "\n\nWrite \"intro\" and every block's \"title\" and \"body\" in Spanish (Español). Keep "
+            "the JSON field names above exactly as given, in English. Translate only the language, "
+            "not the substance -- do not invent, omit, or alter any fact, name, figure, or claim "
+            "because of this instruction."
+        )
 
     data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=2500)
 

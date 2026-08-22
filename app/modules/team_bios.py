@@ -92,12 +92,19 @@ def format_tender_context(analysis) -> str:
 
 def draft_team_bios_from_cv(
     cv_text: str, config: dict | None = None, max_chars: int = 24000, analysis=None,
+    output_language: str = "en",
 ) -> tuple[list[TeamMember], list[str]]:
     """
     Draft candidate bios from uploaded CV/profile text. Returns (members, warnings) --
     always treat the result as a DRAFT: the app must let the user review and edit every
     field before it goes anywhere near an exported document, since CVs are exactly the
     kind of source material where a subtly wrong qualification or year matters.
+
+    `output_language`: language for the drafted "relevance_text" prose -- "en"
+    (default) or "es". Independent of the app's own UI language; see
+    modules/i18n.py's module docstring. "name", "qualified", and "connected"
+    stay exactly as stated in the CV regardless -- see SYSTEM_MESSAGE above --
+    since those are quoted facts (names, degrees, registrations), not prose.
     """
     material = (cv_text or "").strip()
     if not material:
@@ -116,6 +123,17 @@ def draft_team_bios_from_cv(
 
     prompt = PROMPT_TEMPLATE.format(material=material,
                                     tender_context=format_tender_context(analysis))
+    if output_language == "es":
+        prompt += (
+            "\n\nWrite each person's \"relevance_text\" in Spanish (Español) -- the 2-4 sentences "
+            "on their relevant experience. Keep \"name\", \"qualified\", and \"connected\" exactly "
+            "as stated in the CV, in whatever language the CV itself uses (these are quoted facts, "
+            "not prose to translate) -- do not translate a person's name, degree title, or "
+            "registration/membership text. Keep the JSON field names above exactly as given, in "
+            "English. Translate only the language of the prose, not the substance -- do not "
+            "invent, omit, or alter any fact, qualification, or project because of this instruction."
+        )
+
     data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=3000)
 
     raw_members = data.get("team_members", [])

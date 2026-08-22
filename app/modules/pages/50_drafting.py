@@ -107,6 +107,7 @@ with tabs[5]:
                 "compliance_items": st.session_state.compliance_items or [],
                 "win_themes": _draft_win_themes,
                 "structured_material": _structured_material,
+                "output_language": st.session_state.get("output_language", "en"),
             }
             new_drafts = _run_job_or_inline(
                 "draft_generation", draft_generator.generate_all_drafts,
@@ -167,6 +168,7 @@ with tabs[5]:
                         st.session_state.analysis,
                         st.session_state.gap_items or [],
                         st.session_state.ai_config,
+                        output_language=st.session_state.get("output_language", "en"),
                     )
                     if not (st.session_state.risk_register.entries if st.session_state.risk_register else []):
                         st.warning(i18n.t("drafting_risk_none_warning"))
@@ -256,6 +258,7 @@ with tabs[5]:
                         program_week_labels=st.session_state.program_week_labels,
                         project_info=_project_info(),
                         config=st.session_state.ai_config,
+                        output_language=st.session_state.get("output_language", "en"),
                     )
                     if not st.session_state.methodology_stages:
                         st.warning(i18n.t("drafting_stages_none_warning"))
@@ -384,6 +387,7 @@ with tabs[5]:
                 st.session_state.pitch_review = pitch_review_module.review_pitch(
                     st.session_state.project_differentiator, st.session_state.project_sales_pitch,
                     st.session_state.analysis, _project_info(), st.session_state.ai_config,
+                    output_language=st.session_state.get("output_language", "en"),
                 )
                 st.success(i18n.t("drafting_review_complete_success"))
             except Exception as exc:
@@ -405,6 +409,7 @@ with tabs[5]:
                 st.session_state.pitch_questions = pitch_review_module.generate_pitch_questions(
                     st.session_state.project_differentiator, st.session_state.project_sales_pitch,
                     st.session_state.analysis, _project_info(), st.session_state.ai_config,
+                    output_language=st.session_state.get("output_language", "en"),
                 )
             except Exception as exc:
                 _show_error(i18n.t("drafting_generate_questions_failed_error"), exc)
@@ -443,6 +448,7 @@ with tabs[5]:
                             st.session_state.project_differentiator, st.session_state.project_sales_pitch,
                             st.session_state.analysis, _project_info(), st.session_state.ai_config,
                             differentiator_qa=_diff_qa, sales_pitch_qa=_pitch_qa,
+                            output_language=st.session_state.get("output_language", "en"),
                         )
                         st.success(i18n.t("drafting_sharpened_success"))
                     except Exception as exc:
@@ -505,6 +511,7 @@ with tabs[5]:
                         (st.session_state.project_sales_pitch or "").strip(),
                     ) if part),
                     program_weeks=_program_week_count() or None,
+                    output_language=st.session_state.get("output_language", "en"),
                 )
                 _es = st.session_state.executive_summary
                 if not _es or not ((_es.intro or "").strip() or _es.blocks):
@@ -538,6 +545,7 @@ with tabs[5]:
                     ]
                     st.session_state.team_intro = team_intro_module.draft_team_intro(
                         _included_people, st.session_state.analysis, _project_info(), st.session_state.ai_config,
+                        output_language=st.session_state.get("output_language", "en"),
                     )
                     _ti = st.session_state.team_intro
                     if not _ti or not ((_ti.heading or "").strip() or _ti.paragraphs):
@@ -570,6 +578,7 @@ with tabs[5]:
                     st.session_state.experience_intro = experience_intro_module.draft_experience_intro(
                         st.session_state.reference_projects, st.session_state.analysis,
                         _project_info(), st.session_state.ai_config,
+                        output_language=st.session_state.get("output_language", "en"),
                     )
                     _ei = st.session_state.experience_intro
                     if not _ei or not (getattr(_ei, "paragraph", "") or "").strip():
