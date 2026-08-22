@@ -687,9 +687,14 @@ with tabs[2]:
         # project has already been spent -- re-running analysis again
         # (even on the exact same document) now needs a paid bid, unlike
         # the old unconditional "same project, always free" behaviour.
+        # Audit fix Part 1a: pass THIS project's key through so a $50
+        # purchase from here actually unlocks it (see
+        # auth.apply_project_bid_topup()) instead of landing as an
+        # unrelated account credit that leaves this project stuck forever.
         st.warning(i18n.t("free_tier_generate_used"))
         _render_upgrade_buttons(current_user, key_prefix="_tab3_repeat_trial",
-                                 already_subscribed=_access["subscribed"] or _access["past_due"])
+                                 already_subscribed=_access["subscribed"] or _access["past_due"],
+                                 topup_project_key=_project_key)
     elif _repeat_blocked:
         # Paid project, but its 5-pass allowance (Part B2) is used up.
         st.warning(i18n.t("passes_exhausted"))
@@ -749,70 +754,92 @@ with tabs[2]:
             st.caption(i18n.t("analysis_payg_caption", credits=_access['bid_credits']))
 
     if st.button(i18n.t("analysis_run_button"), type="primary", disabled=not ready or _trial_blocked or _repeat_blocked or bool(_extra_blocked_msg)):
-        extracted = st.session_state.tender_extracted
-        progress = st.progress(0.0, text=i18n.t("analysis_progress_text"))
+        # Audit fix Part 1c: for a repeat run on an already-funded PAID
+        # project, spend the pass ATOMICALLY and BEFORE the (expensive,
+        # billable) AI call runs -- see auth.consume_project_pass()'s
+        # guarded UPDATE. The `disabled=` computation above already
+        # refuses this click when _repeat_blocked is True, but that check
+        # and this one are two different script runs: two browser tabs (or
+        # a double-click) can both render the button enabled while exactly
+        # one pass remains, and both reach this handler. Only one of the
+        # two atomic UPDATEs below can actually match "passes_used <
+        # passes_purchased" and increment -- the other gets False and is
+        # turned away here, before it ever starts the AI call, instead of
+        # both running the analysis and only discovering afterward (as the
+        # old read-check-increment-after-the-fact version did) that one of
+        # them had nothing left to spend.
+        _pass_ok = True
+        if IS_SAAS_MODE and current_user and _already_counted and not _repeat_is_trial and not _access.get("unlimited"):
+            _pass_ok = auth.consume_project_pass(current_user, _project_key)
+            if not _pass_ok:
+                st.warning(i18n.t("passes_exhausted"))
 
-        def _progress_cb(done, total):
-            progress.progress((done + 1) / max(total, 1), text=i18n.t("analysis_progress_detail", done=done + 1, total=total))
+        if _pass_ok:
+            extracted = st.session_state.tender_extracted
+            progress = st.progress(0.0, text=i18n.t("analysis_progress_text"))
 
-        try:
-            _record_ai_click()
-            # Runs on the background job worker for logged-in SaaS users
-            # once REDIS_URL is configured (see modules/job_queue.py and
-            # DEPLOY.md's "Background jobs" section) -- this is the
-            # single slowest AI call in the app for a long brief, and
-            # running it inline in the main web process was blocking
-            # every other concurrently-connected user's Streamlit session
-            # while it ran. Falls back to running inline (same as always)
-            # with the same granular per-chunk progress bar when the
-            # queue isn't available yet -- see _run_job_or_inline. The
-            # queued path gets a REDACTED ai_config (api_key="") and a
-            # different target function (job_queue.run_tender_analysis_job,
-            # which re-fills the key from the worker process's own env --
-            # see job_queue.py's docstring) so the real server Anthropic key
-            # never ends up pickled into Redis.
-            _redacted_ai_config = {**st.session_state.ai_config, "api_key": ""}
-            analysis = _run_job_or_inline(
-                "tender_analysis", tender_analyser.analyse_tender,
-                args=(extracted.text, extracted.annotations, st.session_state.ai_config),
-                # The brief's own tables. pdfplumber has always pulled these
-                # out (the upload panel even counts them) and the analysis
-                # never saw them -- which is where the evaluation criteria and
-                # their weightings usually live.
-                kwargs={
-                    "tables": getattr(extracted, "tables", None),
-                    "output_language": st.session_state.get("output_language", "en"),
-                },
-                progress=progress,
-                queued_text=i18n.t("analysis_queued_text"), running_text=i18n.t("analysis_progress_text"),
-                inline_extra_kwargs={"progress_callback": _progress_cb},
-                queue_func=job_queue.run_tender_analysis_job,
-                queue_args=(extracted.text, extracted.annotations, _redacted_ai_config),
-            )
-            st.session_state.analysis = analysis
-            progress.progress(1.0, text=i18n.t("drafting_done_text"))
-            st.success(i18n.t("analysis_complete_success"))
-            if IS_SAAS_MODE and current_user:
-                if _already_counted:
-                    # Part B2: this is a repeat run on an already-funded
-                    # PAID project (a trial-funded or first-ever repeat
-                    # would have been _repeat_blocked above, and the button
-                    # disabled) -- spend one of its passes rather than
-                    # calling record_proposal_usage(), which would just
-                    # no-op (the ProposalUsage row already exists).
-                    auth.consume_project_pass(current_user, _project_key)
-                else:
-                    auth.record_proposal_usage(current_user, _project_key, st.session_state.project_name)
-                    # Signup-funnel step 3 (activation): a bid actually analysed.
-                    analytics.track_event("Bid Analysed")
-                # Part C: remember this as the last-confirmed PAID identity
-                # (no-op for a trial-funded run) -- see
-                # _maybe_snapshot_paid_identity()'s docstring for why this
-                # has to happen right HERE (the moment a paid generation
-                # cycle actually completes) rather than on every rerun.
-                _maybe_snapshot_paid_identity()
-        except Exception as exc:
-            _show_error(i18n.t("analysis_failed_error"), exc)
+            def _progress_cb(done, total):
+                progress.progress((done + 1) / max(total, 1), text=i18n.t("analysis_progress_detail", done=done + 1, total=total))
+
+            try:
+                _record_ai_click()
+                # Runs on the background job worker for logged-in SaaS users
+                # once REDIS_URL is configured (see modules/job_queue.py and
+                # DEPLOY.md's "Background jobs" section) -- this is the
+                # single slowest AI call in the app for a long brief, and
+                # running it inline in the main web process was blocking
+                # every other concurrently-connected user's Streamlit session
+                # while it ran. Falls back to running inline (same as always)
+                # with the same granular per-chunk progress bar when the
+                # queue isn't available yet -- see _run_job_or_inline. The
+                # queued path gets a REDACTED ai_config (api_key="") and a
+                # different target function (job_queue.run_tender_analysis_job,
+                # which re-fills the key from the worker process's own env --
+                # see job_queue.py's docstring) so the real server Anthropic key
+                # never ends up pickled into Redis.
+                _redacted_ai_config = {**st.session_state.ai_config, "api_key": ""}
+                analysis = _run_job_or_inline(
+                    "tender_analysis", tender_analyser.analyse_tender,
+                    args=(extracted.text, extracted.annotations, st.session_state.ai_config),
+                    # The brief's own tables. pdfplumber has always pulled these
+                    # out (the upload panel even counts them) and the analysis
+                    # never saw them -- which is where the evaluation criteria and
+                    # their weightings usually live.
+                    kwargs={
+                        "tables": getattr(extracted, "tables", None),
+                        "output_language": st.session_state.get("output_language", "en"),
+                    },
+                    progress=progress,
+                    queued_text=i18n.t("analysis_queued_text"), running_text=i18n.t("analysis_progress_text"),
+                    inline_extra_kwargs={"progress_callback": _progress_cb},
+                    queue_func=job_queue.run_tender_analysis_job,
+                    queue_args=(extracted.text, extracted.annotations, _redacted_ai_config),
+                )
+                st.session_state.analysis = analysis
+                progress.progress(1.0, text=i18n.t("drafting_done_text"))
+                st.success(i18n.t("analysis_complete_success"))
+                if IS_SAAS_MODE and current_user:
+                    if _already_counted:
+                        # Part B2: this is a repeat run on an already-funded
+                        # PAID project (a trial-funded or first-ever repeat
+                        # would have been _repeat_blocked above, and the button
+                        # disabled). The pass itself was already spent
+                        # ATOMICALLY, BEFORE this AI call ran (see the
+                        # consume_project_pass() call above) -- nothing
+                        # further to charge here.
+                        pass
+                    else:
+                        auth.record_proposal_usage(current_user, _project_key, st.session_state.project_name)
+                        # Signup-funnel step 3 (activation): a bid actually analysed.
+                        analytics.track_event("Bid Analysed")
+                    # Part C: remember this as the last-confirmed PAID identity
+                    # (no-op for a trial-funded run) -- see
+                    # _maybe_snapshot_paid_identity()'s docstring for why this
+                    # has to happen right HERE (the moment a paid generation
+                    # cycle actually completes) rather than on every rerun.
+                    _maybe_snapshot_paid_identity()
+            except Exception as exc:
+                _show_error(i18n.t("analysis_failed_error"), exc)
 
     analysis = st.session_state.analysis
     if analysis:

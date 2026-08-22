@@ -156,6 +156,149 @@ def test_consume_and_exhaust_passes(failures: list[str]) -> None:
         _cleanup_test_user(db, user.id)
 
 
+def test_atomic_pass_consumption_race(failures: list[str]) -> None:
+    """Audit fix Part 1c: consume_project_pass() must be a single atomic
+    guarded UPDATE, not read-check-increment-commit -- spin up N threads
+    all racing to spend the project's LAST remaining pass and assert
+    exactly one of them succeeds, no matter how their reads/writes
+    interleave. A non-atomic version of this function would let more than
+    one thread pass its own "remaining > 0" read before any of them
+    committed, over-spending the allowance."""
+    import threading
+
+    from modules import auth, db
+
+    user = _fresh_test_user(auth, db)
+    try:
+        with db.get_session() as s:
+            db_user = s.query(db.User).filter(db.User.id == user.id).first()
+            db_user.subscription_status = "active"
+            s.commit()
+
+        key = "race project|race tender|race client|race000"
+        auth.record_proposal_usage(user, key, "Race Project")  # opens 5 purchased, 1 used -> 4 remaining
+
+        # Burn down to exactly 1 remaining before the race, so the race
+        # itself is contested over the single last pass.
+        for _ in range(3):
+            if not auth.consume_project_pass(user, key):
+                failures.append("test_atomic_pass_consumption_race: setup consume unexpectedly failed before the race")
+                return
+
+        status_before = auth.project_passes_status(user, key)
+        if status_before["remaining"] != 1:
+            failures.append(f"test_atomic_pass_consumption_race: expected 1 remaining before the race, got {status_before['remaining']}")
+            return
+
+        N_THREADS = 12
+        results: list[bool] = []
+        results_lock = threading.Lock()
+
+        def _racer():
+            outcome = auth.consume_project_pass(user, key)
+            with results_lock:
+                results.append(outcome)
+
+        threads = [threading.Thread(target=_racer) for _ in range(N_THREADS)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+
+        wins = sum(1 for r in results if r)
+        if wins != 1:
+            failures.append(
+                f"test_atomic_pass_consumption_race: expected exactly 1 of {N_THREADS} concurrent "
+                f"consume_project_pass() calls to succeed on the last remaining pass, got {wins}"
+            )
+        status_after = auth.project_passes_status(user, key)
+        if status_after["remaining"] != 0 or status_after["used"] != 5:
+            failures.append(
+                f"test_atomic_pass_consumption_race: expected purchased=5 used=5 remaining=0 after the race, got "
+                f"used={status_after['used']} remaining={status_after['remaining']}"
+            )
+    finally:
+        _cleanup_test_user(db, user.id)
+
+
+def test_bid_purchase_unlocks_trial_project(failures: list[str]) -> None:
+    """Audit fix Part 1a: buying a $50 bid earmarked for a project that's
+    still trial-funded (its one free pass already spent) must actually
+    unlock that project -- funded_by flips from "trial" to "credit", and
+    a fresh 5-pass allowance opens with 1 already used (the analysis that
+    already ran), i.e. 4 remaining -- not just land as an untouched
+    generic account credit that leaves the project stuck."""
+    from modules import auth, db
+
+    user = _fresh_test_user(auth, db)
+    try:
+        key = "unlock project|unlock tender|unlock client|unlock000"
+        auth.record_proposal_usage(user, key, "Unlock Project")  # trial-funded, 1 free pass spent
+        if auth.project_funded_by(user, key) != "trial":
+            failures.append("test_bid_purchase_unlocks_trial_project: setup project should be trial-funded")
+            return
+
+        upgraded = auth.upgrade_trial_project_to_paid(user, key, passes=5)
+        if not upgraded:
+            failures.append("test_bid_purchase_unlocks_trial_project: upgrade_trial_project_to_paid() should return True for a trial-funded project")
+
+        if auth.project_funded_by(user, key) != "credit":
+            failures.append(f"test_bid_purchase_unlocks_trial_project: expected funded_by='credit' after upgrade, got {auth.project_funded_by(user, key)!r}")
+        if auth.is_trial_funded_project(user, key):
+            failures.append("test_bid_purchase_unlocks_trial_project: project must no longer read as trial-funded after upgrade")
+
+        status = auth.project_passes_status(user, key)
+        if status["purchased"] != 5 or status["used"] != 1 or status["remaining"] != 4:
+            failures.append(
+                "test_bid_purchase_unlocks_trial_project: expected purchased=5 used=1 remaining=4 after unlock, got "
+                f"purchased={status['purchased']} used={status['used']} remaining={status['remaining']}"
+            )
+
+        # Free-tier download gating must also be lifted -- this is what the
+        # blocked download screen actually promised.
+        if auth.is_trial_funded_project(user, key):
+            failures.append("test_bid_purchase_unlocks_trial_project: is_trial_funded_project() should be False -- downloads should be unlocked")
+
+        # Calling it again now that the project is already paid must be
+        # correctly reported as "not a trial upgrade" (False) -- a second
+        # real $50 purchase on an already-paid project is a legitimate
+        # Part B2 top-up (more passes), not a trial-unlock, and the
+        # distinct return value is how billing.py's caller tells the two
+        # apart. Actual double-charge protection lives one layer up, at
+        # the Stripe Checkout session_id level (db.ProcessedCheckoutSession)
+        # -- this function is never called twice for the same payment.
+        again = auth.upgrade_trial_project_to_paid(user, key, passes=5)
+        if again:
+            failures.append("test_bid_purchase_unlocks_trial_project: a second upgrade call on an already-paid project should return False (it's a top-up, not a trial upgrade)")
+        status_after = auth.project_passes_status(user, key)
+        if status_after["purchased"] != 10:
+            failures.append(
+                f"test_bid_purchase_unlocks_trial_project: a second real purchase on an already-paid project "
+                f"should top up passes_purchased to 10, got {status_after['purchased']}"
+            )
+    finally:
+        _cleanup_test_user(db, user.id)
+
+
+def test_topup_no_project_falls_back(failures: list[str]) -> None:
+    """apply_project_bid_topup() must report "no_project" (not raise, not
+    silently pretend success) for a project_key with no ProposalUsage row
+    at all -- billing.handle_checkout_redirect() relies on exactly this
+    signal to fall back to a generic bid_credit so a real $50 payment is
+    never dropped on the floor."""
+    from modules import auth, db
+
+    user = _fresh_test_user(auth, db)
+    try:
+        with db.get_session() as s:
+            result = auth.apply_project_bid_topup(s, user.id, "never analysed|nope|nope|000000", passes=5)
+            s.commit()
+        if result != "no_project":
+            failures.append(f"test_topup_no_project_falls_back: expected 'no_project', got {result!r}")
+    finally:
+        _cleanup_test_user(db, user.id)
+
+
 def test_artifact_event_gating(failures: list[str]) -> None:
     """Part B: a trial-funded project's free artifacts should download
     exactly once each; a project not on the free list should always be
@@ -313,6 +456,9 @@ def main() -> int:
     test_funded_by_trial(failures)
     test_funded_by_subscription_opens_passes(failures)
     test_consume_and_exhaust_passes(failures)
+    test_atomic_pass_consumption_race(failures)
+    test_bid_purchase_unlocks_trial_project(failures)
+    test_topup_no_project_falls_back(failures)
     test_artifact_event_gating(failures)
     test_unlimited_account_bypasses_everything(failures)
     test_subscription_monthly_bid_limit_is_four(failures)

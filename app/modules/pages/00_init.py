@@ -459,7 +459,7 @@ def _lib_user_id() -> str:
     return current_user.id if IS_SAAS_MODE and current_user else "local"
 
 
-def _get_or_create_checkout_url(user, kind: str) -> str:
+def _get_or_create_checkout_url(user, kind: str, topup_project_key: str | None = None) -> str:
     """Returns a live Stripe Checkout URL for kind ("sub" or "bid"), reusing
     one cached in st.session_state for up to SUBSCRIPTION_REFRESH_INTERVAL_
     SECONDS instead of creating a brand new Checkout Session on every single
@@ -475,31 +475,56 @@ def _get_or_create_checkout_url(user, kind: str) -> str:
     since both render sites want the same underlying session for the same
     user -- no reason to mint two. A Checkout Session's URL keeps working
     for a day even if this cache goes stale sooner, so serving the same one
-    for a few minutes is harmless."""
-    cache_key = f"_checkout_url_{kind}"
-    ts_key = f"_checkout_url_{kind}_ts"
+    for a few minutes is harmless.
+
+    topup_project_key (audit fix Part 1a/8): when given, the "bid" session
+    is created WITH that project attached (see
+    billing.create_bid_checkout_session's topup_project_key -- this is what
+    lets a $50 purchase unlock/top-up the SPECIFIC project the user is
+    stuck on, rather than landing as a generic account credit). Cached
+    under its own key (a short hash of the project key, not the whole
+    string) so a project-specific URL never collides with, or gets served
+    in place of, the plain "buy a bid for a new project" URL."""
+    _project_suffix = ""
+    if topup_project_key:
+        _project_suffix = "_" + hashlib.sha256(topup_project_key.strip().lower().encode("utf-8")).hexdigest()[:12]
+    cache_key = f"_checkout_url_{kind}{_project_suffix}"
+    ts_key = f"_checkout_url_{kind}{_project_suffix}_ts"
     now_ts = time.time()
     cached_url = st.session_state.get(cache_key)
     cached_ts = st.session_state.get(ts_key, 0.0)
     if cached_url and (now_ts - cached_ts) < SUBSCRIPTION_REFRESH_INTERVAL_SECONDS:
         return cached_url
-    url = billing.create_checkout_session(user) if kind == "sub" else billing.create_bid_checkout_session(user)
+    if kind == "sub":
+        url = billing.create_checkout_session(user)
+    else:
+        url = billing.create_bid_checkout_session(user, topup_project_key=topup_project_key)
     st.session_state[cache_key] = url
     st.session_state[ts_key] = now_ts
     return url
 
 
-def _render_upgrade_buttons(user, key_prefix: str, already_subscribed: bool = False) -> None:
+def _render_upgrade_buttons(user, key_prefix: str, already_subscribed: bool = False,
+                             topup_project_key: str | None = None) -> None:
     """Ways to keep going once the free trial (or, for an already-subscribed
-    account, this billing period's 3-bid quota -- see
-    auth.SUBSCRIPTION_MONTHLY_BID_LIMIT) is used up. Reused at both call
-    sites (the top-right Upgrade popover and the Tender Analysis tab's
-    inline upgrade prompt) so the checkout flows can't drift out of sync.
-    Subscribe: $120/month, 3 bids per billing period (see
-    billing.create_checkout_session) -- hidden when already_subscribed,
-    since subscribing again makes no sense. Buy 1 bid: $50 one-time, adds a
-    single db.User.bid_credits (see billing.create_bid_checkout_session) --
-    works on top of either the trial or an active subscription's quota.
+    account, this billing period's bid quota -- see
+    auth.SUBSCRIPTION_MONTHLY_BID_LIMIT) is used up. Reused at several call
+    sites (the top-right Upgrade popover, the Tender Analysis tab's inline
+    upgrade prompt, and -- when a specific project is stuck, see
+    topup_project_key below -- that same tab's blocked-repeat-run prompt)
+    so the checkout flows can't drift out of sync. Subscribe: $120/month,
+    4 bids per billing period (see billing.create_checkout_session) --
+    hidden when already_subscribed, since subscribing again makes no
+    sense. Buy 1 bid: $50 one-time.
+
+    topup_project_key (audit fix Part 1a): when the buy-a-bid button is
+    being shown BECAUSE a specific project is stuck (its one free trial
+    pass already spent, or its paid pass allowance exhausted), pass that
+    project's key here so the $50 purchase actually unlocks THAT project
+    (see auth.apply_project_bid_topup()) instead of landing as an unrelated
+    account-level bid_credit that leaves the stuck project exactly as
+    stuck as before. None (the default) is the plain "start a new project"
+    purchase, unchanged.
 
     Each option is a single st.link_button straight to the Stripe Checkout
     URL. This used to be a two-step flow (a plain st.button that, once
@@ -514,10 +539,12 @@ def _render_upgrade_buttons(user, key_prefix: str, already_subscribed: bool = Fa
     removes that round trip entirely: one click opens Stripe directly. The
     URL itself comes from _get_or_create_checkout_url() above, which caches
     it instead of creating a fresh live Checkout Session on every render."""
+    _bid_label = "Buy 1 bid -- $50, to unlock this project →" if topup_project_key else "Buy 1 bid -- $50 →"
+
     if already_subscribed:
         try:
-            bid_url = _get_or_create_checkout_url(user, "bid")
-            st.link_button("Buy 1 bid -- $50 →", bid_url, key=f"{key_prefix}_bid_btn", type="primary")
+            bid_url = _get_or_create_checkout_url(user, "bid", topup_project_key=topup_project_key)
+            st.link_button(_bid_label, bid_url, key=f"{key_prefix}_bid_btn", type="primary")
         except Exception as exc:
             # debug_key_info() used to be shown here via st.caption() --
             # useful while Andrew was first wiring up Stripe, but it's
@@ -539,8 +566,8 @@ def _render_upgrade_buttons(user, key_prefix: str, already_subscribed: bool = Fa
             st.error("Couldn't start checkout -- please try again. If it keeps happening, email hello@civilproposals.com.")
     with ucol2:
         try:
-            bid_url = _get_or_create_checkout_url(user, "bid")
-            st.link_button("Buy 1 bid -- $50 →", bid_url, key=f"{key_prefix}_bid_btn")
+            bid_url = _get_or_create_checkout_url(user, "bid", topup_project_key=topup_project_key)
+            st.link_button(_bid_label, bid_url, key=f"{key_prefix}_bid_btn")
         except Exception as exc:
             print(f"[checkout] {exc} | {billing.debug_key_info()}", file=sys.stderr)
             st.error("Couldn't start checkout -- please try again. If it keeps happening, email hello@civilproposals.com.")

@@ -237,14 +237,29 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
             db_user.subscription_status = "active"
             _receipt_kind = "subscription"
         elif _topup_project_key:
-            # Part B2 top-up: this $50 payment is earmarked (via Checkout
-            # Session metadata -- see create_bid_checkout_session) for +5
-            # passes on an EXISTING project, not a new bid_credit -- see
-            # auth.add_project_pass_topup(). The ProjectPasses row lives in
-            # its own short session (same pattern as auth.
-            # record_proposal_usage/consume_project_pass), so it's applied
-            # right after this transaction commits below rather than nested
-            # inside it.
+            # Part 1a/1b of the audit fix brief: this $50 payment is
+            # earmarked (via Checkout Session metadata -- see
+            # create_bid_checkout_session) for a SPECIFIC project, either to
+            # unlock a trial-funded project that's stuck (buying a bid must
+            # actually unlock it, not just land as an unrelated account
+            # credit) or to top up an already-paid project's pass
+            # allowance (Part B2). auth.apply_project_bid_topup() figures
+            # out which case this is and applies it directly inside THIS
+            # session/transaction -- not a separate session opened after
+            # this one commits, which is what Part 1b's audit finding was
+            # about: a crash between the two would leave a customer charged
+            # with nothing granted, and the idempotency row below would
+            # make sure that never got retried either. One transaction, one
+            # commit, both succeed or neither does.
+            from modules import auth
+            _topup_result = auth.apply_project_bid_topup(s, db_user.id, _topup_project_key, passes=5)
+            if _topup_result == "no_project":
+                # Nothing recorded for this project yet (shouldn't normally
+                # happen -- the UI only offers a project-specific top-up
+                # button once a project has actually been analysed -- but
+                # never silently drop a real $50 payment over it) -- fall
+                # back to the plain pay-as-you-go credit below.
+                db_user.bid_credits = (db_user.bid_credits or 0) + 1
             _receipt_kind = "bid"
         else:
             # Pay-as-you-go: always +1 -- create_bid_checkout_session always
@@ -271,19 +286,6 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
             s.rollback()
             return s.query(db.User).filter(db.User.id == user_id).first()
         s.refresh(db_user)
-
-    if _topup_project_key:
-        try:
-            from modules import auth
-            auth.add_project_pass_topup(db_user, _topup_project_key, passes=5)
-        except Exception as exc:
-            # The $50 charge and this session's idempotency row are already
-            # committed above -- a failure here must never look like the
-            # customer's payment vanished. Logged loudly so it can be
-            # applied manually; never raised back to the checkout redirect
-            # handler, which would otherwise show a paying customer an
-            # error page immediately after a successful charge.
-            print(f"[topup_passes] failed for project {_topup_project_key}: {exc}", file=sys.stderr)
 
     # Best-effort receipt email -- the purchase itself is already committed
     # above regardless of whether this send succeeds, since a paying

@@ -50,6 +50,7 @@ import bcrypt
 import streamlit as st
 import streamlit.components.v1 as components
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from modules import db, email_utils, i18n
@@ -1298,67 +1299,159 @@ def project_passes_status(user: db.User, project_key: str) -> dict:
 
 
 def consume_project_pass(user: db.User, project_key: str) -> bool:
-    """Spends one pass on this (already-paid) project -- call right before
+    """Spends one pass on this (already-paid) project -- call right BEFORE
     a generation cycle actually runs (Tender Analysis, or a regeneration
-    once inputs have changed), mirroring record_proposal_usage()'s
-    "meter the action, then do the work" ordering. Returns False (and
-    spends nothing) if the project has no passes row yet, or has none
-    left -- the caller is expected to have already checked
-    project_passes_status()['remaining'] > 0 before letting the metered
-    action run at all, same contract as get_access_status()['allowed']
-    for the trial/subscription gate. Best-effort idempotency note: unlike
-    record_proposal_usage(), a spent pass has no natural per-call identity
-    to de-duplicate on (a regeneration is not idempotent the way "run
-    analysis on this exact document" is -- two distinct clicks are two
-    distinct passes by design), so this does not attempt double-click
-    protection beyond Streamlit's own button-disable-while-running
-    behaviour; callers should disable the triggering button while its
-    action is in flight."""
+    once inputs have changed), and check its return value: False means
+    nothing was spent and the caller must not run the metered action at
+    all (show the existing "no passes left" message instead).
+
+    Audit fix (Part 1c): this used to be a read-check-increment-commit --
+    two concurrent calls (a double-click, two browser tabs, a rerun racing
+    a click) could both read "1 remaining" before either committed, both
+    increment, and both succeed, spending two passes for one that was
+    actually available. It was also called AFTER the AI work completed,
+    with its return value ignored -- so even a correctly-failing check
+    couldn't have stopped the (already-run, already-billed-in-AI-cost)
+    generation anyway. Fixed by making the spend a single, atomic,
+    guarded UPDATE: `passes_used = passes_used + 1 WHERE ... passes_used <
+    passes_purchased`. The database itself is what decides whether there
+    was a pass left -- only one of two concurrent UPDATEs can ever match
+    that WHERE clause and actually increment a row, so exactly one caller
+    gets rowcount > 0 (returns True) and the other gets rowcount == 0
+    (returns False), no matter how they interleave. Callers must call this
+    before starting the metered action, not after -- see the Tender
+    Analysis tab's "Run Analysis" button handler."""
     project_key = (project_key or "").strip().lower()
     if not project_key:
         return False
     with db.get_session() as s:
-        row = s.query(db.ProjectPasses).filter(
-            db.ProjectPasses.user_id == user.id,
-            db.ProjectPasses.project_key == project_key,
-        ).first()
-        if row is None:
-            return False
-        remaining = max(0, (row.passes_purchased or 0) - (row.passes_used or 0))
-        if remaining <= 0:
-            return False
-        row.passes_used = (row.passes_used or 0) + 1
-        row.updated_at = datetime.now(timezone.utc)
+        result = s.execute(
+            text(
+                "UPDATE project_passes SET passes_used = passes_used + 1, updated_at = :now "
+                "WHERE user_id = :uid AND project_key = :pkey AND passes_used < passes_purchased"
+            ),
+            {"now": datetime.now(timezone.utc), "uid": user.id, "pkey": project_key},
+        )
         s.commit()
-        return True
+        return result.rowcount > 0
+
+
+def apply_project_bid_topup(s, user_id: str, project_key: str, passes: int = 5) -> str:
+    """Core DB logic for a $50 bid/top-up purchase earmarked for a specific
+    project (see billing.create_bid_checkout_session's topup_project_key
+    parameter) -- factored out of add_project_pass_topup()/
+    upgrade_trial_project_to_paid() below so billing.handle_checkout_redirect()
+    can run it inside its OWN already-open session, in the exact same
+    transaction as the Stripe-session idempotency row it writes right after
+    (see db.ProcessedCheckoutSession) -- audit fix Part 1b: the grant and
+    the idempotency marker used to be two separate commits (grant in a
+    fresh session, opened only AFTER the first session had already
+    committed), so a crash or worker restart between the two left a
+    customer charged, the checkout session already marked "processed" (so
+    a page refresh/replay would never retry it), and the passes/upgrade
+    never actually applied. One transaction means both happen or neither
+    does. Does NOT commit -- the caller commits.
+
+    Handles Part 1a (buying a bid must unlock the project the user is
+    stuck on) and Part B2's ordinary top-up in one place, distinguished by
+    what's already on record for this project:
+
+    Returns one of:
+      "upgraded_trial" -- a ProposalUsage row existed and was still
+        trial-funded ("" or "trial", i.e. the free pass was spent on
+        exactly this project and nothing else has paid for it since).
+        Upgraded to funded_by="credit" and its ProjectPasses opened (or
+        extended) at +`passes` purchased, with 1 already used -- the
+        analysis that spent the trial pass already ran, so it counts as
+        this project's first spent pass, matching how
+        record_proposal_usage() itself treats a freshly-funded project's
+        first analysis as immediately spent.
+      "topped_up_paid" -- the project was already paid-funded
+        (subscription/credit/unlimited); its ProjectPasses purchased
+        allowance simply grew by `passes` (the ordinary top-up).
+      "no_project" -- no ProposalUsage row exists for this project key at
+        all yet (nothing analysed, nothing to attach to) -- the caller
+        should fall back to crediting a generic account-level bid_credit
+        instead, so the payment is never lost."""
+    project_key = (project_key or "").strip().lower()
+    if not project_key:
+        return "no_project"
+    usage_row = s.query(db.ProposalUsage).filter(
+        db.ProposalUsage.user_id == user_id,
+        db.ProposalUsage.project_key == project_key,
+    ).first()
+    if usage_row is None:
+        return "no_project"
+    passes_row = s.query(db.ProjectPasses).filter(
+        db.ProjectPasses.user_id == user_id,
+        db.ProjectPasses.project_key == project_key,
+    ).first()
+    if (usage_row.funded_by or "") in ("", "trial"):
+        usage_row.funded_by = "credit"
+        if passes_row is None:
+            s.add(db.ProjectPasses(user_id=user_id, project_key=project_key,
+                                    passes_purchased=passes, passes_used=1))
+        else:
+            passes_row.passes_purchased = (passes_row.passes_purchased or 0) + passes
+            passes_row.passes_used = max(passes_row.passes_used or 0, 1)
+            passes_row.updated_at = datetime.now(timezone.utc)
+        return "upgraded_trial"
+    else:
+        if passes_row is None:
+            s.add(db.ProjectPasses(user_id=user_id, project_key=project_key,
+                                    passes_purchased=passes, passes_used=0))
+        else:
+            passes_row.passes_purchased = (passes_row.passes_purchased or 0) + passes
+            passes_row.updated_at = datetime.now(timezone.utc)
+        return "topped_up_paid"
 
 
 def add_project_pass_topup(user: db.User, project_key: str, passes: int = 5) -> bool:
-    """+5 (default) passes on an existing paid project -- the "$50 top-up"
+    """+5 (default) passes on an existing project -- the "$50 top-up"
     purchase flow (see billing.create_bid_checkout_session(), reused here
     rather than a separate Stripe price: the brief specifies the SAME $50
     bid price funds either a new project or a top-up on an existing one,
-    the choice is just which button the user clicked). If this project
-    somehow has no ProjectPasses row yet (funded_by wasn't "subscription"/
-    "credit" the first time -- e.g. a trial project being upgraded), this
-    creates a fresh 5-pass row rather than trying to graft a top-up onto a
-    trial project's non-existent allowance -- matches Part B's "buying a
-    bid unlocks everything, cleanly" acceptance criterion rather than a
-    confusing "1 already used + 5 more" figure the user never purchased
-    piecemeal."""
+    the choice is just which button the user clicked). Standalone wrapper
+    around apply_project_bid_topup() (see that function's docstring for
+    exactly what happens for a trial-funded vs. already-paid project) --
+    billing.handle_checkout_redirect() calls apply_project_bid_topup()
+    directly inside its own transaction instead of this function, so the
+    grant and the Stripe-session idempotency row commit atomically (Part
+    1b); this wrapper remains for standalone/test callers. Returns True
+    unless there's no ProposalUsage row for this project at all yet (see
+    "no_project" above) -- in that edge case this is a no-op and the
+    caller is responsible for the fallback (billing.py credits a generic
+    bid_credit instead)."""
     project_key = (project_key or "").strip().lower()
     if not project_key:
         return False
     with db.get_session() as s:
-        row = s.query(db.ProjectPasses).filter(
-            db.ProjectPasses.user_id == user.id,
-            db.ProjectPasses.project_key == project_key,
-        ).first()
-        if row is None:
-            s.add(db.ProjectPasses(user_id=user.id, project_key=project_key,
-                                    passes_purchased=passes, passes_used=0))
-        else:
-            row.passes_purchased = (row.passes_purchased or 0) + passes
-            row.updated_at = datetime.now(timezone.utc)
+        result = apply_project_bid_topup(s, user.id, project_key, passes=passes)
         s.commit()
-        return True
+        return result != "no_project"
+
+
+def upgrade_trial_project_to_paid(user: db.User, project_key: str, passes: int = 5) -> bool:
+    """Audit fix Part 1a: upgrades an already-recorded, trial-funded
+    project (its one free ProposalUsage/trial pass already spent) to
+    "credit"-funded, opening its 5-pass allowance with 1 already used --
+    the fix for "buying a $50 bid from the blocked-download / blocked-
+    repeat-run screen must unlock THAT project", which previously just
+    landed as a generic account-level bid_credit that never touched the
+    stuck project at all (leaving funded_by="trial" -- and downloads/
+    re-runs blocked -- forever, see is_trial_funded_project()). Thin
+    wrapper around apply_project_bid_topup() for standalone/test callers;
+    billing.handle_checkout_redirect() calls that shared helper directly
+    (see its docstring) so this exact operation and the Stripe-session
+    idempotency row commit in one transaction. Returns True only if a
+    trial-funded project was actually upgraded; False (no-op) if there's
+    no project to attach to yet, or it was already paid-funded -- in
+    either case the $50 payment must still land somewhere, which is the
+    caller's job (billing.py falls back to a generic bid_credit)."""
+    project_key = (project_key or "").strip().lower()
+    if not project_key:
+        return False
+    with db.get_session() as s:
+        result = apply_project_bid_topup(s, user.id, project_key, passes=passes)
+        s.commit()
+        return result == "upgraded_trial"

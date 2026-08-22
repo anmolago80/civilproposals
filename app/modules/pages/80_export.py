@@ -37,14 +37,32 @@ with tabs[9]:
             ))
         else:
             st.warning(i18n.t("passes_exhausted"))
-            if st.button(i18n.t("passes_topup_button"), key="_export_passes_topup_btn", type="primary"):
-                try:
-                    _topup_url = billing.create_bid_checkout_session(
-                        current_user, topup_project_key=_current_project_key(),
-                    )
-                    st.link_button(i18n.t("export_continue_to_payment_button"), _topup_url, type="primary")
-                except Exception as exc:
-                    _show_error("Couldn't start checkout", exc)
+            # Audit fix Part 8: was a two-step button-then-link_button flow
+            # -- the exact vanishing-link bug 00_init.py's own comment
+            # documents and _render_upgrade_buttons() was rewritten to
+            # avoid (see that function's docstring). A single link_button,
+            # backed by the same cached-URL helper, removes the round trip.
+            try:
+                _topup_url = _get_or_create_checkout_url(current_user, "bid", topup_project_key=_current_project_key())
+                st.link_button(i18n.t("passes_topup_button"), _topup_url, key="_export_passes_topup_btn", type="primary")
+            except Exception as exc:
+                _show_error("Couldn't start checkout", exc)
+    elif _project_is_free_tier():
+        # Audit fix Part 1a: a trial-funded project whose one free pass is
+        # already spent gets the SAME "buy a bid, unlock this project"
+        # path as the paid-and-exhausted case above -- previously nothing
+        # here offered a project-specific purchase at all, only the
+        # generic "start a new project" buttons elsewhere in the app,
+        # which never actually unlocked the project someone's stuck on.
+        st.warning(i18n.t("free_tier_generate_used"))
+        try:
+            _unlock_url = _get_or_create_checkout_url(current_user, "bid", topup_project_key=_current_project_key())
+            st.link_button(
+                "Buy 1 bid -- $50, to unlock this project →", _unlock_url,
+                key="_export_free_tier_unlock_btn", type="primary",
+            )
+        except Exception as exc:
+            _show_error("Couldn't start checkout", exc)
 
     # Readiness checklist. Most of the red in an exported pack is not missing
     # information -- it is a step that hasn't been run. Listing those here,
