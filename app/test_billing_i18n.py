@@ -399,6 +399,74 @@ def test_free_tier_rename_bypass_closed(failures: list[str]) -> None:
         _cleanup_test_user(db, user.id)
 
 
+def test_migrate_project_identity_on_rename(failures: list[str]) -> None:
+    """Audit fix Part 3b: renaming a paid project must migrate its
+    ProposalUsage/ProjectPasses/ArtifactEvent rows to the new project_key,
+    not strand them under the old one -- and must never clobber a
+    DIFFERENT project's own existing billing history if the new key
+    happens to collide with one."""
+    from modules import auth, db
+
+    user = _fresh_test_user(auth, db)
+    try:
+        with db.get_session() as s:
+            db_user = s.query(db.User).filter(db.User.id == user.id).first()
+            db_user.subscription_status = "active"
+            s.commit()
+
+        old_key = "old name|old tender|old client|migrate01"
+        new_key = "new name|new tender|new client|migrate01"
+        auth.record_proposal_usage(user, old_key, "Old Name")  # paid, opens 5/1
+        auth.consume_project_pass(user, old_key)  # burn one more, now 5/2 -> 3 remaining
+        with db.get_session() as s:
+            s.add(db.ArtifactEvent(user_id=user.id, project_key=old_key, artifact_type="proposal_docx"))
+            s.commit()
+
+        migrated = auth.migrate_project_identity(user, old_key, new_key)
+        if not migrated:
+            failures.append("test_migrate_project_identity_on_rename: expected migrate_project_identity() to return True")
+            return
+
+        if auth.project_funded_by(user, old_key) != "":
+            failures.append("test_migrate_project_identity_on_rename: old_key should no longer have a ProposalUsage row after migration")
+        if auth.project_funded_by(user, new_key) != "subscription":
+            failures.append(f"test_migrate_project_identity_on_rename: expected new_key funded_by='subscription', got {auth.project_funded_by(user, new_key)!r}")
+
+        old_status = auth.project_passes_status(user, old_key)
+        new_status = auth.project_passes_status(user, new_key)
+        if old_status["has_passes"]:
+            failures.append("test_migrate_project_identity_on_rename: old_key should have no ProjectPasses row left after migration")
+        if not new_status["has_passes"] or new_status["purchased"] != 5 or new_status["used"] != 2:
+            failures.append(
+                f"test_migrate_project_identity_on_rename: expected new_key purchased=5 used=2, got "
+                f"has_passes={new_status['has_passes']} purchased={new_status['purchased']} used={new_status['used']}"
+            )
+
+        with db.get_session() as s:
+            old_artifact = s.query(db.ArtifactEvent).filter(
+                db.ArtifactEvent.user_id == user.id, db.ArtifactEvent.project_key == old_key,
+            ).first()
+            new_artifact = s.query(db.ArtifactEvent).filter(
+                db.ArtifactEvent.user_id == user.id, db.ArtifactEvent.project_key == new_key,
+            ).first()
+        if old_artifact is not None:
+            failures.append("test_migrate_project_identity_on_rename: ArtifactEvent should have moved off old_key")
+        if new_artifact is None:
+            failures.append("test_migrate_project_identity_on_rename: ArtifactEvent should now be under new_key")
+
+        # Collision case: a THIRD, unrelated project already owns some_key --
+        # migrating onto it must be refused, not silently merge histories.
+        some_key = "third name|third tender|third client|migrate02"
+        auth.record_proposal_usage(user, some_key, "Third Project")  # trial or paid, doesn't matter -- it just needs to exist
+        collided = auth.migrate_project_identity(user, new_key, some_key)
+        if collided:
+            failures.append("test_migrate_project_identity_on_rename: migrating onto an already-existing project_key should return False")
+        if auth.project_funded_by(user, new_key) == "":
+            failures.append("test_migrate_project_identity_on_rename: a refused migration must leave the source project's row untouched")
+    finally:
+        _cleanup_test_user(db, user.id)
+
+
 def test_unlimited_account_bypasses_everything(failures: list[str]) -> None:
     """UNLIMITED_ACCOUNTS should never have their trial/subscription
     counters actually decremented in a way that would ever block them --
@@ -514,6 +582,7 @@ def main() -> int:
     test_topup_no_project_falls_back(failures)
     test_artifact_event_gating(failures)
     test_free_tier_rename_bypass_closed(failures)
+    test_migrate_project_identity_on_rename(failures)
     test_unlimited_account_bypasses_everything(failures)
     test_subscription_monthly_bid_limit_is_four(failures)
     test_i18n_catalogs_are_in_sync(failures)

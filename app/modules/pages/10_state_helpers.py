@@ -629,11 +629,34 @@ def _project_passes_status() -> dict:
 # ---------------------------------------------------------------------------
 
 def _maybe_snapshot_paid_identity() -> None:
-    """Call once per rerun (Project Setup tab) to keep track of the most
-    recently seen PAID (subscription/credit-funded) project identity.
+    """Call on EVERY rerun of the Project Setup tab (not just right after a
+    live analysis run) to keep track of the most recently seen PAID
+    (subscription/credit-funded) project identity AND the three editable
+    field values (project/tender/client name) it currently corresponds to.
     Deliberately does nothing for a trial-funded or not-yet-funded project
     -- renaming one of those has no paid analysis to strand, so there's
-    nothing to warn about."""
+    nothing to warn about.
+
+    Audit fix Part 3b: this used to be called ONLY from inside the Tender
+    Analysis tab's click handler, right after a paid analysis run actually
+    completed -- so the snapshot lived purely in st.session_state and never
+    survived a page refresh, a fresh login, or even just closing and
+    reopening the tab. A rename attempted in ANY of those situations found
+    no snapshot to compare against and silently let the edit through with
+    no warning, orphaning the paid analysis under the old identity. Calling
+    this on every Project Setup rerun instead re-derives "is the CURRENTLY
+    loaded project paid?" from the database every time, so it doesn't
+    matter whether the paid identity was established this session or three
+    weeks and two logins ago -- as long as the project's fields, as loaded,
+    still match what's on record as paid, the snapshot is current. Because
+    Streamlit's text_input widgets commit on every keystroke (see the
+    Project Setup tab's own comment), by the time an EDIT'S rerun reaches
+    this function the fields already reflect the NEW, not-yet-paid
+    identity -- auth.project_funded_by() correctly finds nothing for it, so
+    this function simply does NOT overwrite the snapshot that rerun, and
+    the previous (still-accurate) snapshot survives for
+    _pending_rename_confirmation() to compare against on that exact same
+    rerun."""
     if not IS_SAAS_MODE or not current_user:
         return
     _key = _current_project_key()
@@ -642,6 +665,11 @@ def _maybe_snapshot_paid_identity() -> None:
     _funded = auth.project_funded_by(current_user, _key)
     if _funded in ("subscription", "credit"):
         st.session_state["_paid_identity_key"] = _key.lower()
+        st.session_state["_paid_identity_fields"] = {
+            "project_name": st.session_state.get("project_name", ""),
+            "tender_name": st.session_state.get("tender_name", ""),
+            "client_name": st.session_state.get("client_name", ""),
+        }
 
 
 def _pending_rename_confirmation() -> str | None:
@@ -667,16 +695,49 @@ def _pending_rename_confirmation() -> str | None:
 
 
 def _acknowledge_rename(new_key: str) -> None:
-    """Dismisses the rename-confirm dialog for `new_key` -- called from its
-    "Yes, rename" button. The old paid identity is deliberately NOT carried
-    forward onto the new key (that would silently transfer the paid status
-    to a project that hasn't actually been paid for under its new name,
-    exactly the loophole this dialog exists to close) -- it's simply
-    forgotten, so a later rename back to something resembling the old name
-    would (correctly) warn again if the account still holds a stale
-    _paid_identity_key from some other project in the meantime."""
+    """Marks `new_key` as acknowledged so _pending_rename_confirmation()
+    doesn't show the same dialog again for it -- a safety net for the rare
+    case where _confirm_rename()'s migration below couldn't actually apply
+    (new_key collides with a different, already-existing project's own
+    billing history -- see auth.migrate_project_identity()'s defensive
+    "never clobber someone else's row" check), where the identity mismatch
+    would otherwise persist and the dialog would reappear every rerun."""
     st.session_state["_rename_ack_key"] = new_key
-    st.session_state.pop("_paid_identity_key", None)
+
+
+def _confirm_rename(new_key: str) -> None:
+    """"Yes, rename" -- audit fix Part 3b: migrates the paid project's
+    ProposalUsage/ProjectPasses/ArtifactEvent rows from the old identity to
+    `new_key` (see auth.migrate_project_identity()) so renaming a paid
+    project never actually costs anyone their payment; the dialog's copy
+    reflects this ("this project's payment will follow the new name").
+    Re-snapshots the paid identity afterward (under whatever project_key is
+    now current) so a FURTHER rename from here is tracked correctly too."""
+    _old_key = st.session_state.get("_paid_identity_key")
+    if _old_key:
+        auth.migrate_project_identity(current_user, _old_key, new_key)
+    _acknowledge_rename(new_key)
+    _maybe_snapshot_paid_identity()
+
+
+def _cancel_rename(new_key: str) -> None:
+    """"Cancel" -- audit fix Part 3b: actually cancels, by restoring the
+    three editable identity fields to what they were the last time this
+    project's identity was confirmed paid (see
+    _maybe_snapshot_paid_identity's _paid_identity_fields snapshot).
+    Previously both dialog buttons called the same _acknowledge_rename(),
+    which only dismissed the dialog -- the typed field kept showing
+    whatever was just typed either way, so "Cancel" didn't actually cancel
+    the edit. Reassigning a widget-bound session_state key here (a
+    callback, called before the next rerun re-instantiates the text_input)
+    is exactly the supported way to programmatically revert one; doing the
+    same assignment inline, after the widget has already rendered in the
+    SAME script run, is what Streamlit disallows -- this runs from the
+    dialog button's own click handling, one rerun later, which is fine."""
+    _fields = st.session_state.get("_paid_identity_fields") or {}
+    for _field, _value in _fields.items():
+        st.session_state[_field] = _value
+    _acknowledge_rename(new_key)
 
 
 def _record_ai_click() -> None:
@@ -1201,6 +1262,101 @@ def _export_input_signature() -> str:
     except Exception:
         blob = str(payload)
     return hashlib.sha256(blob.encode("utf-8", "replace")).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Audit fix Part 3a -- pass metering for a full "Generate/Regenerate All
+# Drafts" run on a PAID project. Part B2 defines a pass as one full
+# generation cycle: the initial Tender Analysis run, OR a later
+# regeneration once a tracked input has actually changed. Tender Analysis's
+# own repeat-run metering lives in the Tender Analysis tab (see
+# auth.consume_project_pass()'s call site there); this is the matching
+# metering for the OTHER full-cycle action in the app, "Generate/Regenerate
+# All Drafts" (Draft Responses tab) -- previously gated only on
+# _current_project_already_paid(), with no pass cost at all, so a paid
+# project could regenerate every section's drafts an unlimited number of
+# times regardless of its 5-pass allowance.
+# ---------------------------------------------------------------------------
+
+def _draft_generation_input_signature() -> str:
+    """Same hashing technique as _export_input_signature() above, but
+    scoped to what actually FEEDS a full draft-generation run, not the
+    whole export bundle -- deliberately excludes "drafts" itself (and
+    other pure OUTPUTS of this same button, like executive_summary/
+    team_intro/pitch_review) because including them would make the
+    signature circular: every full regenerate overwrites drafts, so
+    comparing a "before" and "after" signature that both include drafts
+    would always disagree, defeating the entire point of "unchanged
+    inputs, no pass spent." What IS compared is everything that actually
+    changes what the drafter would produce: the brief's own analysis, the
+    built section list, compliance items, the resourcing/team plan,
+    reference projects, the differentiator/sales-pitch text, the raw
+    company material, and the chosen output language."""
+    import hashlib
+    import json as _json
+
+    def _dump(value):
+        try:
+            if hasattr(value, "model_dump"):
+                return value.model_dump()
+            if isinstance(value, dict):
+                return {str(k): _dump(v) for k, v in value.items()}
+            if isinstance(value, (list, tuple)):
+                return [_dump(v) for v in value]
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                return value
+            if isinstance(value, (bytes, bytearray)):
+                return f"bytes:{len(value)}"
+            return str(value)
+        except Exception:
+            return "?"
+
+    keys = [
+        "analysis", "sections", "compliance_items", "resource_plan",
+        "reference_projects", "project_differentiator", "project_sales_pitch",
+        "company_material_text", "output_language", "proposal_format",
+    ]
+    payload = {key: _dump(st.session_state.get(key)) for key in keys}
+    try:
+        blob = _json.dumps(payload, sort_keys=True, default=str)
+    except Exception:
+        blob = str(payload)
+    return hashlib.sha256(blob.encode("utf-8", "replace")).hexdigest()
+
+
+def _draft_project_is_metered() -> tuple[bool, str]:
+    """(is_metered, project_key) -- True only for a PAID (subscription/
+    credit) project: never for a trial-funded project (which gets exactly
+    ONE generation pass total, already enforced at the Tender Analysis
+    level -- Part B's original one-pass-free-tier promise includes a full
+    drafted pack from that one pass, so drafting itself stays unmetered
+    for a trial project), never for UNLIMITED_ACCOUNTS, and never outside
+    SaaS mode."""
+    if not IS_SAAS_MODE or not current_user or _access.get("unlimited"):
+        return False, ""
+    _key = _current_project_key()
+    if not _key or auth.is_trial_funded_project(current_user, _key):
+        return False, ""
+    return True, _key
+
+
+def _draft_would_consume_pass() -> bool:
+    """True if clicking 'Generate/Regenerate All Drafts' right now would
+    spend one of a paid project's passes -- i.e. this project is paid (see
+    _draft_project_is_metered()) AND its drafting inputs have changed
+    since the last metered run. False for the very first draft generation
+    on a freshly-analysed paid project (no baseline signature recorded
+    yet -- that generation is covered by the pass Tender Analysis itself
+    already spent, same as re-downloading unchanged documents is free).
+    Read-only and side-effect-free; used for both the pre-click caption
+    and the click handler itself, so they can never disagree."""
+    _metered, _key = _draft_project_is_metered()
+    if not _metered:
+        return False
+    _last_sig = st.session_state.get("_last_draft_metered_signature")
+    if _last_sig is None:
+        return False
+    return _draft_generation_input_signature() != _last_sig
 
 
 def _mark_export_generated() -> None:

@@ -1406,6 +1406,63 @@ def apply_project_bid_topup(s, user_id: str, project_key: str, passes: int = 5) 
         return "topped_up_paid"
 
 
+def migrate_project_identity(user: db.User, old_key: str, new_key: str) -> bool:
+    """Audit fix Part 3b: moves ALL of a project's billing/passes/download
+    records (ProposalUsage, ProjectPasses, ArtifactEvent) from `old_key` to
+    `new_key` for this user -- called when the rename-confirm dialog's
+    "Yes, rename" is clicked on a project that's currently PAID (see
+    modules/pages/10_state_helpers.py's _confirm_rename()). Renaming (or
+    swapping the uploaded brief on) a paid project computes a brand-new
+    project_key -- see _current_project_key()'s docstring: identity folds
+    in the typed project/tender/client names AND a hash of the brief text
+    -- which used to strand the payment under the old, now-orphaned
+    identity forever, with only a warning dialog to explain why. Migrating
+    the rows instead of merely warning about them means a rename never
+    actually costs anyone their payment.
+
+    Idempotent / defensive: returns False (does nothing) if old_key and
+    new_key are the same, if there's no ProposalUsage row under old_key to
+    migrate, or if new_key ALREADY has its own ProposalUsage row -- the
+    last case means new_key is (or was) itself a distinct project with its
+    own billing history, and blindly overwriting its project_key would
+    silently merge two unrelated projects' payments into one. In that rare
+    collision, the rows are left exactly as they were and the caller's
+    dialog keeps warning instead of migrating anything."""
+    old_key = (old_key or "").strip().lower()
+    new_key = (new_key or "").strip().lower()
+    if not old_key or not new_key or old_key == new_key:
+        return False
+    with db.get_session() as s:
+        usage_row = s.query(db.ProposalUsage).filter(
+            db.ProposalUsage.user_id == user.id,
+            db.ProposalUsage.project_key == old_key,
+        ).first()
+        if usage_row is None:
+            return False
+        if s.query(db.ProposalUsage).filter(
+            db.ProposalUsage.user_id == user.id,
+            db.ProposalUsage.project_key == new_key,
+        ).first() is not None:
+            return False
+        usage_row.project_key = new_key
+        for _row in s.query(db.ProjectPasses).filter(
+            db.ProjectPasses.user_id == user.id,
+            db.ProjectPasses.project_key == old_key,
+        ).all():
+            _row.project_key = new_key
+        for _row in s.query(db.ArtifactEvent).filter(
+            db.ArtifactEvent.user_id == user.id,
+            db.ArtifactEvent.project_key == old_key,
+        ).all():
+            _row.project_key = new_key
+        try:
+            s.commit()
+        except IntegrityError:
+            s.rollback()
+            return False
+        return True
+
+
 def add_project_pass_topup(user: db.User, project_key: str, passes: int = 5) -> bool:
     """+5 (default) passes on an existing project -- the "$50 top-up"
     purchase flow (see billing.create_bid_checkout_session(), reused here

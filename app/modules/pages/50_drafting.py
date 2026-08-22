@@ -40,97 +40,130 @@ with tabs[5]:
     if _structure_format_stale():
         st.warning(i18n.t("drafting_format_stale_warning"))
 
+    # Audit fix Part 3a: a full "Generate/Regenerate All Drafts" run is a
+    # full generation cycle under Part B2's definition -- tell the user
+    # up front whether clicking it will spend one of a paid project's
+    # passes (only when this project's drafting inputs have genuinely
+    # changed since the last metered run; free on the very first run and
+    # on any re-run with unchanged inputs -- see _draft_would_consume_pass()).
+    if ready:
+        _draft_metered, _ = _draft_project_is_metered()
+        if _draft_metered:
+            if _draft_would_consume_pass():
+                st.caption(i18n.t("drafting_regen_will_use_pass_caption"))
+            else:
+                st.caption(i18n.t("drafting_regen_no_pass_caption"))
+
     if st.button(i18n.t("drafting_generate_button"), type="primary", disabled=not ready):
         targets = _draftable_sections(st.session_state.sections)
         if not targets:
             st.error(i18n.t("drafting_nothing_to_draft_error"))
             st.stop()
-        progress = st.progress(0.0, text=i18n.t("drafting_progress_text"))
 
-        def _progress_cb(done, total, title):
-            # generate_all_drafts() now runs sections concurrently and calls
-            # this AFTER each one finishes (done is already a 1-indexed
-            # completed-count, not "about to start section done+1" like the
-            # old sequential version) -- sections may complete out of their
-            # original order, so `title` here is whichever one just finished,
-            # not necessarily done'th in the list.
-            progress.progress(done / max(total, 1), text=i18n.t("drafting_progress_detail", title=title, done=done, total=total))
+        # Spend the pass (if this run needs one) BEFORE the AI work starts --
+        # same atomic-guarded-update, pre-run pattern as Tender Analysis's
+        # repeat-run metering (Part 1c).
+        _draft_metered, _draft_key = _draft_project_is_metered()
+        _draft_pass_ok = True
+        if _draft_metered and _draft_would_consume_pass():
+            _draft_pass_ok = auth.consume_project_pass(current_user, _draft_key)
+            if not _draft_pass_ok:
+                st.warning(i18n.t("passes_exhausted"))
 
-        try:
-            _record_ai_click()
-            # Keep excluded personnel (unticked via "Include in proposal" on the
-            # Team & Resourcing tab -- e.g. because their CV wasn't provided)
-            # out of the material fed to the AI, not just the nominated-team
-            # list: their own CV text would otherwise still let the drafting
-            # model surface their name in section prose.
-            _excluded_names = resourcing.excluded_personnel_names(st.session_state.resource_plan)
-            _material_for_draft = dict(st.session_state.company_material_text)
-            if _excluded_names:
-                _cv_files = st.session_state.company_material_files.get("cv_library", {})
-                _excluded_cv_files = team_bios.cv_filenames_for_names(_excluded_names, _cv_files)
-                if _excluded_cv_files:
-                    _kept_cv_files = {
-                        fn: text for fn, text in _cv_files.items() if fn not in _excluded_cv_files
-                    }
-                    _material_for_draft["cv_library"] = "\n\n".join(_kept_cv_files.values())
+        if _draft_pass_ok:
+            progress = st.progress(0.0, text=i18n.t("drafting_progress_text"))
 
-            # Same background-job pattern as Tender Analysis (see that call
-            # site's comment and _run_job_or_inline) -- this is the other
-            # genuinely slow, heavy operation in the app (up to
-            # MAX_CONCURRENT_DRAFTS AI calls in flight at once for a big
-            # pack), so it gets the same treatment, including the redacted
-            # ai_config on the queued path (see job_queue.py's docstring).
-            _redacted_ai_config = {**st.session_state.ai_config, "api_key": ""}
+            def _progress_cb(done, total, title):
+                # generate_all_drafts() now runs sections concurrently and calls
+                # this AFTER each one finishes (done is already a 1-indexed
+                # completed-count, not "about to start section done+1" like the
+                # old sequential version) -- sections may complete out of their
+                # original order, so `title` here is whichever one just finished,
+                # not necessarily done'th in the list.
+                progress.progress(done / max(total, 1), text=i18n.t("drafting_progress_detail", title=title, done=done, total=total))
 
-            # Context the drafter never used to receive. All of it already
-            # existed in state: the client's own name, the brief's scope items
-            # and deliverables, its objectives, the risks it raises, the
-            # mandatory requirements, the compliance rows that map to each
-            # section, and the bid team's own win themes. A "Methodology and
-            # Deliverables" section literally could not list the real
-            # deliverables before this.
-            _draft_win_themes = "\n\n".join(
-                part for part in (
-                    (st.session_state.project_differentiator or "").strip(),
-                    (st.session_state.project_sales_pitch or "").strip(),
-                ) if part
-            )
-            # Structured, user-edited content replaces the raw upload blob for
-            # the sections that have it -- otherwise the draft argues from
-            # truncated raw text while the cards beside it in the same
-            # document show the corrected version.
-            _structured_material = _structured_material_by_section(targets)
+            try:
+                _record_ai_click()
+                # Keep excluded personnel (unticked via "Include in proposal" on the
+                # Team & Resourcing tab -- e.g. because their CV wasn't provided)
+                # out of the material fed to the AI, not just the nominated-team
+                # list: their own CV text would otherwise still let the drafting
+                # model surface their name in section prose.
+                _excluded_names = resourcing.excluded_personnel_names(st.session_state.resource_plan)
+                _material_for_draft = dict(st.session_state.company_material_text)
+                if _excluded_names:
+                    _cv_files = st.session_state.company_material_files.get("cv_library", {})
+                    _excluded_cv_files = team_bios.cv_filenames_for_names(_excluded_names, _cv_files)
+                    if _excluded_cv_files:
+                        _kept_cv_files = {
+                            fn: text for fn, text in _cv_files.items() if fn not in _excluded_cv_files
+                        }
+                        _material_for_draft["cv_library"] = "\n\n".join(_kept_cv_files.values())
 
-            _draft_kwargs = {
-                "team_context": draft_generator.format_team_context(st.session_state.resource_plan),
-                "project_info": _project_info(),
-                "compliance_items": st.session_state.compliance_items or [],
-                "win_themes": _draft_win_themes,
-                "structured_material": _structured_material,
-                "output_language": st.session_state.get("output_language", "en"),
-            }
-            new_drafts = _run_job_or_inline(
-                "draft_generation", draft_generator.generate_all_drafts,
-                args=(targets, st.session_state.analysis, _material_for_draft, st.session_state.ai_config),
-                kwargs=_draft_kwargs,
-                progress=progress,
-                queued_text=i18n.t("drafting_queued_text"), running_text=i18n.t("drafting_progress_text"),
-                inline_extra_kwargs={"progress_callback": _progress_cb},
-                queue_func=job_queue.run_draft_generation_job,
-                queue_args=(targets, st.session_state.analysis, _material_for_draft, _redacted_ai_config),
-            )
-            st.session_state.drafts = {**(st.session_state.drafts or {}), **new_drafts}
-            progress.progress(1.0, text=i18n.t("drafting_done_text"))
-            # "Complete" has to mean complete. An empty or one-sentence draft
-            # used to render as a blank expander under a green success
-            # message, and nobody opens twelve expanders to check.
-            _thin = _thin_drafts(new_drafts)
-            if _thin:
-                st.warning(i18n.t("drafting_thin_warning", sections=", ".join(_thin)))
-            if len(_thin) < len(new_drafts):
-                st.success(i18n.t("drafting_generation_complete_success", n=len(new_drafts) - len(_thin)))
-        except Exception as exc:
-            _show_error(i18n.t("drafting_generation_failed_error"), exc)
+                # Same background-job pattern as Tender Analysis (see that call
+                # site's comment and _run_job_or_inline) -- this is the other
+                # genuinely slow, heavy operation in the app (up to
+                # MAX_CONCURRENT_DRAFTS AI calls in flight at once for a big
+                # pack), so it gets the same treatment, including the redacted
+                # ai_config on the queued path (see job_queue.py's docstring).
+                _redacted_ai_config = {**st.session_state.ai_config, "api_key": ""}
+
+                # Context the drafter never used to receive. All of it already
+                # existed in state: the client's own name, the brief's scope items
+                # and deliverables, its objectives, the risks it raises, the
+                # mandatory requirements, the compliance rows that map to each
+                # section, and the bid team's own win themes. A "Methodology and
+                # Deliverables" section literally could not list the real
+                # deliverables before this.
+                _draft_win_themes = "\n\n".join(
+                    part for part in (
+                        (st.session_state.project_differentiator or "").strip(),
+                        (st.session_state.project_sales_pitch or "").strip(),
+                    ) if part
+                )
+                # Structured, user-edited content replaces the raw upload blob for
+                # the sections that have it -- otherwise the draft argues from
+                # truncated raw text while the cards beside it in the same
+                # document show the corrected version.
+                _structured_material = _structured_material_by_section(targets)
+
+                _draft_kwargs = {
+                    "team_context": draft_generator.format_team_context(st.session_state.resource_plan),
+                    "project_info": _project_info(),
+                    "compliance_items": st.session_state.compliance_items or [],
+                    "win_themes": _draft_win_themes,
+                    "structured_material": _structured_material,
+                    "output_language": st.session_state.get("output_language", "en"),
+                }
+                new_drafts = _run_job_or_inline(
+                    "draft_generation", draft_generator.generate_all_drafts,
+                    args=(targets, st.session_state.analysis, _material_for_draft, st.session_state.ai_config),
+                    kwargs=_draft_kwargs,
+                    progress=progress,
+                    queued_text=i18n.t("drafting_queued_text"), running_text=i18n.t("drafting_progress_text"),
+                    inline_extra_kwargs={"progress_callback": _progress_cb},
+                    queue_func=job_queue.run_draft_generation_job,
+                    queue_args=(targets, st.session_state.analysis, _material_for_draft, _redacted_ai_config),
+                )
+                st.session_state.drafts = {**(st.session_state.drafts or {}), **new_drafts}
+                progress.progress(1.0, text=i18n.t("drafting_done_text"))
+                # "Complete" has to mean complete. An empty or one-sentence draft
+                # used to render as a blank expander under a green success
+                # message, and nobody opens twelve expanders to check.
+                _thin = _thin_drafts(new_drafts)
+                if _thin:
+                    st.warning(i18n.t("drafting_thin_warning", sections=", ".join(_thin)))
+                if len(_thin) < len(new_drafts):
+                    st.success(i18n.t("drafting_generation_complete_success", n=len(new_drafts) - len(_thin)))
+                if _draft_metered:
+                    # Record this run's signature as the new baseline --
+                    # whether or not THIS run actually spent a pass (a free
+                    # first/unchanged run still needs a baseline recorded so
+                    # the NEXT comparison has something real to compare
+                    # against).
+                    st.session_state["_last_draft_metered_signature"] = _draft_generation_input_signature()
+            except Exception as exc:
+                _show_error(i18n.t("drafting_generation_failed_error"), exc)
 
     # -----------------------------------------------------------------
     # Risk register

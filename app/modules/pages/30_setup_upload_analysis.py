@@ -74,6 +74,15 @@ with tabs[0]:
         with st.popover(i18n.t("bid_includes_popover_title")):
             st.markdown(i18n.t("bid_includes_popover_body"))
 
+    # Audit fix Part 3b: re-derive "is the currently loaded project paid?"
+    # from the database on EVERY rerun of this tab, not only right after a
+    # live analysis run -- see _maybe_snapshot_paid_identity()'s docstring
+    # for why this is what makes the rename-confirm dialog below survive a
+    # page refresh, a fresh login, or a project reloaded from a previous
+    # session, instead of only working within the same browser tab that
+    # happened to run the analysis.
+    _maybe_snapshot_paid_identity()
+
     # Part C: renaming (or swapping the client/tender name on) an
     # already-PAID project computes a different billing identity -- see
     # _current_project_key()'s docstring -- so the paid analysis stays
@@ -88,21 +97,22 @@ with tabs[0]:
             st.write(i18n.t("rename_confirm_body"))
             _rc_col1, _rc_col2 = st.columns(2)
             with _rc_col1:
+                # Audit fix Part 3b: migrates the paid billing/passes
+                # records to the new identity (see
+                # auth.migrate_project_identity()) so the rename never
+                # actually costs the payment -- see _confirm_rename()'s
+                # docstring.
                 if st.button(i18n.t("rename_confirm_yes"), type="primary", key="_rename_confirm_yes_btn"):
-                    _acknowledge_rename(_pending_rename_key)
+                    _confirm_rename(_pending_rename_key)
                     st.rerun()
             with _rc_col2:
+                # Audit fix Part 3b: actually cancels now -- reverts the
+                # three editable identity fields to their last-known-paid
+                # values (see _cancel_rename()'s docstring), rather than
+                # just dismissing the dialog while leaving the edit in
+                # place.
                 if st.button(i18n.t("rename_confirm_cancel"), key="_rename_confirm_cancel_btn"):
-                    # There's no reliable way to programmatically revert an
-                    # already-committed text_input value in Streamlit (see
-                    # the comment above) -- "Cancel" here dismisses the
-                    # dialog without erasing the acknowledgement, so it
-                    # simply stops nagging; the field itself still shows
-                    # what was typed, same as every other field on this
-                    # tab. The paid analysis is unaffected either way -- it
-                    # stays attached to the OLD identity regardless of
-                    # which button is clicked.
-                    _acknowledge_rename(_pending_rename_key)
+                    _cancel_rename(_pending_rename_key)
                     st.rerun()
         _rename_confirm_dialog()
 

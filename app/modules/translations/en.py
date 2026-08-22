@@ -124,13 +124,13 @@ STRINGS: dict[str, str] = {
         "**unlimited downloads** of your current documents. A pass is spent when you run Tender "
         "Analysis, or when you regenerate after changing an input -- re-downloading the same, "
         "unchanged documents never spends a pass. Renaming a project, or swapping in a different "
-        "brief, creates a new project identity for billing purposes -- your paid analysis stays "
-        "attached to the old identity."
+        "brief, creates a new project identity for billing purposes -- we'll ask you to confirm, "
+        "and your paid analysis, passes, and downloads follow the new name automatically."
     ),
     "rename_confirm_title": "Rename this project?",
     "rename_confirm_body": (
-        "Renaming changes this project's identity -- your paid analysis stays with the old name. "
-        "Continue?"
+        "Renaming changes this project's billing identity. Your paid analysis, passes, and download "
+        "history will follow the new name automatically -- nothing is lost. Continue?"
     ),
     "rename_confirm_yes": "Yes, rename",
     "rename_confirm_cancel": "Cancel",
@@ -226,6 +226,8 @@ STRINGS: dict[str, str] = {
         "this will silently draft nothing for the sections that only exist in this format."
     ),
     "drafting_generate_button": "Generate First-Pass Drafts",
+    "drafting_regen_will_use_pass_caption": "Inputs have changed since your last generation -- regenerating will use one pass.",
+    "drafting_regen_no_pass_caption": "Inputs unchanged since your last generation -- this won't use a pass.",
     "drafting_nothing_to_draft_error": (
         "Nothing to draft -- the current sections don't match any of this format's "
         "AI-drafted section titles. This usually means the Proposal format (Project Setup) was "

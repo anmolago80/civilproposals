@@ -112,13 +112,14 @@ STRINGS: dict[str, str] = {
         "de generación** y **descargas ilimitadas** de tus documentos actuales. Se consume una pasada al "
         "ejecutar el Análisis de la licitación, o al regenerar después de cambiar una entrada -- volver a "
         "descargar los mismos documentos sin cambios nunca consume una pasada. Renombrar un proyecto, o "
-        "cambiar el brief, crea una nueva identidad de facturación -- tu análisis pagado permanece "
-        "vinculado a la identidad anterior."
+        "cambiar el brief, crea una nueva identidad de facturación -- te pediremos que lo confirmes, y tu "
+        "análisis pagado, tus pasadas y tus descargas seguirán automáticamente al nuevo nombre."
     ),
     "rename_confirm_title": "¿Renombrar este proyecto?",
     "rename_confirm_body": (
-        "Renombrar cambia la identidad de este proyecto -- tu análisis pagado permanece con el nombre "
-        "anterior. ¿Continuar?"
+        "Renombrar cambia la identidad de facturación de este proyecto. Tu análisis pagado, tus pasadas "
+        "y tu historial de descargas seguirán automáticamente al nuevo nombre -- no se pierde nada. "
+        "¿Continuar?"
     ),
     "rename_confirm_yes": "Sí, renombrar",
     "rename_confirm_cancel": "Cancelar",
@@ -217,6 +218,8 @@ STRINGS: dict[str, str] = {
         "secciones que solo existen en este formato."
     ),
     "drafting_generate_button": "Generar primeras versiones",
+    "drafting_regen_will_use_pass_caption": "Los datos cambiaron desde tu última generación -- regenerar usará una pasada.",
+    "drafting_regen_no_pass_caption": "Los datos no han cambiado desde tu última generación -- esto no usará una pasada.",
     "drafting_nothing_to_draft_error": (
         "Nada que redactar -- las secciones actuales no coinciden con ninguno de los títulos "
         "de sección redactados por IA de este formato. Esto suele significar que el formato de "
