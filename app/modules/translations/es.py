@@ -147,6 +147,55 @@ STRINGS: dict[str, str] = {
     "fee_indent_note_total": "el total",
     "fee_indent_note_totals_chart": "los totales y el gráfico",
 
+    # Ronda 3, Parte 6: _fee_history_panel()/_target_fee_prefill() en
+    # 10_state_helpers.py -- el panel de referencia del historial propio de
+    # la firma y el desplegable "Rellenar a partir de un honorario objetivo",
+    # ambos elementos de la interfaz mostrados sobre las tablas de
+    # honorarios, no contenido de documentos exportados (por eso usan
+    # i18n.t(), no export_i18n.export_t()).
+    "fee_history_heading": "**Historial de tu firma** (mediana de {bids} ofertas)",
+    "fee_history_caption": (
+        "Tus propios repartos anteriores para este tipo de proyecto, de paquetes que has "
+        "exportado o archivado. Es un registro de cómo ha cotizado tu firma, no una tarifa de "
+        "mercado ni una recomendación -- el rango muestra cuánto ha variado en realidad."
+    ),
+    "fee_history_col_discipline": "Disciplina",
+    "fee_history_col_median_pct": "% mediana",
+    "fee_history_col_range": "Rango",
+    "fee_history_col_bids": "Ofertas",
+    "fee_history_apply_button": "Aplicar el reparto de tu firma",
+    "fee_history_apply_source_suffix": "mediana de {bids} ofertas anteriores",
+    "fee_history_confidence_own_data": "Datos propios",
+    "fee_prefill_expander": "Rellenar a partir de un honorario objetivo",
+    "fee_prefill_caption": (
+        "Reparte un objetivo entre las disciplinas de abajo usando la mejor referencia "
+        "disponible (el historial de tu firma cuando lo tengas, o si no la regla general "
+        "incluida), y luego deriva las horas a partir de la tarifa de cada fila. Es un "
+        "primer reparto de una cifra que elegiste -- ajusta cada fila antes de exportar."
+    ),
+    "fee_prefill_caption_default_note": " Se usó por defecto el tope de honorarios indicado en la licitación ({fee_cap}).",
+    "fee_prefill_target_label": "Honorario objetivo ($, sin incluir GST)",
+    "fee_prefill_already_priced_warning": (
+        "**Ya cotizado: {disciplines}.** Rellenar deja esas filas exactamente como están, a "
+        "menos que marques la casilla de abajo."
+    ),
+    "fee_prefill_overwrite_checkbox": "Reemplazar también las filas que ya coticé",
+    "fee_prefill_apply_button": "Rellenar a partir del honorario objetivo",
+    "fee_prefill_success": (
+        "Se rellenaron {filled} disciplina(s) con un reparto {source}. Todas las cifras son "
+        "indicativas -- ajústalas antes de exportar."
+    ),
+    "fee_prefill_indicative_note": "Indicativo -- reparto {source} de tu honorario objetivo",
+    "fee_prefill_no_rate_warning": (
+        "**No hay tarifa para {disciplines}**, así que no se pudieron derivar las horas. "
+        "Ingresa una tarifa (o añade una en la tarjeta de tarifas de tu Perfil de firma) y "
+        "vuelve a rellenar."
+    ),
+    "fee_prefill_nothing_info": "Nada que rellenar -- todas las filas ya están cotizadas.",
+    "fee_source_label_your_firms_history": "el historial de tu firma",
+    "fee_source_label_bundled_rule_of_thumb": "la regla general incluida",
+    "fee_source_label_ai_modelled": "modelado por IA",
+
     "init_payment_confirmed_toast": "Pago confirmado -- ¡gracias!",
     "init_checkout_confirm_failed_error": (
         "No pudimos confirmar tu pago en este momento, así que aún no se ha aplicado nada a tu "

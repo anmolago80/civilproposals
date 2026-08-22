@@ -1680,6 +1680,25 @@ def _prefill_rates_from_firm_profile() -> int:
     return filled
 
 
+_FEE_SOURCE_LABEL_KEYS = {
+    fee_history.SOURCE_HISTORY: "fee_source_label_your_firms_history",
+    fee_history.SOURCE_BUNDLED: "fee_source_label_bundled_rule_of_thumb",
+    fee_history.SOURCE_AI: "fee_source_label_ai_modelled",
+}
+
+
+def _fee_source_label(source: str) -> str:
+    """Translated display label for one of fee_history.py's SOURCE_* values.
+    Round 3, Part 6: those constants are always English (test_batch1_wiring.py
+    compares the raw values directly, so they can't change) -- this is the
+    seam that keeps them out of the fee panels' user-facing Spanish text.
+    Falls back to the raw value for anything not in the table, rather than
+    raising, since a source string is never itself untrusted or malformed --
+    at worst an unrecognised future SOURCE_* constant would show in English."""
+    key = _FEE_SOURCE_LABEL_KEYS.get(source)
+    return i18n.t(key) if key else source
+
+
 def _fee_history_panel(apply_key: str) -> None:
     """The firm's own median split, shown ABOVE the bundled table because it
     is the better source -- and only once there are enough past bids for a
@@ -1692,33 +1711,30 @@ def _fee_history_panel(apply_key: str) -> None:
         return
     if not history["disciplines"]:
         return
-    st.markdown(f"**Your firm's history** (median of {history['bids']} bids)")
-    st.caption(
-        "Your own past splits for this project type, from packs you've exported or archived. "
-        "This is a record of how your firm has priced, not a market rate and not a "
-        "recommendation -- the range shows how much it has actually varied."
-    )
+    st.markdown(i18n.t("fee_history_heading", bids=history["bids"]))
+    st.caption(i18n.t("fee_history_caption"))
     st.dataframe(
         [
             {
-                "Discipline": entry["discipline"],
-                "Median %": entry["median_pct"],
-                "Range": f"{entry['low_pct']:.1f}-{entry['high_pct']:.1f}%",
-                "Bids": entry["bids"],
+                i18n.t("fee_history_col_discipline"): entry["discipline"],
+                i18n.t("fee_history_col_median_pct"): entry["median_pct"],
+                i18n.t("fee_history_col_range"): f"{entry['low_pct']:.1f}-{entry['high_pct']:.1f}%",
+                i18n.t("fee_history_col_bids"): entry["bids"],
             }
             for entry in history["disciplines"]
         ],
         use_container_width=True, hide_index=True,
     )
-    if st.button("Apply your firm's split", key=apply_key, type="primary"):
+    if st.button(i18n.t("fee_history_apply_button"), key=apply_key, type="primary"):
         discs = [l.discipline for l in (st.session_state.get("discipline_fee_lines") or [])]
         split, source = fee_history.best_available_split(
             _fee_history_user_id(), st.session_state.get("project_type") or "", discs)
         st.session_state.fee_estimates = [
             fee_estimation_engine.DisciplineFeeEstimate(
                 discipline=disc, fee_percentage=split.get(disc, 0.0),
-                source=f"{fee_history.SOURCE_HISTORY} -- median of {history['bids']} past bids",
-                confidence="Your own data",
+                source=f"{_fee_source_label(fee_history.SOURCE_HISTORY)} -- "
+                       f"{i18n.t('fee_history_apply_source_suffix', bids=history['bids'])}",
+                confidence=i18n.t("fee_history_confidence_own_data"),
             )
             for disc in discs
         ]
@@ -1742,31 +1758,25 @@ def _target_fee_prefill(state_prefix: str) -> None:
         getattr(analysis, "fee_cap", "") if analysis is not None else "")
     default = float(cap_amount or 0.0)
 
-    with st.expander("Pre-fill from a target fee", expanded=False):
+    with st.expander(i18n.t("fee_prefill_expander"), expanded=False):
         st.caption(
-            "Splits a target across the disciplines below using the best benchmark available "
-            "(your firm's history where you have it, otherwise the bundled rule-of-thumb), "
-            "then derives hours from each row's rate. It is a first-pass split of a number you "
-            "chose -- adjust every row before export."
-            + (f" Defaulted to the brief's stated fee cap ({analysis.fee_cap})."
+            i18n.t("fee_prefill_caption")
+            + (i18n.t("fee_prefill_caption_default_note", fee_cap=analysis.fee_cap)
                if cap_amount else "")
         )
         target = st.number_input(
-            "Target fee ($, excl. GST)", min_value=0.0, step=1000.0, value=default,
+            i18n.t("fee_prefill_target_label"), min_value=0.0, step=1000.0, value=default,
             key=f"{state_prefix}_target_fee",
         )
         priced = [l.discipline for l in lines if l.fee_amount > 0]
         overwrite = False
         if priced:
-            st.warning(
-                "**Already priced: " + ", ".join(priced) + ".** Pre-filling leaves those rows "
-                "exactly as they are unless you tick the box below."
-            )
+            st.warning(i18n.t("fee_prefill_already_priced_warning", disciplines=", ".join(priced)))
             overwrite = st.checkbox(
-                "Also replace the rows I've already priced", value=False,
+                i18n.t("fee_prefill_overwrite_checkbox"), value=False,
                 key=f"{state_prefix}_target_overwrite",
             )
-        if st.button("Pre-fill from target fee", key=f"{state_prefix}_target_apply",
+        if st.button(i18n.t("fee_prefill_apply_button"), key=f"{state_prefix}_target_apply",
                      type="primary", disabled=target <= 0):
             split, source = fee_history.best_available_split(
                 _fee_history_user_id(), st.session_state.get("project_type") or "",
@@ -1789,21 +1799,16 @@ def _target_fee_prefill(state_prefix: str) -> None:
                     continue
                 line.rate_per_hour = rate
                 line.total_hours = round(amount / rate, 1)
-                line.note = (line.note or "") or f"Indicative -- {source} split of your target fee"
+                line.note = (line.note or "") or i18n.t(
+                    "fee_prefill_indicative_note", source=_fee_source_label(source))
                 filled += 1
             st.session_state._discipline_fee_editor_version += 1
             if filled:
-                st.success(
-                    f"Pre-filled {filled} discipline(s) from a {source} split. Every figure is "
-                    "indicative -- adjust before export."
-                )
+                st.success(i18n.t("fee_prefill_success", filled=filled, source=_fee_source_label(source)))
             if no_rate:
-                st.warning(
-                    "**No rate for " + ", ".join(no_rate) + "**, so hours couldn't be derived. "
-                    "Enter a rate (or add one to your Firm Profile rate card) and pre-fill again."
-                )
+                st.warning(i18n.t("fee_prefill_no_rate_warning", disciplines=", ".join(no_rate)))
             if not filled and not no_rate:
-                st.info("Nothing to pre-fill -- every row is already priced.")
+                st.info(i18n.t("fee_prefill_nothing_info"))
             st.rerun()
 
 

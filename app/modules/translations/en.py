@@ -158,6 +158,62 @@ STRINGS: dict[str, str] = {
     "fee_indent_note_total": "total",
     "fee_indent_note_totals_chart": "totals & chart",
 
+    # Round 3, Part 6: _fee_history_panel()/_target_fee_prefill() in
+    # 10_state_helpers.py -- the firm's-own-history benchmark panel and the
+    # "pre-fill from a target fee" expander, both live UI chrome shown above
+    # the fee tables, not exported document content (hence i18n.t(), not
+    # export_i18n.export_t()).
+    "fee_history_heading": "**Your firm's history** (median of {bids} bids)",
+    "fee_history_caption": (
+        "Your own past splits for this project type, from packs you've exported or archived. "
+        "This is a record of how your firm has priced, not a market rate and not a "
+        "recommendation -- the range shows how much it has actually varied."
+    ),
+    "fee_history_col_discipline": "Discipline",
+    "fee_history_col_median_pct": "Median %",
+    "fee_history_col_range": "Range",
+    "fee_history_col_bids": "Bids",
+    "fee_history_apply_button": "Apply your firm's split",
+    "fee_history_apply_source_suffix": "median of {bids} past bids",
+    "fee_history_confidence_own_data": "Your own data",
+    "fee_prefill_expander": "Pre-fill from a target fee",
+    "fee_prefill_caption": (
+        "Splits a target across the disciplines below using the best benchmark available "
+        "(your firm's history where you have it, otherwise the bundled rule-of-thumb), "
+        "then derives hours from each row's rate. It is a first-pass split of a number you "
+        "chose -- adjust every row before export."
+    ),
+    "fee_prefill_caption_default_note": " Defaulted to the brief's stated fee cap ({fee_cap}).",
+    "fee_prefill_target_label": "Target fee ($, excl. GST)",
+    "fee_prefill_already_priced_warning": (
+        "**Already priced: {disciplines}.** Pre-filling leaves those rows "
+        "exactly as they are unless you tick the box below."
+    ),
+    "fee_prefill_overwrite_checkbox": "Also replace the rows I've already priced",
+    "fee_prefill_apply_button": "Pre-fill from target fee",
+    "fee_prefill_success": (
+        "Pre-filled {filled} discipline(s) from a {source} split. Every figure is "
+        "indicative -- adjust before export."
+    ),
+    "fee_prefill_indicative_note": "Indicative -- {source} split of your target fee",
+    "fee_prefill_no_rate_warning": (
+        "**No rate for {disciplines}**, so hours couldn't be derived. "
+        "Enter a rate (or add one to your Firm Profile rate card) and pre-fill again."
+    ),
+    "fee_prefill_nothing_info": "Nothing to pre-fill -- every row is already priced.",
+    # Round 3, Part 6 (found while fixing the above): fee_history.py's
+    # SOURCE_HISTORY/SOURCE_BUNDLED/SOURCE_AI constants are spliced verbatim
+    # into fee_history_apply_source_suffix/fee_prefill_success/
+    # fee_prefill_indicative_note above via the `source` variable -- without
+    # a translated label for each, those sentences would stay part-English
+    # even after the surrounding template is translated. Keyed by the exact
+    # constant so a lookup (not a rename of the constant itself) closes the
+    # gap; test_batch1_wiring.py compares against the constants directly, so
+    # they stay in English in fee_history.py.
+    "fee_source_label_your_firms_history": "your firm's history",
+    "fee_source_label_bundled_rule_of_thumb": "bundled rule-of-thumb",
+    "fee_source_label_ai_modelled": "AI-modelled",
+
     # Audit fix Part 6: 00_init.py's checkout redirect handling and the
     # Buy-a-bid/Subscribe buttons (_render_upgrade_buttons).
     "init_payment_confirmed_toast": "Payment confirmed -- thanks!",
