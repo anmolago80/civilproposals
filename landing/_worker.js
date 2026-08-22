@@ -519,6 +519,27 @@ async function serveBlog(request, env, url, ctx) {
     });
   }
 
+  // A category with zero posts has no KV entry -- publish_all() removes it
+  // rather than pushing an empty stub (see blog.py) -- and no matching
+  // static file either, so the fetch above 404s. That is not a broken
+  // link, it's a category nobody has written in yet, so fall back to the
+  // same "no posts yet" placeholder /blog/ itself uses rather than a bare
+  // 404. The placeholder is already noindex, for the same reason /blog/ is.
+  if (/^\/blog\/category\/[a-z0-9-]+\/$/.test(path)) {
+    const blogIndexUrl = new URL(url);
+    blogIndexUrl.pathname = "/blog/";
+    const blogIndexAsset = await env.ASSETS.fetch(new Request(blogIndexUrl.toString(), request));
+    if (blogIndexAsset.status === 200) {
+      return new Response(blogIndexAsset.body, {
+        status: 200,
+        headers: {
+          "Content-Type": blogIndexAsset.headers.get("Content-Type") || "text/html; charset=utf-8",
+          "Cache-Control": "public, max-age=60",
+        },
+      });
+    }
+  }
+
   const notFound = await env.BLOG.get("page:/blog/404/");
   return new Response(notFound || "Post not found.", {
     status: 404,
