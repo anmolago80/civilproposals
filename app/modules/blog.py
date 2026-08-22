@@ -965,6 +965,15 @@ def render_sitemap_xml(posts: list["db.BlogPost"]) -> str:
     <loc>{SITE_ORIGIN}/</loc>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+    <xhtml:link rel="alternate" hreflang="es" href="{SITE_ORIGIN}/es/" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+  </url>
+  <url>
+    <loc>{SITE_ORIGIN}/es/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+    <xhtml:link rel="alternate" hreflang="es" href="{SITE_ORIGIN}/es/" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
   </url>
   <url>
     <loc>{SITE_ORIGIN}/blog/</loc>
@@ -973,6 +982,11 @@ def render_sitemap_xml(posts: list["db.BlogPost"]) -> str:
   </url>
   <url>
     <loc>{SITE_ORIGIN}/security.html</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>{SITE_ORIGIN}/es/security.html</loc>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>
   </url>"""

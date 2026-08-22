@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <!-- First-visit language redirect. Skips entirely once a preference is
      stored (either by this auto-redirect itself, or by the lang-switch
      link setting cp_lang on manual choice) -- see the identical script on
-     index.es.html. Kept synchronous and early in <head> to avoid a
+     index.html. Kept synchronous and early in <head> to avoid a
      flash of English content for Spanish-language browsers. Fails silently
      if localStorage throws (private browsing / disabled storage etc). -->
 <script>
@@ -29,9 +29,9 @@
   }catch(e){}
 })();
 </script>
-<title>CivilProposals: Tender Writing Software & Bid Writing AI for Civil Engineering Firms</title>
-<meta name="description" content="AI-assisted tender writing software and fee proposal generator for civil engineering firms. Turn a tender brief into a structured first pass proposal in minutes. 1 free bid on sign up, then from $50 a bid.">
-<link rel="canonical" href="https://civilproposals.com/">
+<title>CivilProposals: Software de Redacción de Licitaciones e IA para Propuestas de Empresas de Ingeniería Civil</title>
+<meta name="description" content="Software de redacción de licitaciones asistido por IA y generador de propuestas de honorarios para empresas de ingeniería civil. Convierte un brief de licitación en un primer borrador de propuesta estructurado en minutos. 1 propuesta gratuita al registrarte, luego desde $50 por propuesta.">
+<link rel="canonical" href="https://civilproposals.com/es/">
 <link rel="alternate" hreflang="en" href="https://civilproposals.com/">
 <link rel="alternate" hreflang="es" href="https://civilproposals.com/es/">
 <link rel="alternate" hreflang="x-default" href="https://civilproposals.com/">
@@ -41,15 +41,15 @@
 <!-- Open Graph -->
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="CivilProposals">
-<meta property="og:title" content="CivilProposals: Tender Writing Software & Bid Writing AI for Civil Engineering Firms">
-<meta property="og:description" content="Turn a tender brief into a structured first pass proposal in minutes. Built for civil engineering firms. 1 free bid on sign up, then from $50 a bid.">
-<meta property="og:url" content="https://civilproposals.com/">
+<meta property="og:title" content="CivilProposals: Software de Redacción de Licitaciones e IA para Propuestas de Empresas de Ingeniería Civil">
+<meta property="og:description" content="Convierte un brief de licitación en un primer borrador de propuesta estructurado en minutos. Creado para empresas de ingeniería civil. 1 propuesta gratuita al registrarte, luego desde $50 por propuesta.">
+<meta property="og:url" content="https://civilproposals.com/es/">
 <meta property="og:image" content="https://civilproposals.com/assets/app_screenshot_workspace.jpg">
 
 <!-- Twitter Card -->
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="CivilProposals: Tender Writing Software & Bid Writing AI for Civil Engineering Firms">
-<meta name="twitter:description" content="Turn a tender brief into a structured first pass proposal in minutes. Built for civil engineering firms. 1 free bid on sign up, then from $50 a bid.">
+<meta name="twitter:title" content="CivilProposals: Software de Redacción de Licitaciones e IA para Propuestas de Empresas de Ingeniería Civil">
+<meta name="twitter:description" content="Convierte un brief de licitación en un primer borrador de propuesta estructurado en minutos. Creado para empresas de ingeniería civil. 1 propuesta gratuita al registrarte, luego desde $50 por propuesta.">
 <meta name="twitter:image" content="https://civilproposals.com/assets/app_screenshot_workspace.jpg">
 
 <!-- Structured data: Organization + SoftwareApplication (accurate facts only --
@@ -73,24 +73,24 @@
   "name": "CivilProposals",
   "applicationCategory": "BusinessApplication",
   "operatingSystem": "Web",
-  "description": "AI-assisted tender writing software and fee proposal generator for civil engineering firms. Extracts requirements from a tender brief, builds a weighted proposal structure, and drafts a first pass Word document.",
+  "description": "Software de redacción de licitaciones asistido por IA y generador de propuestas de honorarios para empresas de ingeniería civil. Extrae los requisitos de un brief de licitación, construye una estructura de propuesta ponderada y redacta un primer borrador en Word.",
   "url": "https://civilproposals.com/",
   "offers": [
     {
       "@type": "Offer",
-      "name": "Free trial",
+      "name": "Prueba gratuita",
       "price": "0",
       "priceCurrency": "AUD"
     },
     {
       "@type": "Offer",
-      "name": "Pay as you go",
+      "name": "Pago por uso",
       "price": "50",
       "priceCurrency": "AUD"
     },
     {
       "@type": "Offer",
-      "name": "Monthly",
+      "name": "Mensual",
       "price": "120",
       "priceCurrency": "AUD"
     }
@@ -107,58 +107,58 @@
   "mainEntity": [
     {
       "@type": "Question",
-      "name": "Is this just ChatGPT with extra steps?",
+      "name": "¿Esto no es más que ChatGPT con pasos extra?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "No. General chat tools don't know how tender evaluation actually works: which parts of a brief are mandatory, how weightings map to page allocation, or what a compliance matrix needs to cover. CivilProposals is built specifically around that: it extracts scoring criteria straight from your brief, builds a weighted structure to match, and keeps a reusable library of your firm's own past proposals and CVs, so your next bid gets faster too, not just this one."
+        "text": "No. Las herramientas de chat genéricas no saben cómo funciona realmente la evaluación de licitaciones: qué partes de un brief son obligatorias, cómo se traducen las ponderaciones en la asignación de páginas, o qué debe cubrir una matriz de cumplimiento. CivilProposals está construido específicamente en torno a eso: extrae los criterios de puntuación directamente de tu brief, construye una estructura ponderada acorde, y mantiene una biblioteca reutilizable de las propuestas y CVs anteriores de tu propia empresa, para que tu próxima propuesta también sea más rápida, no solo esta."
       }
     },
     {
       "@type": "Question",
-      "name": "Will it invent staff, certifications, or project experience I never gave it?",
+      "name": "¿Inventará personal, certificaciones o experiencia en proyectos que nunca le proporcioné?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "No. Every draft is grounded only in what you've actually uploaded or entered. Anything the tool doesn't genuinely know, a certification, a past project, a specific number, becomes a clearly marked placeholder for you to fill in, never a guess dressed up as fact."
+        "text": "No. Cada borrador se basa únicamente en lo que realmente has subido o introducido. Todo lo que la herramienta no conoce genuinamente, una certificación, un proyecto anterior, una cifra concreta, se convierte en un marcador claramente señalado para que lo completes, nunca en una suposición disfrazada de hecho."
       }
     },
     {
       "@type": "Question",
-      "name": "How secure is what I upload?",
+      "name": "¿Qué tan seguro es lo que subo?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Your tender briefs and company material are stored under your account only; other firms using CivilProposals can't see them. We use Claude (Anthropic) to power the AI drafting, and your data is never used to train their models. We're still a beta product and haven't completed formal compliance certifications like SOC 2 yet, so if that's a hard requirement for your firm, reach out before signing up and we'll be upfront about where things stand."
+        "text": "Tus briefs de licitación y el material de tu empresa se almacenan únicamente bajo tu cuenta; otras empresas que usan CivilProposals no pueden verlos. Usamos Claude (Anthropic) para la redacción asistida por IA, y tus datos nunca se usan para entrenar sus modelos. Todavía somos un producto en beta y aún no hemos completado certificaciones de cumplimiento formales como SOC 2, así que si eso es un requisito indispensable para tu empresa, contáctanos antes de registrarte y seremos totalmente transparentes sobre la situación actual."
       }
     },
     {
       "@type": "Question",
-      "name": "Who's responsible if something in the draft is wrong?",
+      "name": "¿Quién es responsable si algo en el borrador es incorrecto?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "You are, the same as you'd be with a first draft from a junior team member. CivilProposals produces a first pass, not a document that's ready to submit; your normal review process should still catch and correct anything before it goes to a client. Full detail in our Terms of Service."
+        "text": "Tú lo eres, igual que lo serías con un primer borrador de un miembro junior del equipo. CivilProposals produce un primer borrador, no un documento listo para entregar; tu proceso de revisión habitual debe seguir detectando y corrigiendo cualquier error antes de que llegue a un cliente. Todos los detalles están en nuestros Términos de Servicio."
       }
     },
     {
       "@type": "Question",
-      "name": "Do I need a credit card to try it?",
+      "name": "¿Necesito una tarjeta de crédito para probarlo?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "No. Your first full bid is free, no card required. You'll only need to pay if you want to run a second one: $50 for a single bid, or $120/month for 4."
+        "text": "No. Tu primera propuesta completa es gratuita, sin necesidad de tarjeta. Solo necesitarás pagar si quieres hacer una segunda: $50 por una sola propuesta, o $120/mes por 4."
       }
     },
     {
       "@type": "Question",
-      "name": "What exactly does a single $50 bid include?",
+      "name": "¿Qué incluye exactamente una propuesta de $50?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "One $50 bid covers one project -- identified by its project name, tender name, client name, and the brief you upload, together -- and gives you 5 generation passes plus unlimited downloads of your current documents. A pass is used when you run Tender Analysis, or when you regenerate after changing an input; re-downloading the same, unchanged documents never uses a pass. Renaming a project, or swapping in a different brief, creates a new project identity for billing purposes, so your paid analysis stays attached to the original name and brief. Run out of passes on a project? A $50 top-up adds 5 more to that same project."
+        "text": "Una propuesta de $50 cubre un proyecto -- identificado por su nombre de proyecto, nombre de la licitación, nombre del cliente y el brief que subes, en conjunto -- y te da 5 pases de generación además de descargas ilimitadas de tus documentos actuales. Se usa un pase cuando ejecutas el Análisis de Licitación, o cuando regeneras después de cambiar una entrada; volver a descargar los mismos documentos sin cambios nunca consume un pase. Cambiar el nombre de un proyecto, o sustituir el brief por otro distinto, crea una nueva identidad de proyecto a efectos de facturación, de modo que tu análisis ya pagado permanece vinculado al nombre y al brief originales. ¿Se te acabaron los pases en un proyecto? Una recarga de $50 añade 5 más a ese mismo proyecto."
       }
     },
     {
       "@type": "Question",
-      "name": "Can I cancel the Monthly plan anytime?",
+      "name": "¿Puedo cancelar el Plan Mensual en cualquier momento?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Yes, anytime, directly from your account, no phone call or email required. You'll keep access through the end of whatever billing period you've already paid for."
+        "text": "Sí, en cualquier momento, directamente desde tu cuenta, sin necesidad de llamada telefónica ni correo electrónico. Mantendrás el acceso hasta el final del periodo de facturación que ya hayas pagado."
       }
     }
   ]
@@ -522,78 +522,79 @@
   <div class="logo"><img src="assets/logo_mark.png" alt="CivilProposals"> CivilProposals <span class="beta-tag">Beta</span></div>
   <div class="nav-actions">
     <a class="nav-link" href="/blog/">Blog</a>
-    <span class="lang-switch" aria-label="Language">
-      <span class="lang-current">EN</span><span class="lang-sep" aria-hidden="true">|</span><a class="lang-link" href="index.es.html" onclick="try{localStorage.setItem('cp_lang','es');localStorage.setItem('cp_lang_redirect_done','1');}catch(e){}">ES</a>
+    <span class="lang-switch" aria-label="Idioma">
+      <a class="lang-link" href="index.html" onclick="try{localStorage.setItem('cp_lang','en');localStorage.setItem('cp_lang_redirect_done','1');}catch(e){}">EN</a><span class="lang-sep" aria-hidden="true">|</span><span class="lang-current">ES</span>
     </span>
-    <a class="nav-cta plausible-event-name=CTA+Click plausible-event-position=nav" href="https://app.civilproposals.com">Try it free</a>
+    <a class="nav-cta plausible-event-name=CTA+Click plausible-event-position=nav" href="https://app.civilproposals.com">Pruébalo gratis</a>
   </div>
 </nav>
 
 <header class="hero">
   <div class="wrap">
-    <span class="hero-badge">Built by civil engineers for civil engineers</span>
-    <h1 class="hero-h1">Turn a tender brief into a draft proposal <span class="accent">in minutes</span>, not days</h1>
+    <span class="hero-badge">Creado por ingenieros civiles para ingenieros civiles</span>
+    <h1 class="hero-h1">Convierte un brief de licitación en un borrador de propuesta <span class="accent">en minutos</span>, no en días</h1>
     <p class="hero-sub">
-      Upload the brief, and get an extracted compliance matrix, a weighted proposal structure,
-      first pass drafts, and a designed Word document to hand to your proposal writers.
+      Sube el brief y obtén una matriz de cumplimiento extraída automáticamente, una estructura de propuesta
+      ponderada, primeros borradores y un documento Word con diseño listo para tus redactores de propuestas.
     </p>
     <div class="hero-ctas">
-      <a class="btn-primary plausible-event-name=CTA+Click plausible-event-position=hero" href="https://app.civilproposals.com">Upload your first brief free</a>
-      <a class="btn-secondary" href="#pricing">See pricing</a>
+      <a class="btn-primary plausible-event-name=CTA+Click plausible-event-position=hero" href="https://app.civilproposals.com">Sube tu primer brief gratis</a>
+      <a class="btn-secondary" href="#pricing">Ver precios</a>
     </div>
 
     <div class="hero-shot-frame">
-      <img src="assets/app_screenshot_workspace.jpg" alt="CivilProposals workspace showing tracked progress and a live fee estimate" width="1902" height="1009" loading="eager" fetchpriority="high">
+      <img src="assets/app_screenshot_workspace.jpg" alt="Espacio de trabajo de CivilProposals mostrando el progreso registrado y una estimación de honorarios en vivo" width="1902" height="1009" loading="eager" fetchpriority="high">
     </div>
-    <p class="hero-shot-caption">A real screenshot of the live app, mid-proposal: progress tracked step by step, with the discipline fee build-up and chart filling in as you go.</p>
+    <p class="hero-shot-caption">Una captura real de la aplicación en uso, a mitad de una propuesta: el progreso se registra paso a paso, mientras el desglose de honorarios por disciplina y el gráfico se completan sobre la marcha.</p>
   </div>
 </header>
 
 <section style="padding-bottom:56px;">
   <div class="wrap" style="text-align:center;">
-    <span class="section-label">Why CivilProposals</span>
-    <h2 class="section-title">Built by Civil Engineers, for Civil Engineers</h2>
+    <span class="section-label">Por qué CivilProposals</span>
+    <h2 class="section-title">Creado por Ingenieros Civiles, para Ingenieros Civiles</h2>
     <p class="story-body">
-      We know the challenges you face every day because we face them too. Whether it's a small
-      project with a simple scope, a brief buried in an email, a client who isn't quite sure what
-      they want, or a major tender that takes days to read and weeks to prepare, CivilProposals is
-      designed to help. It's tender writing software and a fee proposal generator built specifically
-      for civil engineering firms, not a generic AI wrapper. Built by civil engineers, for civil
-      engineers, this bid writing AI assists you in creating professional, well structured proposals
-      faster, allowing you to focus on understanding client needs and developing winning solutions.
+      Conocemos los desafíos que enfrentas cada día porque también los enfrentamos nosotros. Ya sea un
+      proyecto pequeño con un alcance simple, un brief perdido en un correo, un cliente que no tiene del todo
+      claro lo que quiere, o una licitación importante que lleva días leer y semanas preparar, CivilProposals
+      está diseñado para ayudarte. Es un software de redacción de licitaciones y un generador de propuestas de
+      honorarios creado específicamente para empresas de ingeniería civil, no un envoltorio genérico de IA.
+      Creada por ingenieros civiles, para ingenieros civiles, esta IA para propuestas te ayuda a crear
+      propuestas profesionales y bien estructuradas más rápido, para que puedas centrarte en entender las
+      necesidades del cliente y desarrollar soluciones ganadoras.
     </p>
   </div>
 </section>
 
 <section style="padding-top:0;">
   <div class="wrap">
-    <span class="section-label">Overview</span>
-    <h2 class="section-title">Who it's for</h2>
-    <p class="section-sub">Built for the people who own the pursuit: from bid managers running a full tender response to discipline leads putting together a short fee-proposal letter.</p>
+    <span class="section-label">Resumen</span>
+    <h2 class="section-title">Para quién es</h2>
+    <p class="section-sub">Creado para quienes lideran la búsqueda de contratos: desde gestores de licitaciones que llevan una respuesta completa, hasta responsables de disciplina que preparan una breve carta de propuesta de honorarios.</p>
     <div class="info-card">
       <div class="info-panel">
-        <h3>Built for</h3>
+        <h3>Pensado para</h3>
         <div class="pill-row">
-          <span class="pill">Bid Manager</span>
-          <span class="pill">Proposal Coordinator</span>
-          <span class="pill">Principal / Director</span>
-          <span class="pill">Discipline Lead</span>
+          <span class="pill">Gestor de Licitaciones</span>
+          <span class="pill">Coordinador de Propuestas</span>
+          <span class="pill">Socio / Director</span>
+          <span class="pill">Responsable de Disciplina</span>
         </div>
-        <h3>What you upload</h3>
+        <h3>Qué subes</h3>
         <div class="pill-row">
-          <span class="pill">Tender brief (PDF / DOCX)</span>
-          <span class="pill">Company profile</span>
-          <span class="pill">CV library</span>
-          <span class="pill">Past project references</span>
+          <span class="pill">Brief de licitación (PDF / DOCX)</span>
+          <span class="pill">Perfil de la empresa</span>
+          <span class="pill">Biblioteca de CVs</span>
+          <span class="pill">Referencias de proyectos anteriores</span>
         </div>
       </div>
       <div class="info-panel">
-        <h3>Benefits</h3>
+        <h3>Beneficios</h3>
         <ul class="check-list">
-          <li><span class="tick">✓</span> Extract every mandatory requirement and evaluation criterion straight from the brief.</li>
-          <li><span class="tick">✓</span> Get a weighted, page-allocated structure that matches how you're actually scored.</li>
-          <li><span class="tick">✓</span> First pass drafts that never invent facts: a clear placeholder wherever real detail is missing.</li>
-          <li><span class="tick">✓</span> Export a designed, branded Word pack, not a bare document.</li>
+          <li><span class="tick">✓</span> Extrae todos los requisitos obligatorios y criterios de evaluación directamente del brief.</li>
+          <li><span class="tick">✓</span> Obtén una estructura ponderada y con páginas asignadas que coincide con cómo realmente te evalúan.</li>
+          <li><span class="tick">✓</span> Primeros borradores que nunca inventan datos: un marcador claro allí donde falte información real.</li>
+          <li><span class="tick">✓</span> Exporta un paquete Word diseñado y con tu marca, no un documento sin formato.</li>
         </ul>
       </div>
     </div>
@@ -601,47 +602,47 @@
 </section>
 
 <div class="promo-strip">
-  <span class="promo-label">Save Time and Focus on What Matters</span>
-  <p>A short proposal can take up to eight hours to prepare. CivilProposals completes
-  <span class="accent">up to 50% of that work in under ten minutes.</span></p>
-  <p class="promo-sub">By automating repetitive tasks such as formatting, document structuring, and
-  content generation, the platform frees up valuable time so you can focus on what truly matters:
-  developing a winning strategy, solving the engineering problem at hand, and increasing your
-  chances of securing the contract.</p>
+  <span class="promo-label">Ahorra Tiempo y Céntrate en lo que Importa</span>
+  <p>Una propuesta breve puede tardar hasta ocho horas en prepararse. CivilProposals completa
+  <span class="accent">hasta el 50% de ese trabajo en menos de diez minutos.</span></p>
+  <p class="promo-sub">Al automatizar tareas repetitivas como el formato, la estructuración de documentos y la
+  generación de contenido, la plataforma libera tiempo valioso para que puedas centrarte en lo que realmente
+  importa: desarrollar una estrategia ganadora, resolver el problema de ingeniería en cuestión y aumentar tus
+  probabilidades de conseguir el contrato.</p>
 </div>
 
 <section>
   <div class="wrap">
-    <span class="section-label">How it works</span>
-    <h2 class="section-title">From brief to first pass draft</h2>
-    <p class="section-sub">The same three steps whether it's a full formal response or a short fee-proposal letter.</p>
+    <span class="section-label">Cómo funciona</span>
+    <h2 class="section-title">Del brief al primer borrador</h2>
+    <p class="section-sub">Los mismos tres pasos, ya sea una respuesta formal completa o una breve carta de propuesta de honorarios.</p>
 
     <div class="step-card">
-      <div class="step-label">Step 1</div>
-      <h3>Upload the brief</h3>
+      <div class="step-label">Paso 1</div>
+      <h3>Sube el brief</h3>
       <ol>
-        <li>Start a new project and give it a name.</li>
-        <li>Upload the brief (PDF, DOCX, or TXT) plus any addenda, schedules, or company material (CV library, past proposals, company profile).</li>
+        <li>Crea un nuevo proyecto y ponle un nombre.</li>
+        <li>Sube el brief (PDF, DOCX o TXT) junto con cualquier anexo, cronograma o material de la empresa (biblioteca de CVs, propuestas anteriores, perfil de la empresa).</li>
       </ol>
     </div>
 
     <div class="step-card">
-      <div class="step-label">Step 2</div>
-      <h3>AI extracts the requirements</h3>
+      <div class="step-label">Paso 2</div>
+      <h3>La IA extrae los requisitos</h3>
       <ol>
-        <li>Run Tender Analysis to pull out scope, evaluation criteria, weightings, page limits, deliverables, and risks.</li>
-        <li>Review the generated proposal structure: mirrors the brief's own named criteria, or a proven skeleton when it doesn't have any.</li>
-        <li>Generate a compliance matrix and gap analysis to see what still needs attention before submission.</li>
+        <li>Ejecuta el Análisis de Licitación para extraer el alcance, los criterios de evaluación, las ponderaciones, los límites de páginas, los entregables y los riesgos.</li>
+        <li>Revisa la estructura de propuesta generada: refleja los criterios propios del brief cuando existen, o una estructura probada cuando no los tiene.</li>
+        <li>Genera una matriz de cumplimiento y un análisis de brechas para ver qué necesita atención antes de la entrega.</li>
       </ol>
     </div>
 
     <div class="step-card">
-      <div class="step-label">Step 3</div>
-      <h3>Review the first pass draft</h3>
+      <div class="step-label">Paso 3</div>
+      <h3>Revisa el primer borrador</h3>
       <ol>
-        <li>Generate first pass drafts for every section, grounded only in what you've actually supplied: never invented experience, staff, or certifications.</li>
-        <li>Assign your real nominated team, fees, and program alongside the drafted content.</li>
-        <li>Export a themed, branded Word pack: a real starting point for your proposal writers to refine.</li>
+        <li>Genera primeros borradores para cada sección, basados únicamente en lo que realmente has aportado: nunca se inventa experiencia, personal o certificaciones.</li>
+        <li>Asigna tu equipo nominado real, los honorarios y el cronograma junto al contenido redactado.</li>
+        <li>Exporta un paquete Word con diseño y marca propios: un punto de partida real para que tus redactores de propuestas lo perfeccionen.</li>
       </ol>
     </div>
   </div>
@@ -649,45 +650,45 @@
 
 <section style="background:var(--surface);">
   <div class="wrap">
-    <span class="section-label">What's included</span>
-    <h2 class="section-title">Everything the first pass needs</h2>
-    <p class="section-sub">Not just a draft generator: the full first pass workflow.</p>
+    <span class="section-label">Qué incluye</span>
+    <h2 class="section-title">Todo lo que necesita el primer borrador</h2>
+    <p class="section-sub">No solo un generador de borradores: el flujo de trabajo completo del primer borrador.</p>
     <div class="feature-grid">
       <div class="feature-card">
         <div class="feature-icon">📋</div>
-        <h3>Compliance matrix, automatically</h3>
-        <p>Every mandatory requirement pulled straight from the brief and tracked against your
-        response, so nothing gets missed between now and submission day.</p>
+        <h3>Matriz de cumplimiento, automáticamente</h3>
+        <p>Cada requisito obligatorio extraído directamente del brief y comparado con tu
+        respuesta, para que nada se pase por alto entre ahora y el día de la entrega.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">🏗️</div>
-        <h3>A structure that matches how you're scored</h3>
-        <p>Mirrors the brief's own named selection criteria when it has them, or a proven skeleton
-        when it doesn't, weighted and page-allocated to match, not guessed at.</p>
+        <h3>Una estructura acorde a cómo te evalúan</h3>
+        <p>Refleja los criterios de selección propios del brief cuando existen, o una estructura
+        probada cuando no, ponderada y con páginas asignadas en consecuencia, no a ojo.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">✍️</div>
-        <h3>First pass drafts, never invented facts</h3>
-        <p>A real starting point for every section. Anything the tool doesn't actually know
-        (a certification, a past project, a number) becomes a clearly marked placeholder.</p>
+        <h3>Primeros borradores, sin datos inventados</h3>
+        <p>Un punto de partida real para cada sección. Todo lo que la herramienta no conoce realmente
+        (una certificación, un proyecto anterior, una cifra) se convierte en un marcador claramente señalado.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">🎨</div>
-        <h3>A designed document, not a bare Word file</h3>
-        <p>Branded section dividers, cover banners, a real project org chart, and a themed layout,
-        ready to hand to your proposal writers.</p>
+        <h3>Un documento con diseño, no un Word sin formato</h3>
+        <p>Separadores de sección con tu marca, portadas, un organigrama de proyecto real y un diseño
+        temático, listo para entregar a tus redactores de propuestas.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">🗂️</div>
-        <h3>A reusable content library</h3>
-        <p>Archive finished proposals, tag them, and pull real content back in on your next
-        pursuit instead of starting from a blank page every time.</p>
+        <h3>Una biblioteca de contenido reutilizable</h3>
+        <p>Archiva las propuestas terminadas, etiquétalas y reutiliza contenido real en tu siguiente
+        oportunidad en lugar de empezar de cero cada vez.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">💰</div>
-        <h3>Fee &amp; program tools, built in</h3>
-        <p>An indicative discipline fee split, a delivery program, and a full commercial section
-        buildup alongside the technical response.</p>
+        <h3>Herramientas de honorarios y cronograma, integradas</h3>
+        <p>Un desglose indicativo de honorarios por disciplina, un cronograma de entrega y una sección
+        comercial completa junto a la respuesta técnica.</p>
       </div>
     </div>
   </div>
@@ -695,43 +696,43 @@
 
 <section>
   <div class="wrap">
-    <span class="section-label">A closer look</span>
-    <h2 class="section-title">The tools you'd otherwise only find by clicking around</h2>
-    <p class="section-sub">Beyond the first-pass draft, the same project drives a set of deeper checks and exports. All demo data shown -- no real clients or projects.</p>
+    <span class="section-label">Una mirada más de cerca</span>
+    <h2 class="section-title">Las herramientas que de otro modo solo encontrarías explorando la app</h2>
+    <p class="section-sub">Más allá del primer borrador, el mismo proyecto impulsa un conjunto de verificaciones y exportaciones más profundas. Todos los datos mostrados son de demostración: no hay clientes ni proyectos reales.</p>
     <div class="deep-grid">
       <div class="deep-card wide">
-        <div class="deep-shot"><img src="assets/feature_pitch_review.jpg" alt="Red-team pitch review: an evaluator's read of your pitch plus a tightened rewrite built only from your own content" width="1902" height="780" loading="lazy"></div>
+        <div class="deep-shot"><img src="assets/feature_pitch_review.jpg" alt="Revisión de la propuesta en modo equipo rojo: la lectura de un evaluador sobre tu propuesta más una reescritura ajustada, construida solo con tu propio contenido" width="1902" height="780" loading="lazy"></div>
         <div class="deep-body">
-          <h3>Red-team pitch review</h3>
-          <p>Your differentiator and sales pitch, read the way an evaluator will read them: which claims score nothing because every competitor makes them too, what this brief actually rewards, and a tightened rewrite built strictly from your own content -- with red placeholders where evidence is still needed, never an invented project.</p>
+          <h3>Revisión de la propuesta en modo equipo rojo</h3>
+          <p>Tu diferenciador y tu propuesta de venta, leídos tal como los leerá un evaluador: qué afirmaciones no suman puntos porque toda la competencia también las hace, qué recompensa realmente este brief, y una reescritura ajustada construida estrictamente a partir de tu propio contenido -- con marcadores en rojo donde aún falta evidencia, nunca un proyecto inventado.</p>
         </div>
       </div>
       <div class="deep-card">
-        <div class="deep-shot"><img src="assets/feature_gap_analysis.jpg" alt="Gap analysis table showing each brief requirement marked covered, partial, or missing" width="1902" height="780" loading="lazy"></div>
+        <div class="deep-shot"><img src="assets/feature_gap_analysis.jpg" alt="Tabla de análisis de brechas que muestra cada requisito del brief marcado como cubierto, parcial o faltante" width="1902" height="780" loading="lazy"></div>
         <div class="deep-body">
-          <h3>Gap analysis</h3>
-          <p>Every requirement in the brief, checked against the material you've actually uploaded and marked covered, partial, or missing -- so the holes surface while there's still time to fix them, not on submission morning.</p>
+          <h3>Análisis de brechas</h3>
+          <p>Cada requisito del brief, verificado frente al material que realmente has subido y marcado como cubierto, parcial o faltante -- de modo que los huecos salen a la luz mientras aún hay tiempo de resolverlos, no la mañana de la entrega.</p>
         </div>
       </div>
       <div class="deep-card">
-        <div class="deep-shot"><img src="assets/feature_fee_benchmarks.jpg" alt="Fee estimation table with each discipline's split compared against typical benchmark ranges" width="1902" height="780" loading="lazy"></div>
+        <div class="deep-shot"><img src="assets/feature_fee_benchmarks.jpg" alt="Tabla de estimación de honorarios con el desglose de cada disciplina comparado frente a rangos de referencia habituales" width="1902" height="780" loading="lazy"></div>
         <div class="deep-body">
-          <h3>Fee estimation with benchmarks</h3>
-          <p>Your hours-and-rates build-up, sanity-checked against typical multidisciplinary fee-split patterns. A discipline sitting outside its usual range gets flagged for a second look -- clearly labelled as an indicative rule-of-thumb, never a substitute for your own estimate.</p>
+          <h3>Estimación de honorarios con valores de referencia</h3>
+          <p>Tu desglose de horas y tarifas, verificado frente a patrones habituales de reparto de honorarios multidisciplinar. Una disciplina que se sale de su rango habitual queda marcada para una segunda revisión -- etiquetada claramente como una referencia indicativa, nunca un sustituto de tu propia estimación.</p>
         </div>
       </div>
       <div class="deep-card">
-        <div class="deep-shot"><img src="assets/feature_org_chart.jpg" alt="Project org chart built from the resourcing plan, with a Download Org Chart PPTX button" width="1902" height="780" loading="lazy"></div>
+        <div class="deep-shot"><img src="assets/feature_org_chart.jpg" alt="Organigrama de proyecto construido a partir del plan de recursos, con un botón para Descargar Organigrama en PPTX" width="1902" height="780" loading="lazy"></div>
         <div class="deep-body">
-          <h3>Org chart, exported to PowerPoint</h3>
-          <p>A project org chart built straight from your resourcing plan and exported as a real, editable PPTX -- unassigned roles show a red TBC rather than an invented name, so the chart is honest about where the team still has gaps.</p>
+          <h3>Organigrama, exportado a PowerPoint</h3>
+          <p>Un organigrama de proyecto construido directamente a partir de tu plan de recursos y exportado como un PPTX real y editable -- los roles sin asignar muestran un "TBC" en rojo en lugar de un nombre inventado, de modo que el organigrama es honesto sobre dónde el equipo aún tiene huecos.</p>
         </div>
       </div>
       <div class="deep-card wide">
-        <div class="deep-shot"><img src="assets/feature_methodology.jpg" alt="Staged methodology table themed to the proposal, with real scope items in stage two and red placeholders for unconfirmed stages" width="1902" height="780" loading="lazy"></div>
+        <div class="deep-shot"><img src="assets/feature_methodology.jpg" alt="Tabla de metodología por etapas con el estilo de la propuesta, con elementos de alcance reales en la etapa dos y marcadores en rojo para las etapas aún sin confirmar" width="1902" height="780" loading="lazy"></div>
         <div class="deep-body">
-          <h3>Methodology table, exported to PowerPoint</h3>
-          <p>A staged methodology table themed to your proposal's colours: stage two's key tasks come straight from this brief's real scope items, later stages stay explicit red placeholders until you confirm them, and the whole thing exports as an editable PPTX to finish in PowerPoint.</p>
+          <h3>Tabla de metodología, exportada a PowerPoint</h3>
+          <p>Una tabla de metodología por etapas con los colores de tu propuesta: las tareas clave de la etapa dos provienen directamente de los elementos de alcance reales de este brief, las etapas posteriores permanecen como marcadores en rojo explícitos hasta que las confirmes, y todo el conjunto se exporta como un PPTX editable para terminar en PowerPoint.</p>
         </div>
       </div>
     </div>
@@ -740,13 +741,13 @@
 
 <section style="background:var(--surface);">
   <div class="wrap" style="text-align:center;">
-    <h2 class="section-title">Our Mission</h2>
+    <h2 class="section-title">Nuestra Misión</h2>
     <p class="story-body">
-      Our mission is simple: to help you stop losing your most valuable resource, time. Too often,
-      engineers spend hours on low value administrative work instead of applying their expertise
-      where it has the greatest impact. CivilProposals takes care of the repetitive and
-      time consuming aspects of proposal preparation, enabling you to focus on creating value for
-      your clients, producing higher quality submissions, and winning more work.
+      Nuestra misión es simple: ayudarte a dejar de perder tu recurso más valioso, el tiempo. Con demasiada
+      frecuencia, los ingenieros dedican horas a trabajo administrativo de bajo valor en lugar de aplicar su
+      experiencia donde tiene mayor impacto. CivilProposals se encarga de los aspectos repetitivos y que
+      consumen tiempo en la preparación de propuestas, permitiéndote centrarte en generar valor para
+      tus clientes, producir entregas de mayor calidad y ganar más trabajo.
     </p>
   </div>
 </section>
@@ -756,21 +757,21 @@
     <div class="fact-grid">
       <div class="fact-card">
         <div class="fact-icon">💰</div>
-        <div class="fact-number">$2,400<span class="fact-estimate-tag">(estimate)</span></div>
-        <div class="fact-label">typical cost to prepare a small proposal</div>
-        <p>Based on typical in-house preparation time at standard billing rates -- not a figure from a specific client.</p>
+        <div class="fact-number">$2,400<span class="fact-estimate-tag">(estimación)</span></div>
+        <div class="fact-label">coste habitual de preparar una propuesta pequeña</div>
+        <p>Basado en el tiempo de preparación interno habitual a tarifas de facturación estándar -- no en una cifra de un cliente concreto.</p>
       </div>
       <div class="fact-card">
         <div class="fact-icon">⚡</div>
-        <div class="fact-number">50%<span class="fact-estimate-tag">(estimate)</span></div>
-        <div class="fact-label">of that work, done for you</div>
-        <p>Our estimate for formatting, structure, and first-pass drafting handled automatically -- actual time saved varies by tender.</p>
+        <div class="fact-number">50%<span class="fact-estimate-tag">(estimación)</span></div>
+        <div class="fact-label">de ese trabajo, hecho por ti</div>
+        <p>Nuestra estimación del formato, la estructura y el primer borrador gestionados automáticamente -- el tiempo real ahorrado varía según la licitación.</p>
       </div>
       <div class="fact-card">
         <div class="fact-icon">📄</div>
-        <div class="fact-number">Word export</div>
-        <div class="fact-label">ready to hand to your bid manager</div>
-        <p>A structured, formatted .docx, not a wall of AI chat text -- open it straight into your firm's own template.</p>
+        <div class="fact-number">Exportación Word</div>
+        <div class="fact-label">lista para entregar a tu gestor de licitaciones</div>
+        <p>Un .docx estructurado y con formato, no un muro de texto de chat de IA -- ábrelo directamente en la plantilla propia de tu empresa.</p>
       </div>
     </div>
   </div>
@@ -778,54 +779,54 @@
 
 <section style="background:var(--surface);" id="pricing">
   <div class="wrap">
-    <span class="section-label">Pricing</span>
-    <h2 class="section-title">Pricing that pays for itself</h2>
+    <span class="section-label">Precios</span>
+    <h2 class="section-title">Precios que se pagan solos</h2>
     <p class="section-sub">
-      A single bid can easily cost your firm $2,400 in staff time to prepare. CivilProposals
-      does half that work for you, starting at a fraction of the price. All prices in
-      Australian dollars (AUD).
+      Una sola propuesta puede costarle fácilmente a tu empresa $2,400 en tiempo de personal para prepararla.
+      CivilProposals hace la mitad de ese trabajo por ti, empezando por una fracción del precio. Todos los
+      precios en dólares australianos (AUD).
     </p>
 
     <div class="pricing-grid">
       <div class="pricing-card">
-        <div class="plan-name">Free</div>
+        <div class="plan-name">Gratis</div>
         <div class="price">$0</div>
-        <p class="price-sub">1 free bid on sign up</p>
+        <p class="price-sub">1 propuesta gratuita al registrarte</p>
         <ul>
-          <li><span class="check">✓</span> 1 full bid, no card required</li>
-          <li><span class="check">✓</span> Full AI-assisted preparation included</li>
-          <li><span class="check">✓</span> Designed Word export</li>
-          <li><span class="check">✓</span> See exactly what you get before you pay anything</li>
+          <li><span class="check">✓</span> 1 propuesta completa, sin tarjeta requerida</li>
+          <li><span class="check">✓</span> Preparación completa asistida por IA incluida</li>
+          <li><span class="check">✓</span> Exportación Word con diseño</li>
+          <li><span class="check">✓</span> Comprueba exactamente lo que obtienes antes de pagar nada</li>
         </ul>
-        <a class="btn-secondary plausible-event-name=CTA+Click plausible-event-position=pricing-free" style="display:block;" href="https://app.civilproposals.com">Upload your first brief free</a>
+        <a class="btn-secondary plausible-event-name=CTA+Click plausible-event-position=pricing-free" style="display:block;" href="https://app.civilproposals.com">Sube tu primer brief gratis</a>
       </div>
 
       <div class="pricing-card">
-        <div class="plan-name">Pay as you go</div>
-        <div class="price">$50<span>/bid</span></div>
-        <p class="price-sub">Only pay when you use it</p>
+        <div class="plan-name">Pago por uso</div>
+        <div class="price">$50<span>/propuesta</span></div>
+        <p class="price-sub">Solo pagas cuando lo usas</p>
         <ul>
-          <li><span class="check">✓</span> $50 a bid, no subscription</li>
-          <li><span class="check">✓</span> Full AI-assisted preparation included</li>
-          <li><span class="check">✓</span> Compliance matrix, fee & program tools</li>
-          <li><span class="check">✓</span> Nothing to cancel: use it as often as you like</li>
+          <li><span class="check">✓</span> $50 por propuesta, sin suscripción</li>
+          <li><span class="check">✓</span> Preparación completa asistida por IA incluida</li>
+          <li><span class="check">✓</span> Matriz de cumplimiento, herramientas de honorarios y cronograma</li>
+          <li><span class="check">✓</span> Nada que cancelar: úsalo tantas veces como quieras</li>
         </ul>
-        <a class="btn-secondary plausible-event-name=CTA+Click plausible-event-position=pricing-bid" style="display:block;" href="https://app.civilproposals.com">Buy 1 bid -- $50</a>
+        <a class="btn-secondary plausible-event-name=CTA+Click plausible-event-position=pricing-bid" style="display:block;" href="https://app.civilproposals.com">Comprar 1 propuesta -- $50</a>
       </div>
 
       <div class="pricing-card featured">
-        <span class="pricing-badge">Best value</span>
-        <div class="plan-name">Monthly</div>
-        <div class="price">$120<span>/month</span></div>
-        <p class="price-sub">4 bids included, about $30 a bid</p>
+        <span class="pricing-badge">Mejor valor</span>
+        <div class="plan-name">Mensual</div>
+        <div class="price">$120<span>/mes</span></div>
+        <p class="price-sub">4 propuestas incluidas, unos $30 por propuesta</p>
         <ul>
-          <li><span class="check">✓</span> 4 bids every month</li>
-          <li><span class="check">✓</span> Everything in Pay as you go</li>
-          <li><span class="check">✓</span> Tagged, reusable content library</li>
-          <li><span class="check">✓</span> Compliance matrix, gap analysis, fee & program tools</li>
-          <li><span class="check">✓</span> Cancel anytime</li>
+          <li><span class="check">✓</span> 4 propuestas cada mes</li>
+          <li><span class="check">✓</span> Todo lo del Pago por uso</li>
+          <li><span class="check">✓</span> Biblioteca de contenido etiquetada y reutilizable</li>
+          <li><span class="check">✓</span> Matriz de cumplimiento, análisis de brechas, herramientas de honorarios y cronograma</li>
+          <li><span class="check">✓</span> Cancela cuando quieras</li>
         </ul>
-        <a class="btn-primary plausible-event-name=CTA+Click plausible-event-position=pricing-sub" style="display:block;" href="https://app.civilproposals.com">Subscribe -- $120/mo</a>
+        <a class="btn-primary plausible-event-name=CTA+Click plausible-event-position=pricing-sub" style="display:block;" href="https://app.civilproposals.com">Suscribirse -- $120/mes</a>
       </div>
     </div>
 
@@ -835,88 +836,91 @@
          hides the nav's Beta tag -- one switch, no copy edits needed on
          launch day. -->
     <div class="beta-note" data-beta-note="beta">
-      <strong>🚀 Beta Access.</strong> This product is currently in beta. Features and pricing may
-      change, and occasional issues may occur. Always review and verify AI generated content
-      before using it in tender submissions or other formal documentation. If something doesn't
-      look right, please let us know.
+      <strong>🚀 Acceso Beta.</strong> Este producto está actualmente en fase beta. Las funciones y los precios
+      pueden cambiar, y pueden producirse incidencias ocasionales. Revisa y verifica siempre el contenido
+      generado por IA antes de usarlo en presentaciones de licitaciones u otra documentación formal. Si algo
+      no parece correcto, avísanos.
     </div>
     <div class="beta-note" data-beta-note="ga" hidden>
-      <strong>✅ Out of beta.</strong> CivilProposals is now generally available -- the pricing
-      above is current, and the team behind it uses it on real pursuits. As with any AI-assisted
-      tool, always review and verify generated content before it goes into a tender submission
-      or other formal documentation.
+      <strong>✅ Fuera de la beta.</strong> CivilProposals ya está disponible de forma general -- los precios
+      anteriores están vigentes, y el equipo que está detrás lo usa en licitaciones reales. Como con cualquier
+      herramienta asistida por IA, revisa y verifica siempre el contenido generado antes de que forme parte de
+      una presentación de licitación u otra documentación formal.
     </div>
   </div>
 </section>
 
 <section>
   <div class="wrap">
-    <span class="section-label">FAQ</span>
-    <h2 class="section-title">Questions you might have</h2>
-    <p class="section-sub">The things people usually ask before trying it.</p>
+    <span class="section-label">Preguntas frecuentes</span>
+    <h2 class="section-title">Preguntas que podrías tener</h2>
+    <p class="section-sub">Lo que la gente suele preguntar antes de probarlo.</p>
 
     <div class="faq-list">
       <details class="faq-item">
-        <summary>Is this just ChatGPT with extra steps?</summary>
-        <p>No. General chat tools don't know how tender evaluation actually works: which parts of
-        a brief are mandatory, how weightings map to page allocation, or what a compliance matrix
-        needs to cover. CivilProposals is built specifically around that: it extracts scoring criteria
-        straight from your brief, builds a weighted structure to match, and keeps a reusable
-        library of your firm's own past proposals and CVs, so your next bid gets faster too, not
-        just this one.</p>
+        <summary>¿Esto no es más que ChatGPT con pasos extra?</summary>
+        <p>No. Las herramientas de chat genéricas no saben cómo funciona realmente la evaluación de
+        licitaciones: qué partes de un brief son obligatorias, cómo se traducen las ponderaciones en la
+        asignación de páginas, o qué debe cubrir una matriz de cumplimiento. CivilProposals está construido
+        específicamente en torno a eso: extrae los criterios de puntuación directamente de tu brief, construye
+        una estructura ponderada acorde, y mantiene una biblioteca reutilizable de las propuestas y CVs
+        anteriores de tu propia empresa, para que tu próxima propuesta también sea más rápida, no solo
+        esta.</p>
       </details>
 
       <details class="faq-item">
-        <summary>Will it invent staff, certifications, or project experience I never gave it?</summary>
-        <p>No. Every draft is grounded only in what you've actually uploaded or entered. Anything
-        the tool doesn't genuinely know, a certification, a past project, a specific number,
-        becomes a clearly marked placeholder for you to fill in, never a guess dressed up as
-        fact.</p>
+        <summary>¿Inventará personal, certificaciones o experiencia en proyectos que nunca le proporcioné?</summary>
+        <p>No. Cada borrador se basa únicamente en lo que realmente has subido o introducido. Todo lo que
+        la herramienta no conoce genuinamente, una certificación, un proyecto anterior, una cifra concreta,
+        se convierte en un marcador claramente señalado para que lo completes, nunca en una suposición
+        disfrazada de hecho.</p>
       </details>
 
       <details class="faq-item">
-        <summary>How secure is what I upload?</summary>
-        <p>Your tender briefs and company material are stored under your account only; other
-        firms using CivilProposals can't see them. We use Claude (Anthropic) to power the AI
-        drafting, and your data is never used to train their models. We're still a beta product
-        and haven't completed formal compliance certifications like SOC 2 yet, so if that's a
-        hard requirement for your firm, reach out before signing up and we'll be upfront about
-        where things stand. The full picture -- where data is stored, encryption, AI processing,
-        data residency -- is on our <a href="security.html" style="color:var(--blue);font-weight:700;">Security &amp;
-        Data Handling</a> page.</p>
+        <summary>¿Qué tan seguro es lo que subo?</summary>
+        <p>Tus briefs de licitación y el material de tu empresa se almacenan únicamente bajo tu cuenta; otras
+        empresas que usan CivilProposals no pueden verlos. Usamos Claude (Anthropic) para la redacción
+        asistida por IA, y tus datos nunca se usan para entrenar sus modelos. Todavía somos un producto en
+        beta y aún no hemos completado certificaciones de cumplimiento formales como SOC 2, así que si eso
+        es un requisito indispensable para tu empresa, contáctanos antes de registrarte y seremos totalmente
+        transparentes sobre la situación actual. El panorama completo -- dónde se almacenan los datos, el
+        cifrado, el procesamiento de IA, la residencia de los datos -- está en nuestra página de <a href="security.es.html" style="color:var(--blue);font-weight:700;">Seguridad y
+        Manejo de Datos</a>.</p>
       </details>
 
       <details class="faq-item">
-        <summary>Who's responsible if something in the draft is wrong?</summary>
-        <p>You are, the same as you'd be with a first draft from a junior team member.
-        CivilProposals produces a first pass, not a document that's ready to submit; your normal review
-        process should still catch and correct anything before it goes to a client. Full detail
-        in our <a href="terms-of-service.html" style="color:var(--blue);font-weight:700;">Terms of
-        Service</a>.</p>
+        <summary>¿Quién es responsable si algo en el borrador es incorrecto?</summary>
+        <p>Tú lo eres, igual que lo serías con un primer borrador de un miembro junior del equipo.
+        CivilProposals produce un primer borrador, no un documento listo para entregar; tu proceso de
+        revisión habitual debe seguir detectando y corrigiendo cualquier error antes de que llegue a un
+        cliente. Todos los detalles están en nuestros <a href="terms-of-service.es.html" style="color:var(--blue);font-weight:700;">Términos de
+        Servicio</a>.</p>
       </details>
 
       <details class="faq-item">
-        <summary>Do I need a credit card to try it?</summary>
-        <p>No. Your first full bid is free, no card required. You'll only need to pay if you want
-        to run a second one: $50 for a single bid, or $120/month for 4.</p>
+        <summary>¿Necesito una tarjeta de crédito para probarlo?</summary>
+        <p>No. Tu primera propuesta completa es gratuita, sin necesidad de tarjeta. Solo necesitarás pagar
+        si quieres hacer una segunda: $50 por una sola propuesta, o $120/mes por 4.</p>
       </details>
 
       <details class="faq-item">
-        <summary>What exactly does a single $50 bid include?</summary>
-        <p>One $50 bid covers <strong>one project</strong> -- identified by its project name,
-        tender name, client name, and the brief you upload, together -- and gives you
-        <strong>5 generation passes</strong> plus <strong>unlimited downloads</strong> of your
-        current documents. A pass is used when you run Tender Analysis, or when you regenerate
-        after changing an input; re-downloading the same, unchanged documents never uses a pass.
-        Renaming a project, or swapping in a different brief, creates a new project identity for
-        billing purposes, so your paid analysis stays attached to the original name and brief.
-        Run out of passes on a project? A $50 top-up adds 5 more to that same project.</p>
+        <summary>¿Qué incluye exactamente una propuesta de $50?</summary>
+        <p>Una propuesta de $50 cubre <strong>un proyecto</strong> -- identificado por su nombre de proyecto,
+        nombre de la licitación, nombre del cliente y el brief que subes, en conjunto -- y te da
+        <strong>5 pases de generación</strong> además de <strong>descargas ilimitadas</strong> de tus
+        documentos actuales. Se usa un pase cuando ejecutas el Análisis de Licitación, o cuando regeneras
+        después de cambiar una entrada; volver a descargar los mismos documentos sin cambios nunca consume
+        un pase. Cambiar el nombre de un proyecto, o sustituir el brief por otro distinto, crea una nueva
+        identidad de proyecto a efectos de facturación, de modo que tu análisis ya pagado permanece vinculado
+        al nombre y al brief originales. ¿Se te acabaron los pases en un proyecto? Una recarga de $50 añade 5
+        más a ese mismo proyecto.</p>
       </details>
 
       <details class="faq-item">
-        <summary>Can I cancel the Monthly plan anytime?</summary>
-        <p>Yes, anytime, directly from your account, no phone call or email required. You'll keep
-        access through the end of whatever billing period you've already paid for.</p>
+        <summary>¿Puedo cancelar el Plan Mensual en cualquier momento?</summary>
+        <p>Sí, en cualquier momento, directamente desde tu cuenta, sin necesidad de llamada telefónica ni
+        correo electrónico. Mantendrás el acceso hasta el final del periodo de facturación que ya hayas
+        pagado.</p>
       </details>
     </div>
   </div>
@@ -930,10 +934,10 @@
      reader something to click right where they are. -->
 <section style="background:var(--surface);">
   <div class="wrap" style="max-width:640px;text-align:center;">
-    <h2 class="section-title">Ready to see your first brief turned into a draft?</h2>
-    <p class="section-sub">Your first full bid is free, no card required.</p>
+    <h2 class="section-title">¿Listo para ver tu primer brief convertido en un borrador?</h2>
+    <p class="section-sub">Tu primera propuesta completa es gratuita, sin necesidad de tarjeta.</p>
     <div class="hero-ctas">
-      <a class="btn-primary plausible-event-name=CTA+Click plausible-event-position=hero" href="https://app.civilproposals.com">Upload your first brief free</a>
+      <a class="btn-primary plausible-event-name=CTA+Click plausible-event-position=hero" href="https://app.civilproposals.com">Sube tu primer brief gratis</a>
     </div>
   </div>
 </section>
@@ -952,29 +956,29 @@
      been published (and if the KV read ever fails). -->
 <section>
   <div class="wrap" style="text-align:center;">
-    <span class="section-label">From the blog</span>
-    <h2 class="section-title">Notes on winning civil work</h2>
-    <p class="section-sub">Practical writing on tendering, fee proposals and bid strategy.</p>
+    <span class="section-label">Desde el blog</span>
+    <h2 class="section-title">Notas sobre cómo ganar trabajo civil</h2>
+    <p class="section-sub">Escritos prácticos sobre licitaciones, propuestas de honorarios y estrategia de propuestas.</p>
     <div class="blog-strip" id="blog-cards" data-blog-empty>
       <p class="blog-strip-placeholder">
-        First articles coming shortly &mdash; <a href="/blog/" style="color:var(--blue);">the blog lives here</a>.
+        Los primeros artículos llegarán pronto &mdash; <a href="/blog/" style="color:var(--blue);">el blog está aquí</a>.
       </p>
     </div>
     <p style="margin-top:26px;">
-      <a class="btn-secondary" href="/blog/">Read all articles</a>
+      <a class="btn-secondary" href="/blog/">Leer todos los artículos</a>
     </p>
   </div>
 </section>
 
 <section style="background:var(--ink);">
   <div class="wrap" style="max-width:640px;text-align:center;">
-    <span class="promo-label">Not ready to upload a brief yet?</span>
-    <h2 class="section-title" style="color:#fff;">Get proposal-writing tips, and a heads-up when we ship</h2>
-    <p class="section-sub" style="color:#9CA3AF;">Occasional emails about new features and running better tenders. No spam, unsubscribe anytime.</p>
+    <span class="promo-label">¿Aún no estás listo para subir un brief?</span>
+    <h2 class="section-title" style="color:#fff;">Recibe consejos sobre redacción de propuestas y un aviso cuando lancemos novedades</h2>
+    <p class="section-sub" style="color:#9CA3AF;">Correos ocasionales sobre nuevas funciones y cómo mejorar tus licitaciones. Sin spam, cancela cuando quieras.</p>
     <form id="lead-form" style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:8px;">
       <input type="text" name="company" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;" aria-hidden="true">
-      <input type="email" id="lead-email" name="email" required placeholder="you@firm.com" style="flex:1;min-width:240px;max-width:320px;padding:14px 18px;border-radius:10px;border:1.5px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:#fff;font-size:.95rem;font-family:inherit;">
-      <button type="submit" class="btn-primary" style="border:none;cursor:pointer;">Keep me posted</button>
+      <input type="email" id="lead-email" name="email" required placeholder="tu@empresa.com" style="flex:1;min-width:240px;max-width:320px;padding:14px 18px;border-radius:10px;border:1.5px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:#fff;font-size:.95rem;font-family:inherit;">
+      <button type="submit" class="btn-primary" style="border:none;cursor:pointer;">Mantenme informado</button>
     </form>
     <p id="lead-status" style="margin-top:14px;font-size:.88rem;color:#9CA3AF;" role="status"></p>
   </div>
@@ -984,43 +988,43 @@
   <div class="wrap footer-top">
     <div class="footer-brand">
       <div class="logo"><img src="assets/logo_mark.png" alt="CivilProposals"> CivilProposals</div>
-      <p class="footer-tagline">AI-assisted tender & proposal preparation, built for civil engineering firms.</p>
+      <p class="footer-tagline">Preparación de licitaciones y propuestas asistida por IA, creada para empresas de ingeniería civil.</p>
     </div>
     <div class="footer-col">
-      <div class="footer-col-title">Resources</div>
+      <div class="footer-col-title">Recursos</div>
       <a href="/blog/">Blog</a>
-      <a href="/blog/category/fee-and-pricing/">Fee &amp; pricing</a>
-      <a href="/blog/category/tendering-and-compliance/">Tendering &amp; compliance</a>
+      <a href="/blog/category/fee-and-pricing/">Honorarios y precios</a>
+      <a href="/blog/category/tendering-and-compliance/">Licitaciones y cumplimiento</a>
     </div>
     <div class="footer-col">
-      <div class="footer-col-title">Contact</div>
+      <div class="footer-col-title">Contacto</div>
       <a href="mailto:hello@civilproposals.com">hello@civilproposals.com</a>
     </div>
     <div class="footer-col">
-      <div class="footer-col-title">Follow us</div>
+      <div class="footer-col-title">Síguenos</div>
       <a href="https://www.linkedin.com/company/civil-proposals" target="_blank" rel="noopener">LinkedIn</a>
     </div>
   </div>
 
   <div class="wrap footer-disclaimer">
-    <p>CivilProposals is an AI-powered proposal generation assistant. Content generated by the
-    platform may contain inaccuracies and should not be relied upon as certified engineering, legal,
-    financial, or professional advice. Users are solely responsible for reviewing, verifying, and
-    approving all generated content, including, but not limited to, technical scopes, commercial
-    terms, project requirements, compliance criteria, assumptions, methodologies, qualifications,
-    credentials, project specific information, and submission requirements prior to submission.
-    CivilProposals accepts no liability for any decisions, omissions, errors, or actions arising
-    from the use of its outputs.</p>
+    <p>CivilProposals es un asistente de generación de propuestas impulsado por IA. El contenido generado por
+    la plataforma puede contener imprecisiones y no debe considerarse asesoramiento certificado de ingeniería,
+    legal, financiero o profesional. Los usuarios son los únicos responsables de revisar, verificar y aprobar
+    todo el contenido generado, incluidos, entre otros, los alcances técnicos, los términos comerciales, los
+    requisitos del proyecto, los criterios de cumplimiento, los supuestos, las metodologías, las
+    cualificaciones, las credenciales, la información específica del proyecto y los requisitos de entrega
+    antes de la presentación. CivilProposals no acepta responsabilidad alguna por decisiones, omisiones,
+    errores o acciones derivadas del uso de sus resultados.</p>
   </div>
 
   <div class="wrap footer-bottom">
     <div class="footer-links">
-      <a href="security.html">Security &amp; Data Handling</a>
-      <a href="privacy-policy.html">Privacy Policy</a>
-      <a href="terms-of-service.html">Terms of Service</a>
-      <a href="cookie-policy.html">Cookie Policy</a>
+      <a href="security.es.html">Seguridad y Manejo de Datos</a>
+      <a href="privacy-policy.es.html">Política de Privacidad</a>
+      <a href="terms-of-service.es.html">Términos de Servicio</a>
+      <a href="cookie-policy.es.html">Política de Cookies</a>
     </div>
-    <div class="footer-copyright">Copyright &copy; 2026 CivilProposals. All rights reserved.</div>
+    <div class="footer-copyright">Copyright &copy; 2026 CivilProposals. Todos los derechos reservados.</div>
   </div>
 </footer>
 
@@ -1037,7 +1041,7 @@
     if(company){ return; }
     var btn = form.querySelector('button[type="submit"]');
     btn.disabled = true;
-    status.textContent = 'Sending...';
+    status.textContent = 'Enviando...';
     fetch('/api/lead', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -1046,10 +1050,10 @@
       if(!r.ok) throw new Error('request failed');
       return r.json();
     }).then(function(){
-      status.textContent = "Thanks -- you're on the list.";
+      status.textContent = "Gracias -- ya estás en la lista.";
       form.reset();
     }).catch(function(){
-      status.textContent = "Something went wrong -- please try again, or email hello@civilproposals.com directly.";
+      status.textContent = "Algo salió mal -- inténtalo de nuevo, o escribe directamente a hello@civilproposals.com.";
     }).finally(function(){
       btn.disabled = false;
     });

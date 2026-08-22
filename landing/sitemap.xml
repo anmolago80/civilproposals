@@ -23,15 +23,35 @@
      unparseable, and Google reported it as "1 error, 0 discovered pages"
      with no indication of the cause. Use commas or full stops instead of
      dashes when editing this header.
+
+     Part A1 (EN/ES dual language): /es/ and /es/security.html are the
+     Spanish homepage/security page, routed by _worker.js to
+     index.es.html/security.es.html. Same noindex exclusion rule as
+     above keeps the Spanish legal pages (which carry the identical
+     noindex meta tag as their English originals) out of this list too.
 -->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://civilproposals.com/</loc>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://civilproposals.com/" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://civilproposals.com/es/" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+  </url>
+  <url>
+    <loc>https://civilproposals.com/es/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://civilproposals.com/" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://civilproposals.com/es/" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
   </url>
   <url>
     <loc>https://civilproposals.com/security.html</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://civilproposals.com/es/security.html</loc>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>
   </url>

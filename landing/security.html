@@ -6,6 +6,9 @@
 <title>Security &amp; Data Handling - CivilProposals</title>
 <meta name="description" content="Where CivilProposals stores your tender data, how it's protected, how AI processing works, and honest answers on SOC 2 and Australian data residency.">
 <link rel="canonical" href="https://civilproposals.com/security.html">
+<link rel="alternate" hreflang="en" href="https://civilproposals.com/security.html">
+<link rel="alternate" hreflang="es" href="https://civilproposals.com/es/security.html">
+<link rel="alternate" hreflang="x-default" href="https://civilproposals.com/security.html">
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -43,6 +46,15 @@
     text-decoration:none;font-weight:700;font-size:.92rem;
   }
   .nav-cta:hover{background:var(--blue-dark);}
+  .nav-actions{display:flex;align-items:center;gap:22px;}
+
+  /* Language switcher -- reuses the muted/blue palette used elsewhere on
+     this page rather than inventing a new visual language. */
+  .lang-switch{display:flex;align-items:center;gap:6px;font-weight:700;font-size:.92rem;color:var(--text-muted);}
+  .lang-switch .lang-link{color:var(--text-muted);text-decoration:none;transition:color .15s;}
+  .lang-switch .lang-link:hover{color:var(--blue);}
+  .lang-switch .lang-current{color:var(--blue);}
+  .lang-switch .lang-sep{color:var(--border);}
 
   main{padding:48px 0 80px;}
   .back-link{display:inline-block;margin-bottom:20px;color:var(--text-muted);text-decoration:none;font-size:.9rem;font-weight:700;}
@@ -84,7 +96,12 @@
 
 <nav class="wrap">
   <a class="logo" href="index.html"><img src="assets/logo_mark.png" alt="CivilProposals"> CivilProposals <span class="beta-tag">Beta</span></a>
-  <a class="nav-cta" href="https://app.civilproposals.com">Get Started</a>
+  <div class="nav-actions">
+    <span class="lang-switch" aria-label="Language">
+      <span class="lang-current">EN</span><span class="lang-sep" aria-hidden="true">|</span><a class="lang-link" href="security.es.html" onclick="try{localStorage.setItem('cp_lang','es');localStorage.setItem('cp_lang_redirect_done','1');}catch(e){}">ES</a>
+    </span>
+    <a class="nav-cta" href="https://app.civilproposals.com">Get Started</a>
+  </div>
 </nav>
 
 <main class="wrap">

@@ -42,9 +42,15 @@
 //      appear on the homepage with no rebuild and no redeploy, while
 //      keeping the cards in the server-rendered HTML where crawlers see
 //      them (rather than fetching them client-side).
-//   6. /sitemap.xml -> the generated version from KV when one exists,
+//   6. /es, /es/, /es/index.html -> the same blog-cards splice as above,
+//      but serving the static index.es.html (Spanish homepage) instead.
+//      /es/security.html -> static security.es.html. These give the
+//      hreflang="es" URLs (https://civilproposals.com/es/, .../es/security.html)
+//      a real route rather than relying on the .es.html filenames directly,
+//      mirroring how "/" already resolves to a specific static file above.
+//   7. /sitemap.xml -> the generated version from KV when one exists,
 //      falling back to the static file before anything is published.
-//   7. anything else that reaches this script anyway (shouldn't normally
+//   8. anything else that reaches this script anyway (shouldn't normally
 //      happen given run_worker_first, but just in case) -> fall back to
 //      serving it from static assets via the ASSETS binding.
 //
@@ -521,8 +527,19 @@ class BlogCardsInjector {
   }
 }
 
-async function serveHomeWithBlogCards(request, env) {
-  const assetResponse = await env.ASSETS.fetch(request);
+// assetPath, when given, overrides the pathname used to look up the static
+// file (e.g. "/index.es.html") while everything else about the request
+// (method, headers) is preserved -- needed for /es and /es/, which don't
+// correspond to an actual file on disk the way "/" and "/index.html" do.
+async function serveHomeWithBlogCards(request, env, assetPath) {
+  let assetRequest = request;
+  if (assetPath) {
+    const assetUrl = new URL(request.url);
+    assetUrl.pathname = assetPath;
+    assetRequest = new Request(assetUrl.toString(), request);
+  }
+
+  const assetResponse = await env.ASSETS.fetch(assetRequest);
   if (!env.BLOG) return assetResponse;
 
   const contentType = assetResponse.headers.get("Content-Type") || "";
@@ -606,6 +623,27 @@ export default {
         console.error("[blog cards] injection failed, serving the page as-is:", err);
         return env.ASSETS.fetch(request);
       }
+    }
+
+    // Spanish homepage: /es, /es/, /es/index.html all resolve to the same
+    // static index.es.html, same blog-cards splice as the English homepage.
+    if (url.pathname === "/es" || url.pathname === "/es/" || url.pathname === "/es/index.html") {
+      try {
+        return await serveHomeWithBlogCards(request, env, "/index.es.html");
+      } catch (err) {
+        console.error("[es blog cards] injection failed, serving the page as-is:", err);
+        const assetUrl = new URL(request.url);
+        assetUrl.pathname = "/index.es.html";
+        return env.ASSETS.fetch(new Request(assetUrl.toString(), request));
+      }
+    }
+
+    // Spanish security page: no blog cards to splice, just a straight
+    // static-asset fetch of security.es.html under the /es/ URL.
+    if (url.pathname === "/es/security.html") {
+      const assetUrl = new URL(request.url);
+      assetUrl.pathname = "/security.es.html";
+      return env.ASSETS.fetch(new Request(assetUrl.toString(), request));
     }
 
     if (url.pathname === "/app" || url.pathname.startsWith("/app/")) {
