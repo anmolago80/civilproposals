@@ -714,9 +714,12 @@ def _footer_html() -> str:
       <div class="footer-links">
         <a href="{SITE_ORIGIN}/">Home</a>
         <a href="/blog/">Blog</a>
+        <a href="{SITE_ORIGIN}/about.html">About</a>
+        <a href="{SITE_ORIGIN}/why-we-built-civilproposals.html">Why we built CivilProposals</a>
         <a href="{SITE_ORIGIN}/security.html">Security &amp; Data Handling</a>
         <a href="{SITE_ORIGIN}/privacy-policy.html">Privacy Policy</a>
         <a href="{SITE_ORIGIN}/terms-of-service.html">Terms of Service</a>
+        <a href="{SITE_ORIGIN}/contact.html">Contact</a>
       </div>
       <div>Copyright &copy; {year} CivilProposals. All rights reserved.</div>
     </div>
