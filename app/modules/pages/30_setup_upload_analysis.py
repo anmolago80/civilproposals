@@ -389,7 +389,7 @@ with tabs[1]:
                     st.warning(
                         i18n.t(
                             "upload_material_limit_warning",
-                            tier=_tier_word, limit=_cat_limit, label=limits.UPLOAD_LABELS.get(key, key),
+                            tier=_tier_word, limit=_cat_limit, label=limits.upload_label(key),
                             existing=_existing_count,
                             added_clause=(
                                 i18n.t("upload_material_added_some", kept=len(_kept), total=len(files))

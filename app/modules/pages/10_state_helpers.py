@@ -25,6 +25,15 @@ def _init_state():
         # summary, team intro, etc.) -- a per-PROJECT choice, independent of the
         # app's own UI language (modules/i18n.py's "_lang"). See Project Setup tab.
         "output_language": "en",
+        # Round 3, Part 7b: the language an AI generation path actually ran
+        # in the last time it ran -- see _generated_language_stale(). Never
+        # explicitly defaulted before this fix, which happened to be
+        # harmless for a brand-new session (st.session_state.get(...) on an
+        # absent key already returns None, same as this), but left the key
+        # undeclared unlike every other piece of state above -- and made it
+        # easy to miss that _reset_downstream_from_brief() also needed to
+        # clear it (see that function).
+        "generated_language": None,
         "tender_extracted": None,
         "company_material_text": {},
         "company_material_files": {},  # {category: {filename: extracted_text}} -- per-file, so a
@@ -787,6 +796,14 @@ def _reset_downstream_from_brief() -> None:
         "experience_intro": None,
         "pitch_review": None,
         "pitch_questions": None,
+        # Round 3, Part 7b: every drafted artefact above is being wiped
+        # because it belonged to the brief that just got replaced -- the
+        # language it was generated in belongs with it. Without this,
+        # _generated_language_stale() could show its "drafts were generated
+        # in a different language" notice for a brand new project that has
+        # never generated anything at all, just because the previous
+        # project's language tag survived the reset.
+        "generated_language": None,
         "tender_summary_buffer": None,
         "graphics": None,
         "weighting_chart_png": None,

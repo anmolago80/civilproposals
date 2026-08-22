@@ -1609,10 +1609,23 @@ STRINGS: dict[str, str] = {
     "export_col_value": "Valor",
     "export_placeholdered_heading": "**Dejado como marcador de posición (completar antes de enviar):**",
 
-    # Part A2 -- limits.py (function-returned strings; module-level string
-    # constants themselves stay hardcoded English -- see the TODO comments
-    # next to each in limits.py)
+    # Part A2 -- limits.py (function-returned strings). Ronda 3, Parte 7c:
+    # PAID_PLAN_UPGRADE_NOTE y UPLOAD_LABELS eran las dos constantes de
+    # cadena a nivel de módulo que este comentario decía que se quedaban en
+    # inglés fijo -- ahora ambas son funciones (paid_plan_upgrade_note(),
+    # upload_label()) llamadas en cada punto de uso, igual que todo lo
+    # demás aquí, y sus valores traducidos están abajo.
     "limits_upgrade_clause": "Las cuentas de pago llegan hasta {paid_limit:,} {label}.",
+    "limits_paid_plan_upgrade_note": "Consulta los precios en la página de inicio para actualizar tu plan.",
+    "limits_upload_label_tender_files": "archivo(s) de licitación/adenda",
+    "limits_upload_label_tender_pages": "página(s)",
+    "limits_upload_label_cv_library": "CV(s)",
+    "limits_upload_label_previous_proposals": "archivo(s) de propuestas anteriores",
+    "limits_upload_label_project_references": "archivo(s) de referencia de proyectos",
+    "limits_upload_label_company_profile": "archivo(s) de perfil de la empresa",
+    "limits_upload_label_boilerplate_content": "archivo(s) de contenido estándar",
+    "limits_upload_label_project_photos": "foto(s) de proyecto",
+    "limits_upload_label_branding_images": "imagen(es) de marca",
     "limits_tier_paid": "de pago",
     "limits_tier_trial": "de prueba gratuita",
     "limits_count_limit_message": (

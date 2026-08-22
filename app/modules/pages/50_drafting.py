@@ -224,6 +224,10 @@ with tabs[5]:
                         st.session_state.ai_config,
                         output_language=st.session_state.get("output_language", "en"),
                     )
+                    # Round 3, Part 7a: see the comment on the draft-generation
+                    # stamp above -- every AI generation path needs to record
+                    # what it actually generated in, not just the first one.
+                    st.session_state["generated_language"] = st.session_state.get("output_language", "en")
                     if not (st.session_state.risk_register.entries if st.session_state.risk_register else []):
                         st.warning(i18n.t("drafting_risk_none_warning"))
                     else:
@@ -314,6 +318,8 @@ with tabs[5]:
                         config=st.session_state.ai_config,
                         output_language=st.session_state.get("output_language", "en"),
                     )
+                    # Round 3, Part 7a
+                    st.session_state["generated_language"] = st.session_state.get("output_language", "en")
                     if not st.session_state.methodology_stages:
                         st.warning(i18n.t("drafting_stages_none_warning"))
                     else:
@@ -443,6 +449,8 @@ with tabs[5]:
                     st.session_state.analysis, _project_info(), st.session_state.ai_config,
                     output_language=st.session_state.get("output_language", "en"),
                 )
+                # Round 3, Part 7a
+                st.session_state["generated_language"] = st.session_state.get("output_language", "en")
                 st.success(i18n.t("drafting_review_complete_success"))
             except Exception as exc:
                 _show_error(i18n.t("drafting_pitch_review_failed_error"), exc)
@@ -465,6 +473,8 @@ with tabs[5]:
                     st.session_state.analysis, _project_info(), st.session_state.ai_config,
                     output_language=st.session_state.get("output_language", "en"),
                 )
+                # Round 3, Part 7a
+                st.session_state["generated_language"] = st.session_state.get("output_language", "en")
             except Exception as exc:
                 _show_error(i18n.t("drafting_generate_questions_failed_error"), exc)
 
@@ -504,6 +514,8 @@ with tabs[5]:
                             differentiator_qa=_diff_qa, sales_pitch_qa=_pitch_qa,
                             output_language=st.session_state.get("output_language", "en"),
                         )
+                        # Round 3, Part 7a
+                        st.session_state["generated_language"] = st.session_state.get("output_language", "en")
                         st.success(i18n.t("drafting_sharpened_success"))
                     except Exception as exc:
                         _show_error(i18n.t("drafting_sharpening_failed_error"), exc)
@@ -567,6 +579,8 @@ with tabs[5]:
                     program_weeks=_program_week_count() or None,
                     output_language=st.session_state.get("output_language", "en"),
                 )
+                # Round 3, Part 7a
+                st.session_state["generated_language"] = st.session_state.get("output_language", "en")
                 _es = st.session_state.executive_summary
                 if not _es or not ((_es.intro or "").strip() or _es.blocks):
                     st.warning(i18n.t("drafting_exec_summary_empty_warning"))
@@ -601,6 +615,8 @@ with tabs[5]:
                         _included_people, st.session_state.analysis, _project_info(), st.session_state.ai_config,
                         output_language=st.session_state.get("output_language", "en"),
                     )
+                    # Round 3, Part 7a
+                    st.session_state["generated_language"] = st.session_state.get("output_language", "en")
                     _ti = st.session_state.team_intro
                     if not _ti or not ((_ti.heading or "").strip() or _ti.paragraphs):
                         st.warning(i18n.t("drafting_team_intro_empty_warning"))
@@ -634,6 +650,8 @@ with tabs[5]:
                         _project_info(), st.session_state.ai_config,
                         output_language=st.session_state.get("output_language", "en"),
                     )
+                    # Round 3, Part 7a
+                    st.session_state["generated_language"] = st.session_state.get("output_language", "en")
                     _ei = st.session_state.experience_intro
                     if not _ei or not (getattr(_ei, "paragraph", "") or "").strip():
                         st.warning(i18n.t("drafting_experience_intro_empty_warning"))

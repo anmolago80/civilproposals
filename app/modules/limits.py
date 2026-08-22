@@ -50,8 +50,12 @@ UPLOAD_LIMITS = {
     "branding_images":     (10, 30),
 }
 
-# Human label for each key's items -- used to build the "we've used the
-# first N of these" messages below without repeating labels at every call site.
+# Human label for each key's items -- English source of truth for which
+# UPLOAD_LIMITS keys exist and what they mean; the corresponding
+# limits_upload_label_<key> i18n key carries the live (possibly translated)
+# wording. Kept as a plain dict (not built from the i18n catalog) so a call
+# at import time -- before session_state exists -- never needs i18n.t();
+# see upload_label() below, which is what every live call site should use.
 UPLOAD_LABELS = {
     "tender_files": "brief/addendum file(s)",
     "tender_pages": "page(s)",
@@ -64,13 +68,31 @@ UPLOAD_LABELS = {
     "branding_images": "branding image(s)",
 }
 
-# TODO A2 i18n: PAID_PLAN_UPGRADE_NOTE is a module-level string constant, so it
-# can't safely call i18n.t() here (that needs session_state, which isn't live
-# at import time). It stays hardcoded English -- to translate it, it would
-# need to become a function (e.g. paid_plan_upgrade_note()) called at each use
-# site, or be looked up directly at each call site instead of via this shared
-# constant. Left as-is; not restructured as part of this pass.
-PAID_PLAN_UPGRADE_NOTE = "See pricing on the homepage to upgrade."
+
+def upload_label(key: str) -> str:
+    """Round 3, Part 7c: translated human label for one of UPLOAD_LIMITS's
+    keys -- e.g. "CV(s)" in English, "CV(s)" or its Spanish equivalent
+    depending on the app's UI language (modules/i18n.py's t(), same as
+    every other user-facing string built in this module). UPLOAD_LABELS
+    above previously WAS the label, spliced straight into an otherwise-
+    translated message and staying English regardless of UI language; this
+    function is now the one live call sites use, with UPLOAD_LABELS kept
+    only as the English source-of-truth dict (and the fallback for a key
+    with no i18n entry -- defensive only, every real key has one)."""
+    from modules import i18n
+    return i18n.t(f"limits_upload_label_{key}") if key in UPLOAD_LABELS else key
+
+
+def paid_plan_upgrade_note() -> str:
+    """Round 3, Part 7c: translated "See pricing on the homepage to
+    upgrade." -- previously a module-level string constant
+    (PAID_PLAN_UPGRADE_NOTE), which can't safely call i18n.t() at import
+    time (that needs session_state, which isn't live yet). As a function,
+    called at each use site the same way upgrade_clause() already is, it
+    picks up the UI language live. Every former PAID_PLAN_UPGRADE_NOTE call
+    site below now calls this instead."""
+    from modules import i18n
+    return i18n.t("limits_paid_plan_upgrade_note")
 
 
 def is_paid_tier(access: dict | None) -> bool:
@@ -112,7 +134,7 @@ def upgrade_clause(key: str, access: dict | None) -> str:
     if is_paid_tier(access):
         return ""
     _, paid_limit = UPLOAD_LIMITS[key]
-    label = UPLOAD_LABELS.get(key, key)
+    label = upload_label(key)
     from modules import i18n
     return " " + i18n.t("limits_upgrade_clause", paid_limit=paid_limit, label=label)
 
@@ -131,7 +153,7 @@ def enforce_count_limit(items: list, key: str, access: dict | None, item_label_f
     limit = limits_for(None, access)[key]
     if len(items) <= limit:
         return items, None
-    label = UPLOAD_LABELS.get(key, key)
+    label = upload_label(key)
     kept = items[:limit]
     dropped = items[limit:]
     name_fn = item_label_fn or (lambda f: getattr(f, "name", None) or "unnamed file")
@@ -187,7 +209,7 @@ def tender_page_cap_message(page_count: int, access: dict | None) -> str | None:
             page_count=page_count, trial_limit=trial_limit,
             paid_limit=paid_limit,
         )
-        + " " + PAID_PLAN_UPGRADE_NOTE
+        + " " + paid_plan_upgrade_note()
     )
 
 
@@ -230,16 +252,16 @@ TRIAL_AI_SPEND_CEILING_USD = 5.00
 # never blocks anything for a non-trial account.
 ADMIN_PROJECT_COST_ALERT_USD = 25.00
 
-# TODO A2 i18n: TRIAL_SPEND_CEILING_MESSAGE is a module-level string constant,
-# so it can't safely call i18n.t() here (that needs session_state, which isn't
-# live at import time). It stays hardcoded English -- ai_spend_block_reason()
-# below builds its own translated version at call time instead of returning
-# this constant. Left as-is (unused internally now) rather than restructured,
-# per this pass's scope; a future pass could turn it into a function or drop it.
-TRIAL_SPEND_CEILING_MESSAGE = (
-    "Your free trial's AI allowance is used up -- upgrade to keep going; your work is saved. "
-    + PAID_PLAN_UPGRADE_NOTE
-)
+# Round 3, Part 7c: TRIAL_SPEND_CEILING_MESSAGE used to live here as a
+# module-level string constant built from PAID_PLAN_UPGRADE_NOTE (its own
+# TODO A2 i18n comment already said it was unused internally --
+# ai_spend_block_reason() below has always built its own translated
+# version at call time instead of returning this constant, and nothing
+# else in the codebase referenced it). Now that PAID_PLAN_UPGRADE_NOTE is
+# a function rather than a constant (see paid_plan_upgrade_note() above),
+# a module-level concatenation with it can no longer even be built at
+# import time -- confirmed dead via grep before removing it outright
+# rather than reworking a constant nothing read.
 
 
 def ai_spend_block_reason(user_id: str | None, access: dict | None, account_ai_cost) -> str | None:
@@ -255,7 +277,7 @@ def ai_spend_block_reason(user_id: str | None, access: dict | None, account_ai_c
     cost = account_ai_cost() if callable(account_ai_cost) else account_ai_cost
     if (cost or 0.0) >= TRIAL_AI_SPEND_CEILING_USD:
         from modules import i18n
-        return i18n.t("limits_trial_spend_ceiling_message") + " " + PAID_PLAN_UPGRADE_NOTE
+        return i18n.t("limits_trial_spend_ceiling_message") + " " + paid_plan_upgrade_note()
     return None
 
 

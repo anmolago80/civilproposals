@@ -1604,10 +1604,23 @@ STRINGS: dict[str, str] = {
     "export_col_value": "Value",
     "export_placeholdered_heading": "**Left as placeholders (complete before submission):**",
 
-    # Part A2 -- limits.py (function-returned strings; module-level string
-    # constants themselves stay hardcoded English -- see the TODO comments
-    # next to each in limits.py)
+    # Part A2 -- limits.py (function-returned strings). Round 3, Part 7c:
+    # PAID_PLAN_UPGRADE_NOTE and UPLOAD_LABELS used to be the two module-
+    # level string constants this comment used to say stayed hardcoded
+    # English -- both are now functions (paid_plan_upgrade_note(),
+    # upload_label()) called at each use site, same as everything else
+    # here, and their translated values live below.
     "limits_upgrade_clause": "Paid accounts go up to {paid_limit:,} {label}.",
+    "limits_paid_plan_upgrade_note": "See pricing on the homepage to upgrade.",
+    "limits_upload_label_tender_files": "brief/addendum file(s)",
+    "limits_upload_label_tender_pages": "page(s)",
+    "limits_upload_label_cv_library": "CV(s)",
+    "limits_upload_label_previous_proposals": "previous proposal file(s)",
+    "limits_upload_label_project_references": "project reference file(s)",
+    "limits_upload_label_company_profile": "company profile file(s)",
+    "limits_upload_label_boilerplate_content": "boilerplate content file(s)",
+    "limits_upload_label_project_photos": "project photo(s)",
+    "limits_upload_label_branding_images": "branding image(s)",
     "limits_tier_paid": "paid",
     "limits_tier_trial": "free trial",
     "limits_count_limit_message": (
