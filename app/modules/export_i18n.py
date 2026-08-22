@@ -984,6 +984,56 @@ def canonical_marker_instruction(language: str | None) -> str:
     )
 
 
+# Round 3, Part 4c: methodology_render.stage_carries_hold_point() and
+# program_render.build_model()'s milestone derivation both detect a "hold
+# point" by scanning a stage's own AI-drafted engagement-activities/outcome
+# text for the English phrase "hold point" -- which never matches once that
+# text is legitimately in Spanish, silently dropping the hold-point gate
+# diamond and the delivery-program milestone for every Spanish project. Both
+# scan the SAME free-text field this canonical phrase governs, so one fixed
+# Spanish phrase (paired with the prompt instruction below telling the
+# drafter to use it verbatim, the same convention canonical_marker_instruction()
+# already established for placeholders) fixes both detectors at once.
+HOLD_POINT_PHRASES: dict[str, str] = {
+    "en": "hold point",
+    "es": "punto de espera",
+}
+
+
+def mentions_hold_point(text) -> bool:
+    """True if `text` names a hold point in EITHER language this catalog
+    covers -- deliberately not gated on the project's own output_language,
+    since a mixed-language document (a language switched mid-project, or a
+    stage edited by hand) should still have its hold points detected."""
+    haystack = str(text or "").lower()
+    return any(phrase in haystack for phrase in HOLD_POINT_PHRASES.values())
+
+
+def hold_point_phrasing_instruction(language: str | None) -> str:
+    """Round 3, Part 4c: tells the stage-drafting AI call to use the single
+    canonical Spanish phrase for a hold point, the same way
+    canonical_marker_instruction() pins down the bracketed-placeholder
+    vocabulary -- without this, a model left to its own judgement might
+    write "punto de retención" or "hito de aprobación del cliente" instead,
+    which mentions_hold_point() would never recognise as one.
+
+    Returns "" for anything other than "es" -- concatenate onto an existing
+    prompt, same calling convention as canonical_marker_instruction()."""
+    lang = (language or "").strip().lower()[:2]
+    if lang != "es":
+        return ""
+    phrase = HOLD_POINT_PHRASES["es"]
+    return (
+        f" Whenever a task, engagement activity, or outcome genuinely is a hold point (a point "
+        f"where work pauses for the client's review/approval before continuing), name it using "
+        f"the exact phrase \"{phrase}\" somewhere in that text -- never a paraphrase of your own "
+        f"(not \"punto de retención\", not \"hito de aprobación\") -- so the app's own automated "
+        f"detection of hold points, which matches on that exact phrase, reliably finds every one "
+        f"you write. Only label something a hold point if the inputs actually describe one; do "
+        f"not invent one that wasn't there."
+    )
+
+
 def export_t(key: str, language: str | None, **fmt) -> str:
     """Looks up `key` in `language`'s export catalog, falling back to English,
     then to a visibly-broken `[[key]]` marker if the key exists in neither --

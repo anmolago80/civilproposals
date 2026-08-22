@@ -192,8 +192,14 @@ def build_model(program_schedule: dict | None,
     # Milestones -- only from inputs that actually exist.
     for index, stage in enumerate(stages):
         end = getattr(stage, "week_end", None)
-        activities = [str(a).lower() for a in (getattr(stage, "engagement_activities", None) or [])]
-        holds = [a for a in activities if "hold point" in a and a.strip().upper() != "TBC"]
+        activities = [str(a) for a in (getattr(stage, "engagement_activities", None) or [])]
+        # Detects the phrase in either English or Spanish (Round 3, Part
+        # 4c) -- see export_i18n.mentions_hold_point() -- since a Spanish
+        # stage's engagement text never contained the English word "hold"
+        # to begin with, and checking only for that silently dropped this
+        # milestone on every Spanish project.
+        holds = [a for a in activities
+                if export_i18n.mentions_hold_point(a) and a.strip().upper() != "TBC"]
         if end and holds:
             hold_label = (export_i18n.export_t("program_milestone_client_hold_point", language)
                          if language is not None else "Client hold point")

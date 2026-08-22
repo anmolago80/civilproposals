@@ -97,10 +97,16 @@ def is_placeholder(text) -> bool:
 def stage_carries_hold_point(column: dict) -> bool:
     """Derived, never asserted -- see the module docstring. A stage only
     gets a Programme-style gate diamond after it if its OWN engagement
-    activities or outcome text actually names a hold point."""
+    activities or outcome text actually names a hold point.
+
+    Detects the phrase in either English or Spanish (Round 3, Part 4c) --
+    see export_i18n.mentions_hold_point() -- since a Spanish stage's
+    engagement/outcome text never contained the English word "hold" to
+    begin with, and checking only for that silently dropped the gate
+    diamond on every Spanish project."""
     haystack = " ".join(str(x) for x in (column.get("engagement") or []))
     haystack += " " + str(column.get("outcome") or "")
-    return "hold point" in haystack.lower()
+    return export_i18n.mentions_hold_point(haystack)
 
 
 # ---------------------------------------------------------------------------

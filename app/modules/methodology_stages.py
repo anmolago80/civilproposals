@@ -41,7 +41,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from modules.ai_interface import call_ai_json
-from modules.export_i18n import canonical_marker_instruction
+from modules.export_i18n import canonical_marker_instruction, hold_point_phrasing_instruction
 
 # The literal a cell carries when the inputs don't support it. Rendered red
 # by both the PPTX and the DOCX image, same convention as every other
@@ -331,6 +331,7 @@ def draft_methodology_stages(
             "Translate only the language, not the substance -- do not invent, omit, or alter any "
             "task, deliverable, date, or fact because of this instruction."
             + canonical_marker_instruction(output_language)
+            + hold_point_phrasing_instruction(output_language)
         )
 
     data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=4000)

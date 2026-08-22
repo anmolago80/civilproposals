@@ -1002,6 +1002,42 @@ def check_spanish_png_previews(failures: list[str]) -> None:
         failures.append("[Part4b] org_chart_render default (no language passed) regressed away from English")
 
 
+def check_spanish_hold_point_detection(failures: list[str]) -> None:
+    """Round 3, Part 4c: methodology_render.stage_carries_hold_point() (which
+    methodology_pptx.py also imports and uses directly) and
+    program_render.build_model()'s milestone derivation both used to detect
+    a hold point by checking a stage's own engagement/outcome text for the
+    literal English phrase "hold point" -- which never matches once that
+    text is legitimately in Spanish, silently dropping the Programme
+    style's gate diamond and the delivery-program's milestone for every
+    Spanish project. Fixed via export_i18n.mentions_hold_point(), which
+    checks both languages' canonical phrase."""
+    from datetime import date
+
+    from modules import export_i18n, methodology_render, program_render
+    from modules.methodology_stages import MethodologyStage
+
+    if not methodology_render.stage_carries_hold_point(
+            {"engagement": ["Punto de espera del cliente antes de continuar"], "outcome": ""}):
+        failures.append("[Part4c] methodology_render.stage_carries_hold_point() missed a Spanish hold point")
+    if not methodology_render.stage_carries_hold_point(
+            {"engagement": ["Client hold point before proceeding"], "outcome": ""}):
+        failures.append("[Part4c] methodology_render.stage_carries_hold_point() regressed on an English hold point")
+    if methodology_render.stage_carries_hold_point({"engagement": ["Site inspection"], "outcome": ""}):
+        failures.append("[Part4c] methodology_render.stage_carries_hold_point() false-positived with no hold point mentioned")
+
+    stages = [MethodologyStage(name="Etapa", week_start=1, week_end=3,
+                               engagement_activities=["Punto de espera del cliente"])]
+    model = program_render.build_model(
+        {"A": [True, True, True]}, ["Sem 1", "Sem 2", "Sem 3"], stages, date(2026, 8, 1), None,
+        "P", "C", language="es")
+    if not any("espera" in m.label.lower() for m in model.milestones):
+        failures.append("[Part4c] program_render.build_model() missed a Spanish hold-point milestone")
+
+    if not export_i18n.mentions_hold_point("hay un HOLD POINT aquí"):
+        failures.append("[Part4c] export_i18n.mentions_hold_point() is case-sensitive and shouldn't be")
+
+
 def check_spanish_resourcing_reasons(failures: list[str]) -> None:
     """Audit Round 2, Part 5: resourcing.suggest_proposal_inclusion()'s
     "reason" strings are user-visible in the Team & Resourcing tab
@@ -1144,6 +1180,7 @@ def main() -> int:
     check_spanish_placeholders(failures)
     check_spanish_pptx(failures)
     check_spanish_png_previews(failures)
+    check_spanish_hold_point_detection(failures)
     check_spanish_resourcing_reasons(failures)
     check_generated_language_stale_notice(failures)
     check_swimlane_bar_colours_match_stage(failures)
