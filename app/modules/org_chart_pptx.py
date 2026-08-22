@@ -72,15 +72,15 @@ _BORDER_COLOR = RGBColor(0xBF, 0xBF, 0xBF)
 
 _FONT = "Calibri"
 
-# A4 landscape -- the same precise dimensions modules/program_pptx.py and
-# modules/methodology_pptx.py already use (both say so in their own
-# comments: "same slide size as org_chart_pptx.py"), which this module had
-# drifted from (it was 13.333in x 7.5in, 16:9). Matches the fix brief and
-# modules/org_chart_render.py's PAGE_W_IN/PAGE_H_IN, so the companion deck is
-# the same physical page as the printed/pasted chart, not a wider 16:9 slide
-# with the same content floating in the top of it.
-_SLIDE_W = Inches(11.6929)
-_SLIDE_H = Inches(8.2677)
+# Sample-driven fix: back to plain 16:9 widescreen (13.333in x 7.5in) --
+# matches org_chart_render.py's PAGE_W_IN/PAGE_H_IN (see that module's
+# comment for why the earlier A4-landscape standardisation was reverted for
+# this deck specifically: it left five discipline-lead columns too narrow
+# to fit one row, forcing a second row on team sizes that used to fit fine).
+# No longer the same physical page as program_pptx.py/methodology_pptx.py's
+# A4 exports -- a deliberate, org-chart-specific trade.
+_SLIDE_W = Inches(13.3333)
+_SLIDE_H = Inches(7.5)
 
 def _tint(rgb: RGBColor, amount: float) -> RGBColor:
     """Blend towards white. amount=0 -> unchanged, 1 -> white."""
@@ -301,12 +301,21 @@ MAX_SCALE = 1.35
 
 class _PFlow:
     """EMU-space counterpart to org_chart_render._Flow -- see that class's
-    docstring for the full rationale (fixed-size blocks, stretchable gaps
-    that also draw, e.g. a connector line, so leftover page height becomes
-    breathing room at every seam rather than one dead band). PowerPoint's
-    EMU y-axis already increases downward from the top of the slide, so
-    there's no fraction/axes conversion to do here -- everything is plain
-    integer EMU arithmetic."""
+    docstring for the full rationale (fixed-size blocks and gaps, both
+    scaled by the ONE scale-to-fill factor). PowerPoint's EMU y-axis already
+    increases downward from the top of the slide, so there's no
+    fraction/axes conversion to do here -- everything is plain integer EMU
+    arithmetic.
+
+    render() used to spread any leftover page height evenly across every
+    gap, so a short chart's extra room became breathing space at every seam.
+    Sample-driven fix: against a real 5-lead org this stretched the space
+    between hierarchy levels so far that the discipline row ended up flush
+    against the bottom margin -- the opposite of the old ("Org_Chart 14")
+    look it's meant to match, which drew every level at a small fixed gap
+    and left the extra room as a single margin below the whole chart.
+    render() now does exactly that: gaps scale like blocks and nothing
+    else -- leftover height simply stays unused below the last item."""
 
     def __init__(self):
         self._items = []
@@ -324,13 +333,9 @@ class _PFlow:
         return sum(it["h"] for it in self._items)
 
     def render(self, top_emu: int, scale: float, avail_emu: int = AVAIL_H_EMU) -> int:
-        n_gaps = sum(1 for it in self._items if it["kind"] == "gap")
-        used = int(self.natural_height() * scale)
-        leftover = max(0, avail_emu - used)
-        extra_per_gap = (leftover // n_gaps) if n_gaps else 0
         y = top_emu
         for it in self._items:
-            h = int(it["h"] * scale) + (extra_per_gap if it["kind"] == "gap" else 0)
+            h = int(it["h"] * scale)
             y_bottom = y + h
             if it["draw"] is not None:
                 it["draw"](y, y_bottom, scale)
@@ -338,19 +343,30 @@ class _PFlow:
         return y
 
 
+# Sample-driven fix: EMU counterpart to org_chart_render._ACCEPTABLE_ROW_SCALE
+# -- see that constant's comment for why. Scale is a unitless ratio, so the
+# same threshold applies identically here.
+_ACCEPTABLE_ROW_SCALE = 0.85
+
+
 def _psolve_scale(build_flow, per_row_candidates, avail_w_emu=AVAIL_W_EMU, avail_h_emu=AVAIL_H_EMU):
     """EMU counterpart to org_chart_render._solve_scale -- same fewest-rows-
-    first search, same >6% margin before a more-wrapped candidate takes
-    over (see that function's docstring for why the margin matters)."""
+    first search, stopping at the first candidate whose unclamped scale
+    reaches _ACCEPTABLE_ROW_SCALE (see that function's docstring for why a
+    later, more-wrapped candidate no longer automatically takes over just
+    for scoring higher)."""
     best = None
     for per_row in per_row_candidates:
         flow, row_w = build_flow(per_row)
         natural_h = flow.natural_height()
         height_fit = (avail_h_emu / natural_h) if natural_h > 0 else MAX_SCALE
         width_fit = (avail_w_emu / row_w) if row_w > 0 else MAX_SCALE
-        scale = max(MIN_SCALE, min(MAX_SCALE, min(height_fit, width_fit)))
-        if best is None or scale > best[1] * 1.06:
+        raw_scale = min(height_fit, width_fit)
+        scale = max(MIN_SCALE, min(MAX_SCALE, raw_scale))
+        if best is None or scale > best[1]:
             best = (flow, scale, per_row)
+        if raw_scale >= _ACCEPTABLE_ROW_SCALE:
+            break
     return best
 
 

@@ -357,13 +357,20 @@ def render_png(model: OrgModel, style: str = DEFAULT_STYLE,
 # band, and never assuming a fixed pixel/EMU offset that only suited one
 # particular team size.
 
-# Same precise A4 dimensions modules/program_pptx.py and
-# modules/methodology_pptx.py already use for their own slides (297mm x
-# 210mm), so the on-screen/DOCX chart and the companion PowerPoint
-# (org_chart_pptx.py) are the same physical page as every other generated
-# artefact in this pack, not merely close to it.
-PAGE_W_IN = 11.6929
-PAGE_H_IN = 8.2677
+# Sample-driven fix: matching program_pptx.py/methodology_pptx.py's A4
+# landscape page (297mm x 210mm, 11.6929in x 8.2677in) gave the org chart
+# ~14% less width than the 16:9 widescreen page it used before that change
+# -- not enough room for five discipline-lead columns in one row, so the
+# wrap search below (_psolve_scale/_row_candidates) fell back to a second
+# row on exactly the team sizes that used to fit fine, reading as "too big"
+# even though the scale-to-fill engine itself was working as designed.
+# Restored to plain 16:9 widescreen (13.333in x 7.5in) so the org chart
+# again has the same headroom it had before the A4 standardisation -- the
+# companion PowerPoint (org_chart_pptx.py) is no longer the same physical
+# page as program_pptx.py/methodology_pptx.py's A4 exports, which is the
+# deliberate trade being made here.
+PAGE_W_IN = 13.3333
+PAGE_H_IN = 7.5
 _MARGIN_IN = 0.35
 _TITLE_BAND_IN = 0.62
 
@@ -433,22 +440,25 @@ def _new_figure():
 
 class _Flow:
     """A vertical sequence of blocks (drawable content, fixed reference size)
-    and gaps (spacing that STRETCHES to absorb leftover page height), each
-    given a reference height in INCHES at scale=1.0.
+    and gaps (spacing that scales like a block), each given a reference
+    height in INCHES at scale=1.0.
 
-    render() replays the sequence top-down: every height is multiplied by
-    the chosen scale, and any page height left over after that is spread
-    EVENLY across every gap in the sequence -- so a short chart's extra room
-    becomes breathing space at every seam, not one dead band. A connector
-    (a line between two boxes) is a gap too, via connector() below, so it
-    lengthens along with the space it crosses rather than leaving a floating
-    stub with blank page beneath it -- an early version kept connectors as
-    non-stretching blocks and it reliably produced exactly one oversized gap
-    (the single remaining stretch point) instead of even spacing throughout.
-    Every draw(y_top, y_bottom, scale) callback -- block or gap alike --
-    receives its own already-scaled-and-positioned axes-fraction span, plus
-    the scale itself for anything that needs it directly (font sizes, line
-    weights)."""
+    render() replays the sequence top-down: every height -- block or gap --
+    is multiplied by the chosen scale, nothing else. This used to spread any
+    left-over page height evenly across every gap, so a short chart's extra
+    room became breathing space at every seam. Sample-driven fix: against a
+    real 5-lead org that stretched the space between hierarchy levels so far
+    that the discipline row ended up flush against the bottom margin -- the
+    opposite of the old ("Org_Chart 14") look this is meant to match, which
+    drew every level at a small fixed gap and left the extra room as a
+    single margin below the whole chart, not spread through it. A connector
+    (a line between two boxes) is a gap too, via connector() below; since
+    gaps no longer stretch, its draw callback always gets the same short
+    span its reference height implies, so it renders exactly as compact as
+    the old chart did. Every draw(y_top, y_bottom, scale) callback -- block
+    or gap alike -- receives its own already-scaled-and-positioned
+    axes-fraction span, plus the scale itself for anything that needs it
+    directly (font sizes, line weights)."""
 
     def __init__(self):
         self._items: list[dict] = []
@@ -469,13 +479,9 @@ class _Flow:
 
     def render(self, top_frac: float, scale: float, avail_h_in: float = AVAIL_H_IN) -> float:
         """Draws every block and returns the final bottom y (axes-fraction)."""
-        n_gaps = sum(1 for it in self._items if it["kind"] == "gap")
-        used_in = self.natural_height_in() * scale
-        leftover_in = max(0.0, avail_h_in - used_in)
-        extra_per_gap_in = (leftover_in / n_gaps) if n_gaps else 0.0
         y = top_frac
         for it in self._items:
-            h_in = it["h"] * scale + (extra_per_gap_in if it["kind"] == "gap" else 0.0)
+            h_in = it["h"] * scale
             y_bottom = y - _y_in(h_in)
             if it["draw"] is not None:
                 it["draw"](y, y_bottom, scale)
@@ -483,16 +489,35 @@ class _Flow:
         return y
 
 
+# Sample-driven fix: the "keep whichever wrap yields the largest resulting
+# scale" rule this function used to follow always let a more-wrapped
+# candidate win once it made the content genuinely BIGGER -- not just
+# "legible instead of illegible", which is what the function's own
+# docstring claimed. In practice that meant a single row that already fit
+# comfortably (e.g. scale 1.05 -- everything rendering at or above its own
+# reference size) still lost to a 3+2 wrap scoring 1.28, because there was
+# unused vertical room a second row could claim. The result read as "why
+# did this wrap into two cramped-looking rows when one row had plenty of
+# space" -- exactly Round 4's report. A candidate at or above this scale
+# is "acceptable": every box and font renders at least this close to its
+# designed reference size, so a later candidate scoring even higher is
+# filling blank page space, not fixing a legibility problem, and isn't
+# worth trading a clean single row for. Chosen partway between MIN_SCALE
+# (0.55, the hard shrink floor) and 1.0 (full reference size) -- comfortably
+# above "had to shrink to stay legible", without demanding the unwrapped
+# candidate look as big as a heavily-wrapped alternative could.
+_ACCEPTABLE_ROW_SCALE = 0.85
+
+
 def _solve_scale(build_flow, per_row_candidates,
                  avail_w_in: float = AVAIL_W_IN, avail_h_in: float = AVAIL_H_IN):
-    """Try every candidate discipline-columns-per-row wrap, measure the
-    resulting flow WITHOUT drawing anything, and keep whichever wrap yields
-    the largest resulting scale -- i.e. the best-fitting page. This is the
-    "beyond [min font sizes], wrap to a second row of discipline columns
-    instead of shrinking further" rule: a wrap that lets everything render
-    bigger wins over a single row that would have to shrink past legibility.
-    Ties (including the common case of only one candidate, when there's
-    nothing to wrap) favour fewer rows -- less visual clutter.
+    """Try each candidate discipline-columns-per-row wrap, fewest rows first
+    (see _row_candidates), and stop at the first one whose UNCLAMPED scale
+    reaches _ACCEPTABLE_ROW_SCALE -- "wrap only once the fewer-row option
+    would otherwise have to shrink past legible, not merely because a
+    wrapped layout could render even bigger." If no candidate clears that
+    bar (a large team, every wrap still cramped), falls back to whichever
+    scored highest, same as before.
 
     `build_flow(per_row)` -> (flow: _Flow, row_width_in: float) for one wrap
     choice; row_width_in is that choice's natural (scale=1.0) width, used
@@ -505,15 +530,12 @@ def _solve_scale(build_flow, per_row_candidates,
         natural_h = flow.natural_height_in()
         height_fit = (avail_h_in / natural_h) if natural_h > 0 else MAX_SCALE
         width_fit = (avail_w_in / row_width_in) if row_width_in > 0 else MAX_SCALE
-        scale = max(MIN_SCALE, min(MAX_SCALE, min(height_fit, width_fit)))
-        # Candidates are tried fewest-rows-first (see _row_candidates), so a
-        # later, more-wrapped candidate only takes over on a MEANINGFUL scale
-        # gain (>6%) -- without this margin, a three-column row that just
-        # barely misses the clamp (scale 1.345) loses to a 2+1 wrap that just
-        # barely reaches it (1.35 exactly), trading a clean single row for a
-        # lopsided one over a difference nobody would notice.
-        if best is None or scale > best[1] * 1.06:
+        raw_scale = min(height_fit, width_fit)
+        scale = max(MIN_SCALE, min(MAX_SCALE, raw_scale))
+        if best is None or scale > best[1]:
             best = (flow, scale, per_row)
+        if raw_scale >= _ACCEPTABLE_ROW_SCALE:
+            break
     return best
 
 
@@ -563,6 +585,38 @@ def _fit(figure, artist, max_frac: float, min_size: float = 5.0) -> None:
     while len(text) > 4 and _text_width_frac(figure, artist) > max_frac:
         text = text[:-2]
         artist.set_text(text.rstrip() + "…")
+
+
+def _wrap_to_width(figure, axes, text: str, max_frac: float, fontsize: float,
+                    fontweight: str = "bold") -> list[str]:
+    """Greedy word-wrap of `text` into lines that each render narrower than
+    `max_frac` of the axes width at `fontsize` -- matplotlib has no
+    metrics-only text-width API, so this measures with a real (invisible)
+    probe text artist via _text_width_frac, the same measurement _fit()
+    uses. A single word that alone exceeds max_frac still becomes its own
+    line rather than looping forever -- this always makes progress."""
+    words = text.split()
+    if not words:
+        return [text]
+    probe = axes.text(0, 0, "", fontsize=fontsize, fontweight=fontweight, alpha=0)
+    try:
+        def fits(candidate: str) -> bool:
+            probe.set_text(candidate)
+            return _text_width_frac(figure, probe) <= max_frac
+
+        lines: list[str] = []
+        current = words[0]
+        for word in words[1:]:
+            candidate = f"{current} {word}"
+            if fits(candidate):
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+        lines.append(current)
+        return lines
+    finally:
+        probe.remove()
 
 
 def _balanced_wrap(count: int, max_per_row: int) -> int:
@@ -1318,18 +1372,35 @@ def _render_bands(model: OrgModel, accent: str, language: str | None = None):
     ]
     make_band(assurance_band_title, assurance_chips, _tint(ASSURANCE_AMBER, 0.93))
 
-    def draw_footnote(y_top, y_bottom, scale):
-        if language is not None:
-            footnote_key = ("pptx_org_footnote_with_assurance" if (model.has_assurance or model.disciplines)
-                            else "pptx_org_footnote_plain")
-            text = export_i18n.export_t(footnote_key, language)
-        else:
-            text = (("Solid reporting lines run top-down; the assurance band reviews independently "
-                    "of the delivery team.") if (model.has_assurance or model.disciplines) else
-                   "Solid reporting lines run top-down.")
-        axes.text(band_left, y_top, text, fontsize=max(6.5, 8.0 * scale), fontweight="bold",
-                  color=SUBTLE, ha="left", va="top")
-    flow.block(0.22, draw_footnote)
+    if language is not None:
+        footnote_key = ("pptx_org_footnote_with_assurance" if (model.has_assurance or model.disciplines)
+                        else "pptx_org_footnote_plain")
+        footnote_text = export_i18n.export_t(footnote_key, language)
+    else:
+        footnote_text = (("Solid reporting lines run top-down; the assurance band reviews independently "
+                         "of the delivery team.") if (model.has_assurance or model.disciplines) else
+                        "Solid reporting lines run top-down.")
+
+    # Sample-driven fix (Round 4, Part 2): this used to draw as one
+    # unconstrained line -- fine for the English original, but the Spanish
+    # translation is long enough to run off the right edge of the canvas,
+    # and it's baked into a PNG the customer can't fix in Word. Wrapped to
+    # the same right margin every band/chip above it respects (band_left to
+    # band_right), measured at MAX_SCALE's font size so the line breaks
+    # chosen here stay valid at every scale render_bands might pick --
+    # smaller scales only render the same lines narrower, never wider.
+    _BANDS_FOOTNOTE_LINE_H_IN = 0.22
+    footnote_lines = _wrap_to_width(figure, axes, footnote_text, band_right - band_left,
+                                    fontsize=8.0 * MAX_SCALE, fontweight="bold")
+
+    def draw_footnote(y_top, y_bottom, scale, lines=footnote_lines):
+        line_h = _y_in(_BANDS_FOOTNOTE_LINE_H_IN * scale)
+        y = y_top
+        for line in lines:
+            axes.text(band_left, y, line, fontsize=max(6.5, 8.0 * scale), fontweight="bold",
+                      color=SUBTLE, ha="left", va="top")
+            y -= line_h
+    flow.block(_BANDS_FOOTNOTE_LINE_H_IN * len(footnote_lines), draw_footnote)
 
     natural_h = flow.natural_height_in()
     scale = max(MIN_SCALE, min(MAX_SCALE, AVAIL_H_IN / natural_h if natural_h > 0 else MAX_SCALE))
