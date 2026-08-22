@@ -18,37 +18,23 @@ from __future__ import annotations
 
 with tabs[6]:
     if _is_letter():
-        st.subheader("Project Team")
-        st.caption(
-            "Built entirely from the Team & Resourcing tab (step 8) -- the same people, the same "
-            "CV-drafted bios, and the same 'include in proposal' ticks used there also drive this "
-            "pack's Project Team section, so there's only one place to build your team, whichever "
-            "pack size you're preparing. Head to step 8 to assign people, draft bios from the CV "
-            "library, add a team member under a discipline lead (with their own title), and tick "
-            "who's included. This is a read-only preview of what the exported pack will show."
-        )
+        st.subheader(i18n.t("graphics_project_team_subheader"))
+        st.caption(i18n.t("graphics_project_team_caption"))
         entries = resourcing.letter_team_entries(st.session_state.resource_plan)
         if not entries:
-            st.info(
-                "No one is assigned and ticked 'Include in proposal' yet -- head to step 8 "
-                "(Team & Resourcing) to build the team."
-            )
+            st.info(i18n.t("graphics_project_team_empty_info"))
         else:
             for entry in entries:
                 marker = "↳ " if entry["indent"] else ""
-                name = entry["name"] or "[not assigned]"
+                name = entry["name"] or i18n.t("graphics_not_assigned")
                 st.markdown(f"{marker}**{name}** -- {entry['role_label']}")
     else:
-        st.subheader("Graphics & Design")
-        st.caption(
-            "Real, generated divider banners and cover art built from your own uploaded photos and "
-            "typed quotes -- never invented imagery. Everything this tool can't build for real "
-            "(org charts, methodology diagrams, programme timelines) stays a clearly marked placeholder below."
-        )
+        st.subheader(i18n.t("graphics_subheader"))
+        st.caption(i18n.t("graphics_caption"))
 
     ready = st.session_state.sections is not None
     if not ready:
-        st.info("Generate the Proposal Structure first.")
+        st.info(i18n.t("graphics_need_structure_info"))
     elif _is_letter():
         pass  # Project Team preview above already covers this pack size -- nothing else to render here.
     else:
@@ -56,39 +42,36 @@ with tabs[6]:
         photos = st.session_state.project_photo_bytes
         theme_name = st.session_state.proposal_theme
 
-        st.markdown("#### 1. Pull-quotes / testimonials (optional)")
-        st.caption("Only real quotes you type in here -- nothing is invented or pulled from the web.")
+        st.markdown(i18n.t("graphics_quotes_heading"))
+        st.caption(i18n.t("graphics_quotes_caption"))
         with st.form("add_quote_form", clear_on_submit=True):
             qcol1, qcol2 = st.columns(2)
             with qcol1:
-                q_text = st.text_area("Quote", placeholder="e.g. \"The team delivered a technically excellent outcome...\"", height=80)
+                q_text = st.text_area(i18n.t("graphics_quote_label"), placeholder=i18n.t("graphics_quote_placeholder"), height=80)
             with qcol2:
-                q_attr = st.text_input("Attributed to", placeholder="e.g. J. Smith, Project Director, XYZ Council")
-                q_project = st.text_input("Project (optional)", placeholder="e.g. Burnett River Bridge")
-            if st.form_submit_button("Add quote", type="primary") and q_text.strip():
+                q_attr = st.text_input(i18n.t("graphics_quote_attributed_label"), placeholder=i18n.t("graphics_quote_attributed_placeholder"))
+                q_project = st.text_input(i18n.t("graphics_quote_project_label"), placeholder=i18n.t("graphics_quote_project_placeholder"))
+            if st.form_submit_button(i18n.t("graphics_add_quote_button"), type="primary") and q_text.strip():
                 st.session_state.quotes.append({"text": q_text.strip(), "attribution": q_attr.strip(), "project": q_project.strip()})
 
         if st.session_state.quotes:
             for i, q in enumerate(st.session_state.quotes):
                 col1, col2 = st.columns([5, 1])
                 with col1:
-                    st.markdown(f"_{q['text']}_ — **{q['attribution'] or 'unattributed'}**" + (f" ({q['project']})" if q['project'] else ""))
+                    st.markdown(f"_{q['text']}_ — **{q['attribution'] or i18n.t('graphics_unattributed')}**" + (f" ({q['project']})" if q['project'] else ""))
                 with col2:
-                    if st.button("Remove", key=f"remove_quote_{i}", type="primary"):
+                    if st.button(i18n.t("graphics_remove_button"), key=f"remove_quote_{i}", type="primary"):
                         st.session_state.quotes.pop(i)
                         st.rerun()
 
         st.divider()
-        st.markdown("#### 2. Project photos")
+        st.markdown(i18n.t("graphics_photos_heading"))
         if photos:
             # Thumbnails, because "Photo 1 / Photo 2 / Photo 3" in a dropdown
             # asks the user to remember which upload was which -- and the one
             # that ends up on the cover is the single most visible image in
             # the whole pack.
-            st.caption(
-                "Pick the cover photo. It fills the front page of the pack; the rest stay "
-                "available for section dividers below."
-            )
+            st.caption(i18n.t("graphics_photos_caption"))
             _cover_index = st.session_state.get("cover_photo_index") or 0
             if _cover_index >= len(photos):
                 _cover_index = 0
@@ -98,10 +81,10 @@ with tabs[6]:
                     try:
                         st.image(_photo, use_container_width=True)
                     except Exception:
-                        st.caption(f"(photo {_i + 1} couldn't be previewed)")
+                        st.caption(i18n.t("graphics_photo_preview_failed", n=_i + 1))
                     if _i == _cover_index:
-                        st.caption("**On the cover**")
-                    elif st.button("Use as cover", key=f"_cover_pick_{_i}", use_container_width=True):
+                        st.caption(i18n.t("graphics_on_cover_caption"))
+                    elif st.button(i18n.t("graphics_use_as_cover_button"), key=f"_cover_pick_{_i}", use_container_width=True):
                         st.session_state.cover_photo_index = _i
                         # The cover image is baked into the generated pack, so
                         # a previously-generated DOCX no longer matches.
@@ -110,49 +93,54 @@ with tabs[6]:
             st.session_state.cover_photo_index = _cover_index
 
         st.divider()
-        st.markdown("#### 3. Divider design per section")
+        st.markdown(i18n.t("graphics_divider_heading"))
         if not photos:
-            st.info("No project photos uploaded (Upload Docs) -- sections default to the 'Solid colour' layout. Upload photos there to unlock photo-based layouts.")
+            st.info(i18n.t("graphics_no_photos_info"))
 
+        # TODO A2 i18n: layout names below are functional values consumed
+        # verbatim by divider_designer.py (DIVIDER_LAYOUTS / string equality
+        # checks there) -- out of scope to translate without editing that
+        # module too, so the layout *options* stay in English while the
+        # surrounding UI text above is translated.
         available_layouts = ["Solid colour"] + (["Photo + gradient", "Photo + quote", "Split (colour + photo)"] if photos else [])
         config = st.session_state.section_divider_config
 
+        _none_option = i18n.t("graphics_none_option")
         for section in st.session_state.sections:
             cfg = config[section.title]
             with st.expander(f"{section.section_number}. {section.title}"):
                 c1, c2, c3, c4 = st.columns(4)
                 with c1:
                     layout = st.selectbox(
-                        "Layout", available_layouts,
+                        i18n.t("graphics_layout_label"), available_layouts,
                         index=available_layouts.index(cfg["layout"]) if cfg["layout"] in available_layouts else 0,
                         key=f"layout_{section.title}",
                     )
                 with c2:
-                    photo_options = ["(none)"] + [f"Photo {i+1}" for i in range(len(photos))]
+                    photo_options = [_none_option] + [i18n.t("graphics_photo_option", n=i + 1) for i in range(len(photos))]
                     photo_idx = cfg["photo_index"]
                     photo_choice = st.selectbox(
-                        "Photo", photo_options,
+                        i18n.t("graphics_photo_select_label"), photo_options,
                         index=(photo_idx + 1) if photo_idx is not None else 0,
                         key=f"photo_{section.title}", disabled=not photos,
                     )
                 with c3:
-                    quote_options = ["(none)"] + [f"{q['attribution'] or 'Quote'} {i+1}" for i, q in enumerate(st.session_state.quotes)]
+                    quote_options = [_none_option] + [f"{q['attribution'] or i18n.t('graphics_quote_fallback_label')} {i+1}" for i, q in enumerate(st.session_state.quotes)]
                     quote_idx = cfg["quote_index"]
                     quote_choice = st.selectbox(
-                        "Quote", quote_options,
+                        i18n.t("graphics_quote_select_label"), quote_options,
                         index=(quote_idx + 1) if quote_idx is not None else 0,
                         key=f"quote_{section.title}", disabled=not st.session_state.quotes,
                     )
                 with c4:
                     photo_caption = st.text_input(
-                        "Photo title", value=cfg.get("photo_caption", ""),
-                        placeholder="e.g. Mangaweka Bridge",
+                        i18n.t("graphics_photo_title_label"), value=cfg.get("photo_caption", ""),
+                        placeholder=i18n.t("graphics_photo_title_placeholder"),
                         key=f"photo_caption_{section.title}", disabled=not photos,
-                        help="Shown bottom-right of the photo itself, not the coloured band. "
-                             "Only used when this section has a photo.",
+                        help=i18n.t("graphics_photo_title_help"),
                     )
                 cfg["layout"] = layout
-                cfg["photo_index"] = None if photo_choice == "(none)" else int(photo_choice.split()[-1]) - 1
+                cfg["photo_index"] = None if photo_choice == _none_option else int(photo_choice.split()[-1]) - 1
                 # Show which photo "Photo 2" actually is, rather than making
                 # the user generate the banner to find out.
                 if cfg["photo_index"] is not None and cfg["photo_index"] < len(photos):
@@ -161,22 +149,22 @@ with tabs[6]:
                             st.image(photos[cfg["photo_index"]], use_container_width=True)
                         except Exception:
                             pass
-                cfg["quote_index"] = None if quote_choice == "(none)" else quote_options.index(quote_choice) - 1
+                cfg["quote_index"] = None if quote_choice == _none_option else quote_options.index(quote_choice) - 1
                 cfg["photo_caption"] = photo_caption.strip()
 
                 existing = st.session_state.divider_images.get(section.title)
                 if existing:
-                    st.image(existing, caption="Current banner for this section", use_container_width=True)
+                    st.image(existing, caption=i18n.t("graphics_current_banner_caption"), use_container_width=True)
 
         st.divider()
-        st.markdown("#### 3. Document font")
+        st.markdown(i18n.t("graphics_font_heading"))
         st.selectbox(
-            "Body & heading font", ["Arial", "Calibri", "Helvetica", "Times New Roman", "Georgia", "Verdana"],
-            key="body_font", help="Applied to the exported Word document and the divider text.",
+            i18n.t("graphics_font_label"), ["Arial", "Calibri", "Helvetica", "Times New Roman", "Georgia", "Verdana"],
+            key="body_font", help=i18n.t("graphics_font_help"),
         )
 
-        st.markdown("#### 4. Generate")
-        if st.button("Generate Graphics Package", type="primary"):
+        st.markdown(i18n.t("graphics_generate_heading"))
+        if st.button(i18n.t("graphics_generate_button"), type="primary"):
             new_divider_images = {}
             for section in st.session_state.sections:
                 cfg = config[section.title]
@@ -199,7 +187,7 @@ with tabs[6]:
 
             if not st.session_state.project_photo_bytes:
                 st.session_state.cover_hero_png = divider_designer.render_banner(
-                    st.session_state.tender_name or "Tender Response Pack", "Solid colour", theme_name,
+                    st.session_state.tender_name or i18n.t("graphics_default_tender_pack_name"), "Solid colour", theme_name,
                 )
             else:
                 st.session_state.cover_hero_png = None
@@ -213,20 +201,21 @@ with tabs[6]:
             )
             if st.session_state.weighted_criteria:
                 st.session_state.weighting_chart_png = graphics_engine.generate_weighting_chart(st.session_state.weighted_criteria)
-            st.success(f"Generated {len(new_divider_images)} divider banner(s) and {len(st.session_state.graphics)} graphic recommendation(s).")
+            st.success(i18n.t("graphics_generated_success", banners=len(new_divider_images), recs=len(st.session_state.graphics)))
 
     if st.session_state.graphics:
         st.divider()
-        st.markdown("#### Remaining placeholders overview")
+        st.markdown(i18n.t("graphics_remaining_placeholders_heading"))
         st.dataframe(
             [{
-                "Graphic": g.graphic_title, "Type": g.graphic_type, "Placement": g.suggested_placement,
-                "Source needed": g.source_data_required, "Status": g.status,
+                i18n.t("graphics_col_graphic"): g.graphic_title, i18n.t("graphics_col_type"): g.graphic_type,
+                i18n.t("graphics_col_placement"): g.suggested_placement,
+                i18n.t("graphics_col_source_needed"): g.source_data_required, i18n.t("graphics_col_status"): g.status,
             } for g in st.session_state.graphics],
             use_container_width=True,
         )
         if st.session_state.weighting_chart_png:
-            st.markdown("#### Evaluation weighting dashboard (generated)")
+            st.markdown(i18n.t("graphics_weighting_dashboard_heading"))
             st.image(st.session_state.weighting_chart_png)
 
 

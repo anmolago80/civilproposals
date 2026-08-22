@@ -17,16 +17,11 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 
 with tabs[7]:
-    st.subheader("Team & Resourcing")
-    st.caption(
-        "Identify who staffs each discipline the brief calls for, plus the standing "
-        "management roles every job carries, then generate a project org chart for the "
-        "Key Personnel section. Names come from your uploaded CV library where possible, "
-        "but you can also type in anyone you haven't uploaded a CV for."
-    )
+    st.subheader(i18n.t("team_subheader"))
+    st.caption(i18n.t("team_caption"))
 
     if st.session_state.analysis is None:
-        st.info("Run the Tender Analysis first -- the required disciplines come from the brief.")
+        st.info(i18n.t("team_run_analysis_first_info"))
     else:
         for _k in ("resource_extra_names", "cv_library_filenames", "cv_extracted_names", "dismissed_disciplines"):
             if st.session_state.get(_k) is None:
@@ -77,46 +72,37 @@ with tabs[7]:
         ai_ready = bool(st.session_state.ai_config.get("api_key")) and bool(cv_text.strip()) and _current_project_already_paid()
         ncol1, ncol2 = st.columns([2, 3])
         with ncol1:
-            if st.button("Load names from CV library", disabled=not ai_ready,
+            if st.button(i18n.t("team_load_names_button"), disabled=not ai_ready,
                          help=None if ai_ready else (
                              _ai_block_reason() if not _current_project_already_paid()
-                             else f"Upload a CV library (Upload Docs) and {_AI_HINT_CLAUSE}."
+                             else i18n.t("team_load_names_help", ai_hint=_AI_HINT_CLAUSE)
                          ), type="primary"):
-                with st.spinner("Reading the whole CV library for names (a few seconds per batch)..."):
+                with st.spinner(i18n.t("team_spinner_load_names")):
                     try:
                         _record_ai_click()
                         names, warns = team_bios.extract_person_names(cv_text, st.session_state.ai_config)
                         st.session_state.cv_extracted_names = resourcing.dedupe_names(names)
                         if st.session_state.cv_extracted_names:
-                            st.success(f"Found {len(st.session_state.cv_extracted_names)} name(s): " + ", ".join(st.session_state.cv_extracted_names))
+                            st.success(i18n.t("team_names_found_success", n=len(st.session_state.cv_extracted_names), names=", ".join(st.session_state.cv_extracted_names)))
                         for w in warns:
                             st.warning(w)
                     except Exception as exc:
-                        _show_error("Could not read names from the CV library", exc)
+                        _show_error(i18n.t("team_load_names_error"), exc)
                 st.rerun()
         with ncol2:
             if known_names:
-                st.caption("Available names: " + ", ".join(known_names))
+                st.caption(i18n.t("team_available_names_caption", names=", ".join(known_names)))
             else:
-                st.caption("No names yet -- click 'Load names from CV library', or add people manually below.")
+                st.caption(i18n.t("team_no_names_caption"))
 
         # The most reliable name source is the CV filenames (one file = one
         # person). A project loaded from an older save won't have them, so nudge
         # the user to re-upload the CV library for instant, complete names.
         if cv_text.strip() and not st.session_state.cv_library_filenames:
-            st.caption(
-                "💡 Tip: for the most complete and accurate list, re-upload your CV library files "
-                "in Upload Docs -- each filename gives one person's full name instantly, "
-                "with no AI guesswork. (Your loaded project kept the CV text but not the filenames.)"
-            )
+            st.caption(i18n.t("team_reupload_cv_tip_caption"))
 
-        st.markdown("#### Management roles")
-        st.caption(
-            "The client's PM sits at the top of the chart, then your Project Director and "
-            "Project Manager -- those three are always there. Design Manager is optional: "
-            "remove it with the ✕ if this commission doesn't have one, and it disappears from "
-            "the chart and the pack entirely rather than sitting there as an unresolvable TBC."
-        )
+        st.markdown(i18n.t("team_management_roles_heading"))
+        st.caption(i18n.t("team_management_roles_caption"))
         _render_resource_rows("management", known_names)
 
         # Only offered while the role is actually gone, mirroring how a removed
@@ -128,7 +114,7 @@ with tabs[7]:
                 continue
             _acol1, _acol2 = st.columns([2, 3])
             with _acol1:
-                if st.button(f"+ Add {_optional_role}", key=f"_add_mgmt_{_optional_role}",
+                if st.button(i18n.t("team_add_role_button", role=_optional_role), key=f"_add_mgmt_{_optional_role}",
                              type="primary"):
                     st.session_state.removed_management_roles = [
                         r for r in st.session_state.removed_management_roles if r != _optional_role
@@ -143,18 +129,11 @@ with tabs[7]:
                     )
                     st.rerun()
             with _acol2:
-                st.caption(
-                    f"{_optional_role} is currently off this project's chart. Adding it back "
-                    "restores an unassigned row here -- nothing else changes."
-                )
+                st.caption(i18n.t("team_role_off_chart_caption", role=_optional_role))
 
         st.divider()
-        st.markdown("#### Discipline leads")
-        st.caption(
-            "One per discipline the brief requires. Add or remove disciplines as needed. "
-            "Project Management isn't listed here -- it's staffed by the Project Manager role "
-            "above -- but it still gets its own line in the fee estimate tab."
-        )
+        st.markdown(i18n.t("team_discipline_leads_heading"))
+        st.caption(i18n.t("team_discipline_leads_caption"))
         _render_resource_rows("discipline", known_names)
 
         # Focused re-scan of the brief for disciplines -- catches ones the main
@@ -164,12 +143,12 @@ with tabs[7]:
         rescan_ready = bool(st.session_state.ai_config.get("api_key")) and bool(brief_text.strip()) and _current_project_already_paid()
         rcol1, rcol2 = st.columns([2, 3])
         with rcol1:
-            if st.button("Re-scan brief for disciplines", disabled=not rescan_ready,
+            if st.button(i18n.t("team_rescan_button"), disabled=not rescan_ready,
                          help=None if rescan_ready else (
                              _ai_block_reason() if not _current_project_already_paid()
-                             else f"Needs the tender brief (Upload Docs) and {_AI_HINT_CLAUSE}."
+                             else i18n.t("team_rescan_help", ai_hint=_AI_HINT_CLAUSE)
                          ), type="primary"):
-                with st.spinner("Re-reading the brief for every discipline the scope implies..."):
+                with st.spinner(i18n.t("team_spinner_rescan")):
                     try:
                         _record_ai_click()
                         detected, _detect_warnings = tender_analyser.detect_disciplines_from_text(
@@ -193,33 +172,29 @@ with tabs[7]:
                                 added.append(label)
                         st.session_state.resource_plan = resourcing.normalize_plan_disciplines(st.session_state.resource_plan)
                         if added:
-                            st.success("Added: " + ", ".join(added))
+                            st.success(i18n.t("team_disciplines_added_success", names=", ".join(added)))
                         elif _detect_warnings:
                             # Don't claim "nothing found" when the scan didn't
                             # actually complete -- see the warnings above.
                             pass
                         else:
-                            st.info("No new disciplines found beyond what's already listed.")
+                            st.info(i18n.t("team_no_new_disciplines_info"))
                     except Exception as exc:
-                        _show_error("Discipline re-scan failed", exc)
+                        _show_error(i18n.t("team_rescan_failed_error"), exc)
                 st.rerun()
         with rcol2:
-            st.caption("Reads the brief and infers disciplines the scope implies (environmental, constructability, rail, survey, etc.), even if they weren't named explicitly.")
+            st.caption(i18n.t("team_rescan_caption"))
 
         with st.form("add_discipline_resource_form", clear_on_submit=True):
             acol1, acol2 = st.columns([3, 1])
             with acol1:
-                new_disc = st.text_input("Add a discipline", placeholder="e.g. Landscaping, Surveying, Constructability")
+                new_disc = st.text_input(i18n.t("team_add_discipline_label"), placeholder=i18n.t("team_add_discipline_placeholder"))
             with acol2:
                 st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-                if st.form_submit_button("Add discipline", type="primary") and new_disc.strip():
+                if st.form_submit_button(i18n.t("team_add_discipline_button"), type="primary") and new_disc.strip():
                     label = resourcing.canonical_discipline(new_disc.strip())
                     if label == resourcing.ALWAYS_INCLUDED_DISCIPLINE:
-                        st.warning(
-                            "Project Management is staffed by the Project Manager role above, "
-                            "not added here as a separate discipline. It still has its own line "
-                            "in the fee estimate tab."
-                        )
+                        st.warning(i18n.t("team_pm_not_separate_warning"))
                     else:
                         # Un-dismiss if it was previously removed, so re-adding sticks.
                         st.session_state.dismissed_disciplines = [
@@ -232,27 +207,21 @@ with tabs[7]:
                     st.rerun()
 
         st.divider()
-        st.markdown("#### Add someone without a CV")
-        st.caption("Names you type here become available in every dropdown above -- for people you want on the chart who don't have a CV uploaded.")
+        st.markdown(i18n.t("team_add_no_cv_heading"))
+        st.caption(i18n.t("team_add_no_cv_caption"))
         with st.form("add_extra_name_form", clear_on_submit=True):
             ncol1, ncol2 = st.columns([3, 1])
             with ncol1:
-                extra_name = st.text_input("Person's name", label_visibility="collapsed", placeholder="e.g. Jordan Lee")
+                extra_name = st.text_input(i18n.t("team_person_name_label"), label_visibility="collapsed", placeholder=i18n.t("team_person_name_placeholder"))
             with ncol2:
-                if st.form_submit_button("Add name", type="primary") and extra_name.strip():
+                if st.form_submit_button(i18n.t("team_add_name_button"), type="primary") and extra_name.strip():
                     if extra_name.strip() not in st.session_state.resource_extra_names:
                         st.session_state.resource_extra_names.append(extra_name.strip())
                     st.rerun()
 
         st.divider()
-        st.markdown("#### Key personnel profile details")
-        st.caption(
-            "Feeds the numbered Key Personnel profiles in the exported pack -- Project Director, "
-            "Project Manager, Design Manager (when the project has one), then discipline leads, "
-            "in that order. Everything here "
-            "is optional, user-entered text (never guessed): leave a field blank and the export "
-            "shows a clearly marked placeholder instead."
-        )
+        st.markdown(i18n.t("team_key_personnel_heading"))
+        st.caption(i18n.t("team_key_personnel_caption"))
         # One entry per unique person (roles merged) -- so someone leading two disciplines
         # gets a single profile/editor, not duplicates. Matches the deduped export exactly.
         _profile_entries = resourcing.personnel_profiles_deduped(st.session_state.resource_plan)
@@ -262,22 +231,20 @@ with tabs[7]:
             and bool(_assigned_profile_names) and _current_project_already_paid()
         )
         _overwrite_profiles = st.checkbox(
-            "Overwrite existing values (re-read from CVs, replacing what's there)",
+            i18n.t("team_overwrite_checkbox_label"),
             value=False, key="_profile_fill_overwrite",
-            help="Off (default): only fills blank fields, protecting anything you've typed. "
-                 "On: re-reads every assigned person's CV and replaces the current values -- "
-                 "use this to fix wrong details left over from an earlier run.",
+            help=i18n.t("team_overwrite_checkbox_help"),
         )
         pfcol1, pfcol2 = st.columns([2, 3])
         with pfcol1:
             if st.button(
-                "Fill profile fields from CVs", disabled=not _profile_fill_ready,
+                i18n.t("team_fill_profile_button"), disabled=not _profile_fill_ready,
                 help=None if _profile_fill_ready else (
                     _ai_block_reason() if not _current_project_already_paid()
-                    else f"Assign people to roles above, upload a CV library (Upload Docs), and {_AI_HINT_CLAUSE}."
+                    else i18n.t("team_fill_profile_help", ai_hint=_AI_HINT_CLAUSE)
                 ),
              type="primary"):
-                with st.spinner("Reading each person's CV for registration status, experience and relevance (a few seconds per batch)..."):
+                with st.spinner(i18n.t("team_spinner_fill_profile")):
                     try:
                         _record_ai_click()
                         cv_profiles, warns = team_bios.extract_personnel_profile_fields(
@@ -330,46 +297,34 @@ with tabs[7]:
                             if changed:
                                 filled.append(entry["name"])
                         if filled:
-                            verb = "Updated" if _overwrite_profiles else "Filled"
-                            st.success(f"{verb} profile details for: {', '.join(filled)}. Review before exporting -- fields left blank mean the CV didn't clearly state that fact.")
+                            verb = i18n.t("team_verb_updated") if _overwrite_profiles else i18n.t("team_verb_filled")
+                            st.success(i18n.t("team_profile_filled_success", verb=verb, names=", ".join(filled)))
                         elif _overwrite_profiles:
-                            st.info("No profile details found in the CVs to write -- the CVs don't clearly state these facts, or no assigned person could be matched to a CV file.")
+                            st.info(i18n.t("team_profile_none_overwrite_info"))
                         else:
-                            st.info("No new profile details found -- existing entries were left as-is. Tick 'Overwrite existing values' to re-read and replace them.")
+                            st.info(i18n.t("team_profile_none_info"))
                         for w in warns:
                             st.warning(w)
                     except Exception as exc:
-                        _show_error("Could not fill profile fields from CVs", exc)
+                        _show_error(i18n.t("team_fill_profile_error"), exc)
                 st.rerun()
         with pfcol2:
-            st.caption(
-                "Reads each assigned person's own CV file (in isolation, so no one's details get mixed up "
-                "with another person's) for their registration/membership status and stated years of "
-                "experience, and drafts an \"On this project, [name] will...\" line from their real background."
-            )
+            st.caption(i18n.t("team_fill_profile_caption"))
 
         st.markdown("---")
-        st.caption(
-            "**Include in proposal** -- tick which pen pics actually make it into the exported Key "
-            "Personnel section. A full photo + write-up profile takes real page space, so when a "
-            "page-limited section is full, untick anyone whose profile isn't essential to include -- "
-            "they're still on the job (still in the org chart and fee build-up), they just won't get "
-            "a dedicated profile. Whichever leadership roles this project carries are always "
-            "recommended (project leadership), every other tick can be pre-set from an AI read of this project's "
-            "scope below, and you can always override any tick by hand."
-        )
+        st.caption(i18n.t("team_include_caption"))
         _suggest_ready = (
             bool(st.session_state.ai_config.get("api_key")) and bool(st.session_state.resource_plan)
             and _current_project_already_paid()
         )
         if st.button(
-            "Suggest which personnel to include (AI)", disabled=not _suggest_ready,
+            i18n.t("team_suggest_button"), disabled=not _suggest_ready,
             help=None if _suggest_ready else (
                 _ai_block_reason() if not _current_project_already_paid()
-                else f"Assign roles above and {_AI_HINT_CLAUSE}."
+                else i18n.t("team_suggest_help", ai_hint=_AI_HINT_CLAUSE)
             ),
          type="primary"):
-            with st.spinner("Reading this project's scope to judge which discipline profiles are worth including..."):
+            with st.spinner(i18n.t("team_spinner_suggest")):
                 try:
                     _record_ai_click()
                     suggestions = resourcing.suggest_proposal_inclusion(
@@ -393,9 +348,9 @@ with tabs[7]:
                         person_label = (entry.get("name") or "").strip() or "[unassigned]"
                         ekey_for_entry = person_label if entry.get("name") else a.slot
                         st.session_state[f"prof_include_{ekey_for_entry}"] = a.include_in_proposal
-                    st.success("Recommendations applied -- review the ticks and reasons below, then adjust by hand as needed.")
+                    st.success(i18n.t("team_suggest_applied_success"))
                 except Exception as exc:
-                    _show_error("Could not get AI recommendations", exc)
+                    _show_error(i18n.t("team_suggest_error"), exc)
             st.rerun()
 
         for entry in _profile_entries:
@@ -431,7 +386,7 @@ with tabs[7]:
                 st.markdown(f"**{role_label} -- {person_label}**")
             with hcol_tick:
                 a.include_in_proposal = st.checkbox(
-                    "Include in proposal", value=a.include_in_proposal, key=f"prof_include_{ekey}",
+                    i18n.t("team_include_checkbox_label"), value=a.include_in_proposal, key=f"prof_include_{ekey}",
                 )
             with hcol2:
                 refresh_ready = (
@@ -439,14 +394,14 @@ with tabs[7]:
                     and bool(cv_text.strip()) and _current_project_already_paid()
                 )
                 if st.button(
-                    "Refresh from CV", key=f"prof_refresh_{ekey}", disabled=not refresh_ready,
+                    i18n.t("team_refresh_button"), key=f"prof_refresh_{ekey}", disabled=not refresh_ready,
                     help=None if refresh_ready else (
                         _ai_block_reason() if not _current_project_already_paid()
-                        else f"Assign a name, upload a CV library (Upload Docs), and {_AI_HINT_CLAUSE}."
+                        else i18n.t("team_refresh_help", ai_hint=_AI_HINT_CLAUSE)
                     ),
                  type="primary"):
                     messages = []  # [(level, text), ...] -- rendered after the rerun, see result_key above
-                    with st.spinner(f"Re-reading {name}'s CV..."):
+                    with st.spinner(i18n.t("team_spinner_refresh", name=name)):
                         try:
                             _record_ai_click()
                             cv_profiles, warns = team_bios.extract_personnel_profile_fields(
@@ -480,7 +435,7 @@ with tabs[7]:
                                     st.session_state[f"prof_relproj_{ekey}"] = "\n".join(found_projects)
                                     changed = True
                             if changed:
-                                messages.append(("success", f"Refreshed {name} from their own CV file."))
+                                messages.append(("success", i18n.t("team_refresh_success", name=name)))
                             elif found is not None:
                                 # Matched to a CV file, AI call succeeded, but every field came back
                                 # empty -- almost always means the CV TEXT on file for this person is
@@ -490,16 +445,12 @@ with tabs[7]:
                                 # tab 2 re-extracts it with the current logic and fixes this.
                                 messages.append((
                                     "warning",
-                                    f"Read {name}'s CV file but found no details to fill in. This usually means the "
-                                    f"text stored for their CV is incomplete (e.g. it was uploaded before a recent "
-                                    f"extraction fix) rather than the CV genuinely being empty -- try re-uploading "
-                                    f"{name}'s CV file in Upload Docs, then refresh again."
+                                    i18n.t("team_refresh_thin_warning", name=name),
                                 ))
                             else:
                                 messages.append((
                                     "warning",
-                                    f"Couldn't find/re-read {name}'s CV file -- check their filename "
-                                    "derives to this exact name, or that their CV is in the library (Upload Docs)."
+                                    i18n.t("team_refresh_not_found_warning", name=name),
                                 ))
                             for w in warns:
                                 messages.append(("warning", w))
@@ -514,8 +465,7 @@ with tabs[7]:
                             print(f"[Refresh from CV] {exc}", file=sys.stderr)
                             messages.append((
                                 "error",
-                                f"Could not refresh {name} from their CV -- please try again. If it keeps "
-                                "happening, email hello@civilproposals.com and we'll take a look.",
+                                i18n.t("team_refresh_error", name=name),
                             ))
                     st.session_state[result_key] = messages
                     st.rerun()
@@ -531,35 +481,35 @@ with tabs[7]:
             # even if the user has since overridden the tick by hand, so they can see
             # what the recommendation was.
             if a.slot in resourcing.FIRM_MANAGEMENT_ROLES:
-                st.caption(f"AI note: {resourcing.FIRM_LEADERSHIP_REASON}")
+                st.caption(i18n.t("team_ai_note_prefix", reason=resourcing.FIRM_LEADERSHIP_REASON))
             else:
                 _verdict = st.session_state.personnel_inclusion_suggestions.get(a.slot)
                 if _verdict:
-                    _stance = "Recommended" if _verdict.get("recommended") else "Not essential"
-                    st.caption(f"AI note ({_stance}): {_verdict.get('reason', '')}")
+                    _stance = i18n.t("team_stance_recommended") if _verdict.get("recommended") else i18n.t("team_stance_not_essential")
+                    st.caption(i18n.t("team_ai_note_stance_prefix", stance=_stance, reason=_verdict.get('reason', '')))
 
-            with st.expander("Details", expanded=False):
+            with st.expander(i18n.t("team_details_expander"), expanded=False):
                 if not (entry.get("name") or "").strip():
-                    st.caption("Assign a name to this role above before adding profile details.")
-                a.qualification = st.text_input("Qualification", value=a.qualification, key=f"prof_qual_{ekey}")
-                a.rpeq_status = st.text_input("RPEQ / registration status", value=a.rpeq_status, key=f"prof_rpeq_{ekey}")
-                a.years_experience = st.text_input("Years of experience", value=a.years_experience, key=f"prof_years_{ekey}")
+                    st.caption(i18n.t("team_assign_name_first_caption"))
+                a.qualification = st.text_input(i18n.t("team_qualification_label"), value=a.qualification, key=f"prof_qual_{ekey}")
+                a.rpeq_status = st.text_input(i18n.t("team_rpeq_label"), value=a.rpeq_status, key=f"prof_rpeq_{ekey}")
+                a.years_experience = st.text_input(i18n.t("team_years_experience_label"), value=a.years_experience, key=f"prof_years_{ekey}")
                 a.value_to_project = st.text_area(
-                    f"On this project, {person_label} will...", value=a.value_to_project,
+                    i18n.t("team_value_to_project_label", person=person_label), value=a.value_to_project,
                     key=f"prof_value_{ekey}", height=70,
                 )
                 relevant_projects_text = st.text_area(
-                    "Relevant project experience (one per line)",
+                    i18n.t("team_relevant_projects_label"),
                     value="\n".join(a.relevant_projects), key=f"prof_relproj_{ekey}", height=70,
                 )
                 a.relevant_projects = [line.strip() for line in relevant_projects_text.splitlines() if line.strip()]
                 local_exp_text = st.text_area(
-                    "Local district experience (one per line)",
+                    i18n.t("team_local_experience_label"),
                     value="\n".join(a.local_experience), key=f"prof_local_{ekey}", height=70,
                 )
                 a.local_experience = [line.strip() for line in local_exp_text.splitlines() if line.strip()]
                 photo = st.file_uploader(
-                    "Headshot (optional)", type=["png", "jpg", "jpeg"], key=f"prof_photo_{ekey}",
+                    i18n.t("team_headshot_label"), type=["png", "jpg", "jpeg"], key=f"prof_photo_{ekey}",
                     disabled=not (entry.get("name") or "").strip(),
                 )
                 if photo is not None and (entry.get("name") or "").strip():
@@ -573,45 +523,36 @@ with tabs[7]:
                     st.image(existing_profile_photo, width=120)
 
         st.divider()
-        st.markdown("#### Project organisation chart")
+        st.markdown(i18n.t("team_org_chart_heading"))
         _assigned = sum(1 for a in st.session_state.resource_plan if (a.person_name or "").strip())
-        st.caption(
-            f"{_assigned} of {len(st.session_state.resource_plan)} slots assigned. An unassigned "
-            "slot shows as a red TBC on the chart -- a role you removed doesn't show at all."
-        )
+        st.caption(i18n.t("team_org_chart_caption", assigned=_assigned, total=len(st.session_state.resource_plan)))
         _org_chart_style_control()
 
         _org_preview = _org_png(st.session_state.org_chart_style)
         if _org_preview:
             st.image(_org_preview, use_container_width=True)
         else:
-            st.caption(
-                "Couldn't draw the chart just now -- your team is unaffected. Try again, and if "
-                "it keeps happening email hello@civilproposals.com."
-            )
+            st.caption(i18n.t("team_chart_render_failed_caption"))
 
         # The preview is live; putting it INTO the pack stays an explicit act,
         # so a stray click on a style never silently rewrites what an already
         # generated pack contains.
         _ocol1, _ocol2 = st.columns([2, 3])
         with _ocol1:
-            if st.button("Use this chart in the exported pack", type="primary",
+            if st.button(i18n.t("team_use_chart_button"), type="primary",
                          disabled=_org_preview is None):
                 st.session_state.org_chart_png = _org_preview
                 st.session_state.org_chart_png_style = st.session_state.org_chart_style
-                st.success(
-                    "Saved. This chart now appears in the Key Personnel area of the exported pack."
-                )
+                st.success(i18n.t("team_chart_saved_success"))
         with _ocol2:
             if not st.session_state.org_chart_png:
-                st.caption("The exported pack has no org chart yet -- click to add this one.")
+                st.caption(i18n.t("team_chart_none_caption"))
             elif st.session_state.org_chart_png_style != st.session_state.org_chart_style:
-                st.warning(
-                    "**The exported pack still has the "
-                    f"{org_chart_render.STYLE_LABELS.get(st.session_state.org_chart_png_style, 'previous')} "
-                    "chart.** Click to replace it with the one above."
-                )
+                st.warning(i18n.t(
+                    "team_chart_stale_warning",
+                    style=org_chart_render.STYLE_LABELS.get(st.session_state.org_chart_png_style, 'previous'),
+                ))
             else:
-                st.caption("The exported pack has this chart.")
+                st.caption(i18n.t("team_chart_current_caption"))
 
 

@@ -17,17 +17,11 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 
 with tabs[5]:
-    st.subheader("Draft Responses")
+    st.subheader(i18n.t("drafting_subheader"))
     if _is_letter():
-        st.caption(
-            "The Small Scope pack has two sections that are genuinely free text -- Introduction "
-            "and Methodology and Deliverables, both drafted below. Scope of Work comes straight "
-            "from the brief, Project Team/Fees/Program have their own dedicated steps "
-            "(Team & Resourcing / Fee Estimate), and Terms of Engagement further down is "
-            "always your own wording, never AI-drafted."
-        )
+        st.caption(i18n.t("drafting_letter_caption"))
     else:
-        st.caption("First-pass draft content per section, with red guidance notes and a list of what still needs real user input.")
+        st.caption(i18n.t("drafting_standard_caption"))
 
     ready = (
         st.session_state.sections is not None
@@ -38,26 +32,20 @@ with tabs[5]:
         if st.session_state.sections is not None and not _current_project_already_paid():
             st.info(_ai_block_reason())
         else:
-            st.info(f"Generate the Proposal Structure and {_AI_HINT_CLAUSE}.")
+            # TODO A2 i18n: _AI_HINT_CLAUSE is defined (English-only) in
+            # 00_init.py, out of scope for this pass -- only the surrounding
+            # sentence is translated here.
+            st.info(i18n.t("drafting_generate_structure_and_hint", hint=_AI_HINT_CLAUSE))
 
     if _structure_format_stale():
-        st.warning(
-            "The Proposal format (Project Setup) was changed after the current sections were generated. "
-            "Go to Structure and click **Generate Proposal Structure** again before drafting, or "
-            "this will silently draft nothing for the sections that only exist in this format."
-        )
+        st.warning(i18n.t("drafting_format_stale_warning"))
 
-    if st.button("Generate First-Pass Drafts", type="primary", disabled=not ready):
+    if st.button(i18n.t("drafting_generate_button"), type="primary", disabled=not ready):
         targets = _draftable_sections(st.session_state.sections)
         if not targets:
-            st.error(
-                "Nothing to draft -- the current sections don't match any of this format's "
-                "AI-drafted section titles. This usually means the Proposal format (Project Setup) was "
-                "changed after Proposal Structure was generated. Go to Structure and click "
-                "**Generate Proposal Structure** again, then retry this."
-            )
+            st.error(i18n.t("drafting_nothing_to_draft_error"))
             st.stop()
-        progress = st.progress(0.0, text="Drafting...")
+        progress = st.progress(0.0, text=i18n.t("drafting_progress_text"))
 
         def _progress_cb(done, total, title):
             # generate_all_drafts() now runs sections concurrently and calls
@@ -66,7 +54,7 @@ with tabs[5]:
             # old sequential version) -- sections may complete out of their
             # original order, so `title` here is whichever one just finished,
             # not necessarily done'th in the list.
-            progress.progress(done / max(total, 1), text=f"Drafted '{title}' ({done}/{total})...")
+            progress.progress(done / max(total, 1), text=i18n.t("drafting_progress_detail", title=title, done=done, total=total))
 
         try:
             _record_ai_click()
@@ -125,40 +113,30 @@ with tabs[5]:
                 args=(targets, st.session_state.analysis, _material_for_draft, st.session_state.ai_config),
                 kwargs=_draft_kwargs,
                 progress=progress,
-                queued_text="Queued for drafting...", running_text="Drafting...",
+                queued_text=i18n.t("drafting_queued_text"), running_text=i18n.t("drafting_progress_text"),
                 inline_extra_kwargs={"progress_callback": _progress_cb},
                 queue_func=job_queue.run_draft_generation_job,
                 queue_args=(targets, st.session_state.analysis, _material_for_draft, _redacted_ai_config),
             )
             st.session_state.drafts = {**(st.session_state.drafts or {}), **new_drafts}
-            progress.progress(1.0, text="Done.")
+            progress.progress(1.0, text=i18n.t("drafting_done_text"))
             # "Complete" has to mean complete. An empty or one-sentence draft
             # used to render as a blank expander under a green success
             # message, and nobody opens twelve expanders to check.
             _thin = _thin_drafts(new_drafts)
             if _thin:
-                st.warning(
-                    "**Drafting finished, but some sections came back empty or very short:** "
-                    + ", ".join(_thin)
-                    + ". Re-run drafting for those, or write them yourself -- they will export "
-                    "as red placeholders until you do."
-                )
+                st.warning(i18n.t("drafting_thin_warning", sections=", ".join(_thin)))
             if len(_thin) < len(new_drafts):
-                st.success(f"Draft generation complete for {len(new_drafts) - len(_thin)} section(s).")
+                st.success(i18n.t("drafting_generation_complete_success", n=len(new_drafts) - len(_thin)))
         except Exception as exc:
-            _show_error("Draft generation failed", exc)
+            _show_error(i18n.t("drafting_generation_failed_error"), exc)
 
     # -----------------------------------------------------------------
     # Risk register
     # -----------------------------------------------------------------
     st.markdown("---")
-    st.markdown("#### Risk register")
-    st.caption(
-        "A first-pass risk / impact / mitigation table, structured from the risks the brief "
-        "itself raises and the gaps the analysis found. **A mitigation is a commitment your "
-        "firm will be held to**, so the AI only ever states one the brief already describes -- "
-        "everything else comes back as **TBC** for you to decide. Edit anything below."
-    )
+    st.markdown(i18n.t("drafting_risk_register_heading"))
+    st.caption(i18n.t("drafting_risk_register_caption"))
     _risk_ready = (
         st.session_state.analysis is not None
         and bool(st.session_state.ai_config.get("api_key"))
@@ -167,7 +145,7 @@ with tabs[5]:
     rcol1, rcol2 = st.columns([1, 2])
     with rcol1:
         _draft_risk_clicked = st.button(
-            "Draft risk register", type="primary", disabled=not _risk_ready, key="draft_risk_btn",
+            i18n.t("drafting_risk_register_button"), type="primary", disabled=not _risk_ready, key="draft_risk_btn",
         )
     with rcol2:
         if not st.session_state.ai_config.get("api_key"):
@@ -175,14 +153,14 @@ with tabs[5]:
         elif not _current_project_already_paid():
             st.caption(_ai_block_reason())
         elif st.session_state.analysis is None:
-            st.caption("Run Tender Analysis first -- the register is built from the brief's own risks.")
+            st.caption(i18n.t("drafting_risk_run_analysis_caption"))
 
     if _draft_risk_clicked:
         if st.session_state.risk_register and not st.session_state.get("_confirm_rerisk"):
             st.session_state._confirm_rerisk = True
         else:
             st.session_state._confirm_rerisk = False
-            with st.spinner("Structuring the risk register..."):
+            with st.spinner(i18n.t("drafting_spinner_risk_register")):
                 try:
                     _record_ai_click()
                     st.session_state.risk_register = risk_register.draft_risk_register(
@@ -191,21 +169,15 @@ with tabs[5]:
                         st.session_state.ai_config,
                     )
                     if not (st.session_state.risk_register.entries if st.session_state.risk_register else []):
-                        st.warning(
-                            "No risks came back -- the brief may not raise any. Nothing has been "
-                            "changed; add rows by hand below if you want a register anyway."
-                        )
+                        st.warning(i18n.t("drafting_risk_none_warning"))
                     else:
-                        st.success(f"Structured {len(st.session_state.risk_register.entries)} risk(s) -- review below.")
+                        st.success(i18n.t("drafting_risk_structured_success", n=len(st.session_state.risk_register.entries)))
                 except Exception as exc:
-                    _show_error("Drafting the risk register failed", exc)
+                    _show_error(i18n.t("drafting_risk_register_failed_error"), exc)
 
     if st.session_state.get("_confirm_rerisk"):
-        st.warning(
-            "You already have a risk register, and some of it may be your own edits. Drafting "
-            "again replaces every row. Click **Draft risk register** once more to go ahead."
-        )
-        if st.button("Cancel", key="cancel_rerisk"):
+        st.warning(i18n.t("drafting_risk_confirm_rerisk_warning"))
+        if st.button(i18n.t("drafting_cancel_button"), key="cancel_rerisk"):
             st.session_state._confirm_rerisk = False
             st.rerun()
 
@@ -218,10 +190,10 @@ with tabs[5]:
             _risk_rows, key="risk_register_editor", num_rows="dynamic", use_container_width=True,
             hide_index=True,
             column_config={
-                "Risk": st.column_config.TextColumn("Risk", width="medium"),
-                "Impact": st.column_config.TextColumn("Impact", width="medium"),
-                "Mitigation": st.column_config.TextColumn("Mitigation", width="medium"),
-                "Source": st.column_config.TextColumn("Source", disabled=True, width="small"),
+                "Risk": st.column_config.TextColumn(i18n.t("drafting_risk_col_risk"), width="medium"),
+                "Impact": st.column_config.TextColumn(i18n.t("drafting_risk_col_impact"), width="medium"),
+                "Mitigation": st.column_config.TextColumn(i18n.t("drafting_risk_col_mitigation"), width="medium"),
+                "Source": st.column_config.TextColumn(i18n.t("drafting_risk_col_source"), disabled=True, width="small"),
             },
         )
         st.session_state.risk_register = risk_register.RiskRegister(entries=[
@@ -233,23 +205,14 @@ with tabs[5]:
             )
             for row in _edited_risks if (row.get("Risk") or "").strip()
         ])
-        st.caption(
-            "Rows left as **TBC** export in red, so nobody submits an unfilled mitigation by "
-            "accident."
-        )
+        st.caption(i18n.t("drafting_risk_tbc_caption"))
 
     # -----------------------------------------------------------------
     # Design stages -- the grid that fills the methodology table
     # -----------------------------------------------------------------
     st.markdown("---")
-    st.markdown("#### Design stages")
-    st.caption(
-        "The delivery stages behind the exported methodology table. The AI assigns your "
-        "brief's own scope items and deliverables to stages and rephrases them -- it never "
-        "adds a task, activity, deliverable or date that isn't in the brief, and writes "
-        "**TBC** wherever the brief doesn't support a cell. Edit anything below; what's here "
-        "when you export is exactly what goes into the table."
-    )
+    st.markdown(i18n.t("drafting_design_stages_heading"))
+    st.caption(i18n.t("drafting_design_stages_caption"))
 
     _stages_ready = (
         st.session_state.analysis is not None
@@ -264,7 +227,7 @@ with tabs[5]:
     scol1, scol2 = st.columns([1, 2])
     with scol1:
         _draft_stages_clicked = st.button(
-            "Draft methodology stages", type="primary", disabled=not _stages_ready,
+            i18n.t("drafting_stages_button"), type="primary", disabled=not _stages_ready,
             key="draft_stages_btn",
         )
     with scol2:
@@ -273,7 +236,7 @@ with tabs[5]:
         elif not _current_project_already_paid():
             st.caption(_ai_block_reason())
         elif st.session_state.analysis is None:
-            st.caption("Run Tender Analysis first -- the stages are built from the brief's own scope and deliverables.")
+            st.caption(i18n.t("drafting_stages_run_analysis_caption"))
 
     # Regenerating over edited content needs an explicit second click. AI
     # output must never silently overwrite something a person has changed.
@@ -282,7 +245,7 @@ with tabs[5]:
             st.session_state._confirm_restage = True
         else:
             st.session_state._confirm_restage = False
-            with st.spinner("Drafting methodology stages..."):
+            with st.spinner(i18n.t("drafting_spinner_stages")):
                 try:
                     _record_ai_click()
                     _methodology_draft = (st.session_state.drafts or {}).get("Methodology and Deliverables")
@@ -295,33 +258,23 @@ with tabs[5]:
                         config=st.session_state.ai_config,
                     )
                     if not st.session_state.methodology_stages:
-                        st.warning(
-                            "The AI returned no stages -- nothing has been changed. You can fill "
-                            "the grid in by hand with **Start a blank grid** below."
-                        )
+                        st.warning(i18n.t("drafting_stages_none_warning"))
                     else:
-                        st.success(f"Drafted {len(st.session_state.methodology_stages)} stage(s) -- review and edit below.")
+                        st.success(i18n.t("drafting_stages_drafted_success", n=len(st.session_state.methodology_stages)))
                 except Exception as exc:
-                    _show_error("Drafting the methodology stages failed", exc)
+                    _show_error(i18n.t("drafting_stages_failed_error"), exc)
 
     if st.session_state.get("_confirm_restage"):
-        st.warning(
-            "You already have a stage grid below, and some of it may be your own edits. "
-            "Drafting again replaces every stage. Click **Draft methodology stages** once "
-            "more to go ahead, or edit the grid directly instead."
-        )
-        if st.button("Cancel", key="cancel_restage"):
+        st.warning(i18n.t("drafting_stages_confirm_restage_warning"))
+        if st.button(i18n.t("drafting_cancel_button"), key="cancel_restage"):
             st.session_state._confirm_restage = False
             st.rerun()
 
     if not st.session_state.methodology_stages:
-        if st.button("Start a blank grid", key="blank_stages_btn"):
+        if st.button(i18n.t("drafting_blank_grid_button"), key="blank_stages_btn"):
             st.session_state.methodology_stages = methodology_stages.blank_stages()
             st.rerun()
-        st.caption(
-            "No stages yet. Without them the exported methodology table falls back to its "
-            "generic four-stage layout with placeholder columns."
-        )
+        st.caption(i18n.t("drafting_no_stages_caption"))
     else:
         _week_labels = st.session_state.program_week_labels or []
         _week_options = [0] + list(range(1, len(_week_labels) + 1))
@@ -333,56 +286,53 @@ with tabs[5]:
 
         _remove_index = None
         for _i, _stage in enumerate(st.session_state.methodology_stages):
-            with st.expander(f"Stage {_i + 1}: {_stage.name or 'Untitled'}", expanded=(_i == 0)):
-                _stage.name = st.text_input("Stage name", value=_stage.name, key=f"_stage_name_{_i}")
+            _stage_title = i18n.t(
+                "drafting_stage_title", n=_i + 1,
+                name=_stage.name or i18n.t("drafting_stage_untitled"),
+            )
+            with st.expander(_stage_title, expanded=(_i == 0)):
+                _stage.name = st.text_input(i18n.t("drafting_stage_name_label"), value=_stage.name, key=f"_stage_name_{_i}")
                 wcol1, wcol2, wcol3 = st.columns([1, 1, 2])
                 with wcol1:
                     _ws = st.selectbox(
-                        "First week", _week_options, key=f"_stage_ws_{_i}",
+                        i18n.t("drafting_stage_first_week_label"), _week_options, key=f"_stage_ws_{_i}",
                         index=_week_options.index(_stage.week_start) if _stage.week_start in _week_options else 0,
                         format_func=_week_label,
                     )
                 with wcol2:
                     _we = st.selectbox(
-                        "Last week", _week_options, key=f"_stage_we_{_i}",
+                        i18n.t("drafting_stage_last_week_label"), _week_options, key=f"_stage_we_{_i}",
                         index=_week_options.index(_stage.week_end) if _stage.week_end in _week_options else 0,
                         format_func=_week_label,
                     )
                 with wcol3:
                     st.write("")
-                    st.caption(
-                        "Week numbers come from the delivery program on the Fees & Program step. "
-                        "Set an anticipated start date there and these become real dates in the "
-                        "exported table."
-                    )
+                    st.caption(i18n.t("drafting_week_numbers_caption"))
                 _stage.week_start = _ws or None
                 _stage.week_end = _we or None
 
                 _stage.key_tasks = [
                     line.strip() for line in st.text_area(
-                        "Key tasks (one per line)", value="\n".join(_stage.key_tasks),
+                        i18n.t("drafting_key_tasks_label"), value="\n".join(_stage.key_tasks),
                         key=f"_stage_tasks_{_i}", height=110,
                     ).split("\n") if line.strip()
                 ]
                 _stage.engagement_activities = [
                     line.strip() for line in st.text_area(
-                        "Engagement activities (one per line)",
+                        i18n.t("drafting_engagement_activities_label"),
                         value="\n".join(_stage.engagement_activities),
                         key=f"_stage_eng_{_i}", height=80,
                     ).split("\n") if line.strip()
                 ]
-                _stage.outcome = st.text_input("Outcome", value=_stage.outcome, key=f"_stage_out_{_i}")
+                _stage.outcome = st.text_input(i18n.t("drafting_outcome_label"), value=_stage.outcome, key=f"_stage_out_{_i}")
                 _stage.deliverables = [
                     line.strip() for line in st.text_area(
-                        "Deliverables (one per line)", value="\n".join(_stage.deliverables),
+                        i18n.t("drafting_deliverables_label"), value="\n".join(_stage.deliverables),
                         key=f"_stage_deliv_{_i}", height=90,
                     ).split("\n") if line.strip()
                 ]
-                st.caption(
-                    "Leave a cell as **TBC** where the brief genuinely doesn't say -- it exports "
-                    "in red so nobody submits it by accident."
-                )
-                if st.button("Remove this stage", key=f"_stage_rm_{_i}"):
+                st.caption(i18n.t("drafting_cell_tbc_caption"))
+                if st.button(i18n.t("drafting_remove_stage_button"), key=f"_stage_rm_{_i}"):
                     _remove_index = _i
 
         if _remove_index is not None:
@@ -391,7 +341,7 @@ with tabs[5]:
 
         acol1, acol2 = st.columns([1, 3])
         with acol1:
-            if st.button("Add a stage", key="add_stage_btn"):
+            if st.button(i18n.t("drafting_add_stage_button"), key="add_stage_btn"):
                 st.session_state.methodology_stages.append(
                     methodology_stages.MethodologyStage(
                         name="", key_tasks=[methodology_stages.TBC],
@@ -403,63 +353,50 @@ with tabs[5]:
                 st.rerun()
 
         st.checkbox(
-            "Confirm this firm issues Work Verification Records (WVRs) with design deliverables",
+            i18n.t("drafting_wvr_checkbox_label"),
             key="methodology_wvr_confirmed",
-            help="The methodology table used to state this as fact in every export without "
-                 "anyone having been asked. Leave it unticked and it exports as a red "
-                 "[CONFIRM WVR / QA STATEMENT] instead.",
+            help=i18n.t("drafting_wvr_checkbox_help"),
         )
 
         st.markdown("")
         _methodology_style_control()
 
     st.markdown("---")
-    st.caption(
-        "**Differentiator & sales pitch** -- write these in your own words: what sets this "
-        "firm apart for this bid, and the pitch for why it should win. AI review is optional "
-        "-- it comments on the text as written and offers a tightened, re-angled rewrite tied "
-        "to this brief's real scope, but only ever works with what you've written here, never "
-        "invents new claims."
-    )
+    st.caption(i18n.t("drafting_diff_pitch_caption"))
     dcol1, dcol2 = st.columns(2)
     with dcol1:
         st.text_area(
-            "Differentiator", key="project_differentiator", height=140,
-            placeholder="What sets this firm apart for this bid?",
+            i18n.t("drafting_differentiator_label"), key="project_differentiator", height=140,
+            placeholder=i18n.t("drafting_differentiator_placeholder"),
         )
     with dcol2:
         st.text_area(
-            "Sales pitch", key="project_sales_pitch", height=140,
-            placeholder="The pitch for why this firm should win.",
+            i18n.t("drafting_sales_pitch_label"), key="project_sales_pitch", height=140,
+            placeholder=i18n.t("drafting_sales_pitch_placeholder"),
         )
     _pitch_ready = bool(st.session_state.ai_config.get("api_key")) and (
         st.session_state.project_differentiator.strip() or st.session_state.project_sales_pitch.strip()
     ) and _current_project_already_paid()
-    if st.button("Review with AI", disabled=not _pitch_ready, key="review_pitch_btn", type="primary"):
-        with st.spinner("Reviewing differentiator & sales pitch..."):
+    if st.button(i18n.t("drafting_review_ai_button"), disabled=not _pitch_ready, key="review_pitch_btn", type="primary"):
+        with st.spinner(i18n.t("drafting_spinner_pitch_review")):
             try:
                 _record_ai_click()
                 st.session_state.pitch_review = pitch_review_module.review_pitch(
                     st.session_state.project_differentiator, st.session_state.project_sales_pitch,
                     st.session_state.analysis, _project_info(), st.session_state.ai_config,
                 )
-                st.success("Review complete.")
+                st.success(i18n.t("drafting_review_complete_success"))
             except Exception as exc:
-                _show_error("Pitch review failed", exc)
+                _show_error(i18n.t("drafting_pitch_review_failed_error"), exc)
     if not st.session_state.ai_config.get("api_key"):
         st.caption(_AI_HINT_SENTENCE)
     elif not _current_project_already_paid():
         st.caption(_ai_block_reason())
 
-    st.markdown("**Sharpen further with follow-up questions**")
-    st.caption(
-        "Generates a few targeted questions about whatever's still vague or unsupported in what "
-        "you've written above (up to 4 per field), then folds your answers straight into a sharper "
-        "rewrite -- same rule as everywhere else on this page, nothing added beyond what you type. "
-        "Only runs when you click the button, never automatically."
-    )
-    if st.button("Get sharpening questions", disabled=not _pitch_ready, key="get_pitch_questions_btn"):
-        with st.spinner("Coming up with follow-up questions..."):
+    st.markdown(i18n.t("drafting_sharpen_heading"))
+    st.caption(i18n.t("drafting_sharpen_caption"))
+    if st.button(i18n.t("drafting_get_questions_button"), disabled=not _pitch_ready, key="get_pitch_questions_btn"):
+        with st.spinner(i18n.t("drafting_spinner_questions")):
             try:
                 _record_ai_click()
                 for i in range(4):
@@ -470,28 +407,28 @@ with tabs[5]:
                     st.session_state.analysis, _project_info(), st.session_state.ai_config,
                 )
             except Exception as exc:
-                _show_error("Couldn't generate questions", exc)
+                _show_error(i18n.t("drafting_generate_questions_failed_error"), exc)
 
     if st.session_state.pitch_questions:
         pq = st.session_state.pitch_questions
         if not pq.differentiator_questions and not pq.sales_pitch_questions:
-            st.caption("Both already read specific and concrete -- no follow-up questions needed.")
+            st.caption(i18n.t("drafting_both_specific_caption"))
         else:
             qcol1, qcol2 = st.columns(2)
             with qcol1:
                 if pq.differentiator_questions:
-                    st.markdown("*Differentiator*")
+                    st.markdown(f"*{i18n.t('drafting_differentiator_label')}*")
                     for i, q in enumerate(pq.differentiator_questions):
                         st.text_input(q, key=f"diff_qa_{i}")
             with qcol2:
                 if pq.sales_pitch_questions:
-                    st.markdown("*Sales pitch*")
+                    st.markdown(f"*{i18n.t('drafting_sales_pitch_label')}*")
                     for i, q in enumerate(pq.sales_pitch_questions):
                         st.text_input(q, key=f"pitch_qa_{i}")
 
-            if st.button("Sharpen with my answers", key="sharpen_with_answers_btn", type="primary",
+            if st.button(i18n.t("drafting_sharpen_with_answers_button"), key="sharpen_with_answers_btn", type="primary",
                          disabled=not _current_project_already_paid()):
-                with st.spinner("Sharpening with your answers..."):
+                with st.spinner(i18n.t("drafting_spinner_sharpening")):
                     try:
                         _record_ai_click()
                         _diff_qa = [
@@ -507,9 +444,9 @@ with tabs[5]:
                             st.session_state.analysis, _project_info(), st.session_state.ai_config,
                             differentiator_qa=_diff_qa, sales_pitch_qa=_pitch_qa,
                         )
-                        st.success("Sharpened using your answers -- see the rewrite below.")
+                        st.success(i18n.t("drafting_sharpened_success"))
                     except Exception as exc:
-                        _show_error("Sharpening failed", exc)
+                        _show_error(i18n.t("drafting_sharpening_failed_error"), exc)
 
     if st.session_state.pitch_review:
         pr = st.session_state.pitch_review
@@ -527,40 +464,31 @@ with tabs[5]:
         rcol1, rcol2 = st.columns(2)
         with rcol1:
             if pr.differentiator_comment or pr.differentiator_refined:
-                st.markdown("**Differentiator -- AI comment**")
+                st.markdown(i18n.t("drafting_diff_ai_comment_heading"))
                 st.write(pr.differentiator_comment)
-                st.markdown("**Suggested rewrite**")
+                st.markdown(i18n.t("drafting_suggested_rewrite_heading"))
                 st.write(pr.differentiator_refined)
                 if pr.differentiator_refined:
                     st.button(
-                        "Use this rewrite", key="use_diff_rewrite", on_click=_apply_differentiator_rewrite,
+                        i18n.t("drafting_use_rewrite_button"), key="use_diff_rewrite", on_click=_apply_differentiator_rewrite,
                      type="primary")
         with rcol2:
             if pr.sales_pitch_comment or pr.sales_pitch_refined:
-                st.markdown("**Sales pitch -- AI comment**")
+                st.markdown(i18n.t("drafting_pitch_ai_comment_heading"))
                 st.write(pr.sales_pitch_comment)
-                st.markdown("**Suggested rewrite**")
+                st.markdown(i18n.t("drafting_suggested_rewrite_heading"))
                 st.write(pr.sales_pitch_refined)
                 if pr.sales_pitch_refined:
                     st.button(
-                        "Use this rewrite", key="use_pitch_rewrite", on_click=_apply_sales_pitch_rewrite,
+                        i18n.t("drafting_use_rewrite_button"), key="use_pitch_rewrite", on_click=_apply_sales_pitch_rewrite,
                      type="primary")
 
     st.markdown("---")
-    st.caption(
-        "**Executive summary** -- an unweighted page that goes straight after the cover, "
-        "before the scored sections (Large Scope pack) or straight after the cover (Small "
-        "Scope pack). No score of its own, but it's the evaluators' first impression, so it's "
-        "drafted warm and sales-forward rather than dry -- catchy titles, short readable "
-        "blocks, grounded in the real brief and the real (included) nominated team."
-    )
+    st.caption(i18n.t("drafting_exec_summary_caption"))
     if not st.session_state.drafts:
-        st.caption(
-            "Draft the sections first -- the summary is written from what the proposal "
-            "actually says, so that it can't promise a subject the document doesn't cover."
-        )
-    if st.button("Generate Executive Summary (AI)", disabled=not ready, type="primary"):
-        with st.spinner("Drafting executive summary..."):
+        st.caption(i18n.t("drafting_exec_summary_draft_first_caption"))
+    if st.button(i18n.t("drafting_generate_exec_summary_button"), disabled=not ready, type="primary"):
+        with st.spinner(i18n.t("drafting_spinner_exec_summary")):
             try:
                 _record_ai_click()
                 _excluded_names = resourcing.excluded_personnel_names(st.session_state.resource_plan)
@@ -580,18 +508,14 @@ with tabs[5]:
                 )
                 _es = st.session_state.executive_summary
                 if not _es or not ((_es.intro or "").strip() or _es.blocks):
-                    st.warning(
-                        "The executive summary came back empty -- nothing has been saved over "
-                        "what you had. Try again, or write it yourself; the pack's first page "
-                        "exports as a red placeholder until it exists."
-                    )
+                    st.warning(i18n.t("drafting_exec_summary_empty_warning"))
                 else:
-                    st.success("Executive summary drafted.")
+                    st.success(i18n.t("drafting_exec_summary_drafted_success"))
             except Exception as exc:
-                _show_error("Executive summary generation failed", exc)
+                _show_error(i18n.t("drafting_exec_summary_failed_error"), exc)
 
     if st.session_state.executive_summary:
-        with st.expander("Executive summary", expanded=False):
+        with st.expander(i18n.t("drafting_exec_summary_expander"), expanded=False):
             es = st.session_state.executive_summary
             if es.intro:
                 st.write(es.intro)
@@ -601,17 +525,10 @@ with tabs[5]:
 
     if not _is_letter():
         st.markdown("---")
-        st.caption(
-            "**Team introduction** -- a short sales-forward pitch at the very start of Key "
-            "Personnel, before the org chart and pen pics: a catchy headline and a couple of "
-            "paragraphs connecting the nominated (included) team's real past projects to this "
-            "brief's real challenges, closing with a pull-quote line. Grounded entirely in "
-            "each person's own value-to-project write-up and relevant projects, entered on the "
-            "Team & Resourcing tab -- never invented."
-        )
+        st.caption(i18n.t("drafting_team_intro_caption"))
         _team_ready = ready and bool(st.session_state.resource_plan)
-        if st.button("Generate Team Introduction (AI)", disabled=not _team_ready, type="primary"):
-            with st.spinner("Drafting team introduction..."):
+        if st.button(i18n.t("drafting_generate_team_intro_button"), disabled=not _team_ready, type="primary"):
+            with st.spinner(i18n.t("drafting_spinner_team_intro")):
                 try:
                     _record_ai_click()
                     _included_people = [
@@ -624,21 +541,16 @@ with tabs[5]:
                     )
                     _ti = st.session_state.team_intro
                     if not _ti or not ((_ti.heading or "").strip() or _ti.paragraphs):
-                        st.warning(
-                            "The team introduction came back empty. This usually means the "
-                            "nominated people have no write-ups yet -- fill in their "
-                            "\"on this project they will...\" text on Team & Resourcing and "
-                            "try again."
-                        )
+                        st.warning(i18n.t("drafting_team_intro_empty_warning"))
                     else:
-                        st.success("Team introduction drafted.")
+                        st.success(i18n.t("drafting_team_intro_drafted_success"))
                 except Exception as exc:
-                    _show_error("Team introduction generation failed", exc)
+                    _show_error(i18n.t("drafting_team_intro_failed_error"), exc)
         if not st.session_state.resource_plan:
-            st.caption("Assign at least one person on the Team & Resourcing tab first.")
+            st.caption(i18n.t("drafting_assign_person_caption"))
 
         if st.session_state.team_intro:
-            with st.expander("Team introduction", expanded=False):
+            with st.expander(i18n.t("drafting_team_intro_expander"), expanded=False):
                 ti = st.session_state.team_intro
                 if ti.heading:
                     st.markdown(f"**{ti.heading}**")
@@ -648,18 +560,11 @@ with tabs[5]:
                     st.markdown(f"*{ti.pullquote}*")
 
         st.markdown("---")
-        st.caption(
-            "**Project experience introduction** -- a short sales-forward paragraph at the "
-            "start of Relevant Project Experience, before the individual project cards: "
-            "names the strongest 2-4 comparable reference projects and states plainly why "
-            "they prove this firm can deliver the brief, replacing the generic 'selected "
-            "past projects' note. Grounded entirely in the real reference projects entered "
-            "and drafted in Upload Docs -- never invented."
-        )
+        st.caption(i18n.t("drafting_experience_intro_caption"))
         _experience_ready = ready and bool(st.session_state.reference_projects)
-        if st.button("Generate Project Experience Introduction (AI)", disabled=not _experience_ready,
-                     help=None if _experience_ready else "Needs at least one drafted reference project -- see below.", type="primary"):
-            with st.spinner("Drafting project experience introduction..."):
+        if st.button(i18n.t("drafting_generate_experience_intro_button"), disabled=not _experience_ready,
+                     help=None if _experience_ready else i18n.t("drafting_experience_intro_help"), type="primary"):
+            with st.spinner(i18n.t("drafting_spinner_experience_intro")):
                 try:
                     _record_ai_click()
                     st.session_state.experience_intro = experience_intro_module.draft_experience_intro(
@@ -668,59 +573,51 @@ with tabs[5]:
                     )
                     _ei = st.session_state.experience_intro
                     if not _ei or not (getattr(_ei, "paragraph", "") or "").strip():
-                        st.warning(
-                            "The project experience introduction came back empty -- the "
-                            "reference projects may have no description or relevance text yet. "
-                            "The section falls back to its default note until this exists."
-                        )
+                        st.warning(i18n.t("drafting_experience_intro_empty_warning"))
                     else:
-                        st.success("Project experience introduction drafted.")
+                        st.success(i18n.t("drafting_experience_intro_drafted_success"))
                 except Exception as exc:
-                    _show_error("Project experience introduction generation failed", exc)
+                    _show_error(i18n.t("drafting_experience_intro_failed_error"), exc)
         if not st.session_state.reference_projects:
             # Uploading reference material (Upload Docs) only extracts its text --
             # it still needs "Draft reference projects from uploaded material"
             # clicked there before any entries exist for this button to use. A
             # bare "add a reference project" caption reads as if uploading alone
             # should have been enough, which is exactly the confusing part.
-            st.caption(
-                "No drafted reference projects yet. Go to Upload Docs, upload 'Project references' "
-                "material if you haven't, then click **Draft reference projects from uploaded "
-                "material** there -- or add one manually on that same step."
-            )
+            st.caption(i18n.t("drafting_no_reference_projects_caption"))
 
         if st.session_state.experience_intro:
-            with st.expander("Project experience introduction", expanded=False):
+            with st.expander(i18n.t("drafting_experience_intro_expander"), expanded=False):
                 st.write(st.session_state.experience_intro.paragraph)
 
     if st.session_state.drafts:
         for section in _draftable_sections(st.session_state.sections or []):
             draft = st.session_state.drafts.get(section.title)
             note = st.session_state.guidance_notes.get(section.title) if st.session_state.guidance_notes else None
+            # TODO A2 i18n: expander title "{number}. {title}" carries no
+            # translatable words of its own (section.title is generated data),
+            # left as an f-string.
             with st.expander(f"{section.section_number}. {section.title}", expanded=False):
                 if note and not _is_letter():
                     st.markdown(f":red[**[{note.marker}]**]")
-                    st.markdown(f":red[Page limit: {note.page_limit_text}]")
-                    st.markdown(f":red[Evaluation weighting: {note.weighting_text}]")
-                    st.markdown(f":red[Formatting: {note.format_requirements_text}]")
+                    st.markdown(f":red[{i18n.t('drafting_page_limit_prefix', text=note.page_limit_text)}]")
+                    st.markdown(f":red[{i18n.t('drafting_evaluation_weighting_prefix', text=note.weighting_text)}]")
+                    st.markdown(f":red[{i18n.t('drafting_formatting_prefix', text=note.format_requirements_text)}]")
                 if draft:
                     st.markdown(f"**{draft.draft_heading}**")
                     st.write(draft.draft_text)
                     if draft.required_user_inputs:
-                        st.markdown("**Still needs from you:**")
+                        st.markdown(i18n.t("drafting_still_needs_heading"))
                         for r in draft.required_user_inputs:
                             st.markdown(f"- {r}")
 
     if _is_letter():
         st.divider()
-        st.markdown("#### Terms of Engagement")
-        st.caption(
-            "Always your own text -- this tool never invents or guesses which contract/commercial "
-            "conditions apply, since getting that wrong is a real legal risk."
-        )
+        st.markdown(i18n.t("drafting_terms_heading"))
+        st.caption(i18n.t("drafting_terms_caption"))
         st.text_area(
-            "Terms of Engagement", key="terms_of_engagement_text", height=150,
-            placeholder="e.g. This offer is made under our current Master Services Agreement with Townsville City Council, reference ...",
+            i18n.t("drafting_terms_label"), key="terms_of_engagement_text", height=150,
+            placeholder=i18n.t("drafting_terms_placeholder"),
             label_visibility="collapsed",
         )
 

@@ -17,7 +17,7 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 
 with tabs[9]:
-    st.subheader("Export Pack")
+    st.subheader(i18n.t("export_subheader"))
 
     # Part B2: passes-remaining indicator for a paid project -- the brief's
     # own "sidebar/readiness pass counter" requirement, placed here (right
@@ -42,7 +42,7 @@ with tabs[9]:
                     _topup_url = billing.create_bid_checkout_session(
                         current_user, topup_project_key=_current_project_key(),
                     )
-                    st.link_button("Continue to payment", _topup_url, type="primary")
+                    st.link_button(i18n.t("export_continue_to_payment_button"), _topup_url, type="primary")
                 except Exception as exc:
                     _show_error("Couldn't start checkout", exc)
 
@@ -52,36 +52,28 @@ with tabs[9]:
     # of actions before anyone opens the file and starts wondering.
     _readiness = _export_readiness()
     if _readiness:
-        with st.expander(f"⚠️ {len(_readiness)} thing(s) still outstanding before this pack is ready",
+        with st.expander(i18n.t("export_readiness_expander", n=len(_readiness)),
                          expanded=True):
             for _item in _readiness:
                 st.markdown(
-                    f"- **{_item['label']}** -- go to *{_item['where']}*"
+                    i18n.t("export_readiness_item", label=_item['label'], where=_item['where'])
                     + (f". {_item['detail']}" if _item["detail"] else "")
                 )
-            st.caption(
-                "You can export anyway -- everything outstanding shows as a red placeholder in "
-                "the document, so nothing is silently missing."
-            )
+            st.caption(i18n.t("export_readiness_caption"))
     else:
-        st.success("Everything this pack needs has been filled in.")
+        st.success(i18n.t("export_readiness_all_done_success"))
 
     if _is_letter():
-        st.caption("Generates the first-pass Small Scope Proposal Response Pack. Review the checklist page inside before this goes anywhere near a real submission.")
+        st.caption(i18n.t("export_letter_intro_caption"))
         ready = st.session_state.sections is not None
         if not ready:
-            st.info("Generate the Proposal Structure first.")
+            st.info(i18n.t("export_generate_structure_first_info"))
 
         if _structure_format_stale():
-            st.warning(
-                "The Proposal format (Project Setup) was changed after these sections were generated -- "
-                "go to Structure and click **Generate Proposal Structure** again first, or the "
-                "exported pack will be missing the Introduction/Methodology drafts even if you "
-                "already ran drafting."
-            )
+            st.warning(i18n.t("export_letter_structure_stale_warning"))
 
-        if st.button("Generate Small Scope Pack DOCX", type="primary", disabled=not ready):
-            with st.spinner("Assembling document..."):
+        if st.button(i18n.t("export_generate_letter_docx_button"), type="primary", disabled=not ready):
+            with st.spinner(i18n.t("export_assembling_spinner")):
                 cover_image = _cover_photo_bytes()
                 sender = {
                     "name": st.session_state.letter_sender_name,
@@ -146,23 +138,19 @@ with tabs[9]:
                     ocr_note=_ocr_export_note(),
                     document_placeholders=_doc_placeholders,
                 )
-            st.success("Document generated.")
+            st.success(i18n.t("export_document_generated_success"))
     else:
-        st.caption("Generates the first-pass DOCX response pack. Review the checklist inside the document before this goes anywhere near a real submission.")
+        st.caption(i18n.t("export_formal_intro_caption"))
 
         ready = st.session_state.sections is not None and st.session_state.guidance_notes is not None
         if not ready:
-            st.info("Generate the Proposal Structure first. Drafts, graphics, and fee estimate are optional but recommended before exporting.")
+            st.info(i18n.t("export_formal_generate_structure_first_info"))
 
         if _structure_format_stale():
-            st.warning(
-                "The Proposal format (Project Setup) was changed after these sections were generated -- "
-                "go to Structure and click **Generate Proposal Structure** again first, or the "
-                "exported pack may not match what you drafted."
-            )
+            st.warning(i18n.t("export_formal_structure_stale_warning"))
 
-        if st.button("Generate DOCX", type="primary", disabled=not ready):
-            with st.spinner("Assembling document..."):
+        if st.button(i18n.t("export_generate_docx_button"), type="primary", disabled=not ready):
+            with st.spinner(i18n.t("export_assembling_spinner")):
                 cover_image = _cover_photo_bytes()
 
                 # Same override the Fee Estimate tab's "Indicative fee split by discipline"
@@ -249,14 +237,11 @@ with tabs[9]:
                     ocr_note=_ocr_export_note(),
                     document_placeholders=_doc_placeholders,
                 )
-            st.success("Document generated.")
+            st.success(i18n.t("export_document_generated_success"))
 
     if st.session_state.docx_buffer:
         if _export_is_stale():
-            st.warning(
-                "**These files were generated before your latest edits.** Downloading now gives "
-                "you the older pack. Generate again to pick up the changes."
-            )
+            st.warning(i18n.t("export_stale_files_warning"))
         filename = (st.session_state.tender_name or "tender_response_pack").replace(" ", "_")
         suffix = "small_scope_pack" if _is_letter() else "large_scope_pack"
         # Small Scope: DOCX + Tender Summary. Large Scope: DOCX + Org Chart + Methodology
@@ -271,11 +256,11 @@ with tabs[9]:
             # first download, so it's always safe to call right after a
             # successful click.
             if _free_artifact_download_blocked("proposal_docx"):
-                st.button("Download DOCX", disabled=True, type="primary", key="_dl_docx_blocked")
+                st.button(i18n.t("export_download_docx_button"), disabled=True, type="primary", key="_dl_docx_blocked")
                 st.caption(i18n.t("free_tier_artifact_used"))
             else:
                 if st.download_button(
-                    "Download DOCX", data=st.session_state.docx_buffer,
+                    i18n.t("export_download_docx_button"), data=st.session_state.docx_buffer,
                     file_name=f"{filename}_{suffix}.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     type="primary",
@@ -324,7 +309,7 @@ with tabs[9]:
                 # download doesn't pay the render cost for a file it can't
                 # have.
                 if _free_artifact_download_blocked("org_chart_pptx"):
-                    st.button("Download Org Chart (PPTX)", disabled=True, type="primary", key="_dl_orgchart_blocked")
+                    st.button(i18n.t("export_download_orgchart_button"), disabled=True, type="primary", key="_dl_orgchart_blocked")
                     st.caption(i18n.t("free_tier_artifact_used"))
                 else:
                     try:
@@ -341,24 +326,17 @@ with tabs[9]:
                             ),
                         )
                         if st.download_button(
-                            "Download Org Chart (PPTX)",
+                            i18n.t("export_download_orgchart_button"),
                             data=chart_bytes,
                             file_name="Org_Chart.pptx",
                             mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                          type="primary"):
                             _mark_free_artifact_downloaded("org_chart_pptx")
-                        st.caption(
-                            "Built from this project's resourcing plan -- each discipline's lead plus "
-                            "anyone added under them, with red \"TBC\" for unassigned roles and "
-                            "[CONFIRM TITLE] where a support member has no title yet. The client's own "
-                            "PM and subconsultant firms aren't shown -- the app holds no data for them. "
-                            "Fill in the gaps, then paste the finished chart over the first-pass image "
-                            "in the DOCX."
-                        )
+                        st.caption(i18n.t("export_orgchart_caption"))
                     except Exception:
                         # Never let a chart-generation bug block the DOCX download that
                         # actually matters -- just skip the org chart download this time.
-                        st.caption("Couldn't build the org chart this time -- the DOCX download above is unaffected.")
+                        st.caption(i18n.t("export_orgchart_build_failed_caption"))
 
         # Same placeholder-in-DOCX / finish-in-PowerPoint pattern as the org chart
         # above (see export_docx._build_methodology_table). Four generic stage
@@ -378,7 +356,7 @@ with tabs[9]:
                 # paid-only, for every free-tier project, regardless of
                 # whether its one free download has been used yet.
                 if _free_artifact_download_blocked("methodology_pptx"):
-                    st.button("Download Methodology Table (PPTX)", disabled=True, type="primary", key="_dl_methodology_blocked")
+                    st.button(i18n.t("export_download_methodology_button"), disabled=True, type="primary", key="_dl_methodology_blocked")
                     st.caption(i18n.t("free_tier_paid_only_caption"))
                 else:
                     try:
@@ -406,26 +384,20 @@ with tabs[9]:
                             ),
                         )
                         st.download_button(
-                            "Download Methodology Table (PPTX)",
+                            i18n.t("export_download_methodology_button"),
                             data=methodology_bytes,
                             file_name="Methodology_Table.pptx",
                             mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                          type="primary")
                         st.caption(
-                            "Built from the design stages you reviewed on the Draft Responses step -- "
-                            "every column is real content, with red TBC where the brief didn't support a "
-                            "cell. Without a reviewed grid it falls back to the generic four-stage layout. "
-                            "Paste the finished table into the proposal where the red placeholder note "
-                            "marks its place."
+                            i18n.t("export_methodology_caption_has_stages")
                             if st.session_state.methodology_stages else
-                            "No design stages reviewed yet, so this is the generic four-stage fallback: "
-                            "column 2 from your real scope items, the rest red placeholders. Run **Draft "
-                            "methodology stages** on the Draft Responses step to fill all four columns."
+                            i18n.t("export_methodology_caption_no_stages")
                         )
                     except Exception:
                         # Never let a chart-generation bug block the DOCX download that
                         # actually matters -- just skip the methodology table download this time.
-                        st.caption("Couldn't build the methodology table this time -- the DOCX download above is unaffected.")
+                        st.caption(i18n.t("export_methodology_build_failed_caption"))
 
         # Same PPTX-companion pattern as the org chart / methodology table above -- the
         # Large Scope pack's DOCX has no Program section of its own (unlike the Small
@@ -436,7 +408,7 @@ with tabs[9]:
             with dcols[3]:
                 # Part B: also not on the free list -- always paid-only.
                 if _free_artifact_download_blocked("program_pptx"):
-                    st.button("Download Program (PPTX)", disabled=True, type="primary", key="_dl_program_blocked")
+                    st.button(i18n.t("export_download_program_button"), disabled=True, type="primary", key="_dl_program_blocked")
                     st.caption(i18n.t("free_tier_paid_only_caption"))
                 else:
                     try:
@@ -456,19 +428,16 @@ with tabs[9]:
                             ),
                         )
                         st.download_button(
-                            "Download Program (PPTX)",
+                            i18n.t("export_download_program_button"),
                             data=program_bytes,
                             file_name="Delivery_Program.pptx",
                             mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                          type="primary")
-                        st.caption(
-                            "Built from the delivery program entered in the Fee Estimate tab -- shows a red "
-                            "placeholder if no program has been generated there yet."
-                        )
+                        st.caption(i18n.t("export_program_caption"))
                     except Exception:
                         # Never let a chart-generation bug block the DOCX download that
                         # actually matters -- just skip the program download this time.
-                        st.caption("Couldn't build the program this time -- the DOCX download above is unaffected.")
+                        st.caption(i18n.t("export_program_build_failed_caption"))
 
         # The Tender Summary is a separate document (see export_docx.build_tender_summary_docx),
         # generated in the same click as the Proposal DOCX above -- everything about how the
@@ -481,35 +450,27 @@ with tabs[9]:
             if st.session_state.tender_summary_buffer:
                 # Part B: the second free-tier artifact.
                 if _free_artifact_download_blocked("tender_summary_docx"):
-                    st.button("Download Tender Summary (DOCX)", disabled=True, type="primary", key="_dl_tendersummary_blocked")
+                    st.button(i18n.t("export_download_tendersummary_button"), disabled=True, type="primary", key="_dl_tendersummary_blocked")
                     st.caption(i18n.t("free_tier_artifact_used"))
                 else:
                     if st.download_button(
-                        "Download Tender Summary (DOCX)",
+                        i18n.t("export_download_tendersummary_button"),
                         data=st.session_state.tender_summary_buffer,
                         file_name=f"{filename}_tender_summary.docx",
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                      type="primary"):
                         _mark_free_artifact_downloaded("tender_summary_docx")
-                    st.caption(
-                        "Companion internal document -- guidance on the brief's main requirements, plus "
-                        "the compliance matrix, gap analysis, review checklist, and user input list where "
-                        "generated. Not part of the proposal itself."
-                    )
+                    st.caption(i18n.t("export_tendersummary_caption"))
             else:
-                st.caption("Tender Summary document will be generated alongside the DOCX above.")
+                st.caption(i18n.t("export_tendersummary_pending_caption"))
 
         st.divider()
-        st.markdown("#### Proposal Library")
-        st.caption(
-            "Archive this generated proposal into the Proposal Library "
-            f"(library/{st.session_state.project_type or '<project type>'}/) for reuse later -- "
-            "as a 'Previous proposals' reference in Upload Docs, or to browse and "
-            "download from the 'Proposal Library' button in the top banner. Nothing is archived automatically; click below "
-            "whenever you're happy with this version. Only the proposal DOCX itself is archived, "
-            "not the Tender Summary or the PowerPoint companions above."
-        )
-        if st.button("Archive to Library", key="archive_to_library_btn", type="primary"):
+        st.markdown(i18n.t("export_library_heading"))
+        st.caption(i18n.t(
+            "export_library_caption",
+            project_type=st.session_state.project_type or i18n.t("export_library_project_type_placeholder"),
+        ))
+        if st.button(i18n.t("export_archive_button"), key="archive_to_library_btn", type="primary"):
             try:
                 _archived = proposal_library.archive_proposal(
                     _lib_user_id(),
@@ -524,9 +485,9 @@ with tabs[9]:
                 # and finished, so the fee snapshot is refreshed here too. The
                 # upsert in fee_history keeps it from counting as a second bid.
                 _record_fee_snapshot()
-                st.success(f"Archived to the library under '{_archived['project_type']}' as {_archived['filename']}.")
+                st.success(i18n.t("export_archive_success", project_type=_archived['project_type'], filename=_archived['filename']))
             except Exception as exc:
-                _show_error("Couldn't archive to the library", exc)
+                _show_error(i18n.t("export_archive_failed_error"), exc)
 
     # -----------------------------------------------------------------------
     # Returnable schedules -- fill the client's own response forms (DOCX
@@ -536,19 +497,12 @@ with tabs[9]:
     # schedules only need project data, not the pack.
     # -----------------------------------------------------------------------
     st.divider()
-    st.markdown("#### Returnable schedules")
+    st.markdown(i18n.t("export_schedules_heading"))
     if _project_is_free_tier():
         st.caption(i18n.t("free_tier_paid_only_caption"))
-    st.caption(
-        "Fill the client's own response forms from this project's data -- company and contact "
-        "details, key personnel, reference projects, fee build-up -- inside their original "
-        "document, formatting intact. Anything the project doesn't actually know is left as a "
-        f"clearly-marked **{returnable_schedules.PLACEHOLDER_PREFIX}: ...]** placeholder, never "
-        "a guess. Schedules found in an uploaded tender-package ZIP appear here automatically; "
-        "you can also upload more below."
-    )
+    st.caption(i18n.t("export_schedules_caption", placeholder_prefix=returnable_schedules.PLACEHOLDER_PREFIX))
     _extra_scheds = st.file_uploader(
-        "Add schedules to fill (DOCX or XLSX)", type=["docx", "xlsx", "xlsm"],
+        i18n.t("export_add_schedules_label"), type=["docx", "xlsx", "xlsm"],
         accept_multiple_files=True, key="_returnable_sched_uploader",
     )
     if _extra_scheds:
@@ -556,11 +510,7 @@ with tabs[9]:
             _name = _f.name
             if _name not in (st.session_state.returnable_schedule_files or {}):
                 if _name.lower().endswith(".docx") and not returnable_schedules.looks_like_response_form(_name, _f.getvalue()):
-                    st.info(
-                        f"'{_name}' doesn't look like a response form (its tables are already "
-                        f"full, or it has none) -- it'll still be attempted, but check the "
-                        f"result carefully."
-                    )
+                    st.info(i18n.t("export_schedule_not_form_info", name=_name))
                 st.session_state.returnable_schedule_files = {
                     **(st.session_state.returnable_schedule_files or {}),
                     _name: _f.getvalue(),
@@ -568,21 +518,22 @@ with tabs[9]:
 
     _sched_files = st.session_state.returnable_schedule_files or {}
     if not _sched_files:
-        st.caption("No schedules yet -- upload a tender-package ZIP in Upload Docs, or add files above.")
+        st.caption(i18n.t("export_no_schedules_caption"))
     else:
         _sched_names = sorted(_sched_files)
-        st.write(f"**{len(_sched_names)} schedule(s) ready:** " + ", ".join(f"`{n}`" for n in _sched_names))
+        st.write(i18n.t("export_schedules_ready_prefix", n=len(_sched_names)) + ", ".join(f"`{n}`" for n in _sched_names))
         _rm_col1, _rm_col2 = st.columns([3, 1])
         with _rm_col2:
-            _to_remove = st.selectbox("Remove a file", ["(keep all)"] + _sched_names, key="_sched_remove_pick",
+            _keep_all_option = i18n.t("export_keep_all_option")
+            _to_remove = st.selectbox(i18n.t("export_remove_file_label"), [_keep_all_option] + _sched_names, key="_sched_remove_pick",
                                       label_visibility="collapsed")
-            if _to_remove != "(keep all)" and st.button("Remove", key="_sched_remove_btn"):
+            if _to_remove != _keep_all_option and st.button(i18n.t("export_remove_button"), key="_sched_remove_btn"):
                 _new = dict(_sched_files)
                 _new.pop(_to_remove, None)
                 st.session_state.returnable_schedule_files = _new
                 st.rerun()
         with _rm_col1:
-            if st.button("Fill schedules from this project's data", type="primary", key="_fill_scheds_btn"):
+            if st.button(i18n.t("export_fill_schedules_button"), type="primary", key="_fill_scheds_btn"):
                 # Firm-level answers (ABN, insurances, certifications,
                 # registered address) come from the firm profile -- these
                 # labels were permanently placeholdered before it existed.
@@ -590,7 +541,7 @@ with tabs[9]:
                     st.session_state, firm_profile.schedule_fill_data(_firm_profile()),
                 )
                 _results = []
-                with st.spinner(f"Filling {len(_sched_names)} schedule(s)..."):
+                with st.spinner(i18n.t("export_filling_spinner", n=len(_sched_names))):
                     for _name in _sched_names:
                         _results.append(returnable_schedules.fill_schedule(_name, _sched_files[_name], _fill_data))
                 st.session_state._sched_fill_results = _results
@@ -605,10 +556,10 @@ with tabs[9]:
                 # Part B: filled returnable schedules aren't on the free
                 # list either -- always paid-only for a free-tier project.
                 if _free_artifact_download_blocked("returnable_schedule"):
-                    st.button("Download filled copy", disabled=True, type="primary", key=f"_sched_dl_blocked_{_res.filename}")
+                    st.button(i18n.t("export_download_filled_button"), disabled=True, type="primary", key=f"_sched_dl_blocked_{_res.filename}")
                 else:
                     st.download_button(
-                        "Download filled copy",
+                        i18n.t("export_download_filled_button"),
                         data=_res.file_bytes,
                         file_name=returnable_schedules.filled_filename(_res.filename),
                         mime=("application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -618,24 +569,22 @@ with tabs[9]:
                         type="primary",
                     )
             with _fcol2:
-                st.caption(
-                    f"{len(_res.filled)} field(s) filled from project data, "
-                    f"{len(_res.placeholdered)} left as clearly-marked placeholders to complete. "
-                    f"Review everything before submitting -- this is a first pass, and the "
-                    f"placeholders are deliberate: the project doesn't know those answers."
-                )
+                st.caption(i18n.t(
+                    "export_schedule_fill_summary_caption",
+                    filled=len(_res.filled), placeholdered=len(_res.placeholdered),
+                ))
             if _res.filled or _res.placeholdered:
-                with st.expander(f"What was filled / placeholdered in {_res.filename}"):
+                with st.expander(i18n.t("export_schedule_detail_expander", filename=_res.filename)):
                     if _res.filled:
-                        st.markdown("**Filled from project data:**")
+                        st.markdown(i18n.t("export_filled_heading"))
                         st.dataframe(
-                            [{"Where": f["where"], "Field": f["label"], "Value": f["value"]} for f in _res.filled],
+                            [{i18n.t("export_col_where"): f["where"], i18n.t("export_col_field"): f["label"], i18n.t("export_col_value"): f["value"]} for f in _res.filled],
                             use_container_width=True, hide_index=True,
                         )
                     if _res.placeholdered:
-                        st.markdown("**Left as placeholders (complete before submission):**")
+                        st.markdown(i18n.t("export_placeholdered_heading"))
                         st.dataframe(
-                            [{"Where": f["where"], "Field": f["label"]} for f in _res.placeholdered],
+                            [{i18n.t("export_col_where"): f["where"], i18n.t("export_col_field"): f["label"]} for f in _res.placeholdered],
                             use_container_width=True, hide_index=True,
                         )
 

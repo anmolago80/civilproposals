@@ -17,19 +17,13 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 
 with tabs[0]:
-    st.subheader("Project Setup")
-    st.caption("Basic project details -- used throughout the workflow and on the cover page of the exported pack.")
+    st.subheader(i18n.t("setup_subheader"))
+    st.caption(i18n.t("setup_caption"))
 
-    st.markdown("**Proposal format**")
-    st.caption(
-        "The tool is agnostic to what the project actually is -- scope, team, and fees always "
-        "come from what you upload, never from the format you pick. This only changes the shape "
-        "of the output: a bound Large Scope pack with named sections and page limits, or a "
-        "shorter Small Scope pack with the same sections just leaner (typical for a small "
-        "brief, or an email-based request from the client)."
-    )
+    st.markdown(i18n.t("setup_format_heading"))
+    st.caption(i18n.t("setup_format_caption"))
     format_label = st.selectbox(
-        "Which does this pursuit need?",
+        i18n.t("setup_format_select_label"),
         list(PROPOSAL_FORMAT_LABELS.values()),
         index=list(PROPOSAL_FORMAT_LABELS.keys()).index(st.session_state.proposal_format),
         key="proposal_format_select",
@@ -52,15 +46,15 @@ with tabs[0]:
     # reading these keys is unaffected; they now commit as typed.
     col1, col2 = st.columns(2)
     with col1:
-        st.text_input("Project name", key="project_name")
-        st.text_input("Client name", key="client_name")
-        st.text_input("Tender / EOI name", key="tender_name")
-        st.text_input("Submission date", key="submission_date_input", placeholder="e.g. 14 July 2026")
+        st.text_input(i18n.t("setup_project_name_label"), key="project_name")
+        st.text_input(i18n.t("setup_client_name_label"), key="client_name")
+        st.text_input(i18n.t("setup_tender_name_label"), key="tender_name")
+        st.text_input(i18n.t("setup_submission_date_label"), key="submission_date_input", placeholder=i18n.t("setup_submission_date_placeholder"))
     with col2:
-        st.text_input("Bidder / company name", key="bidder_name")
-        st.selectbox("Project type", PROJECT_TYPES, key="project_type")
-        st.selectbox("Proposal theme", PROPOSAL_THEMES, key="proposal_theme")
-    st.caption("Saved as you type -- there's no separate save step.")
+        st.text_input(i18n.t("setup_bidder_name_label"), key="bidder_name")
+        st.selectbox(i18n.t("setup_project_type_label"), PROJECT_TYPES, key="project_type")
+        st.selectbox(i18n.t("setup_proposal_theme_label"), PROPOSAL_THEMES, key="proposal_theme")
+    st.caption(i18n.t("setup_autosave_caption"))
 
     if IS_SAAS_MODE and current_user:
         with st.popover(i18n.t("bid_includes_popover_title")):
@@ -105,39 +99,28 @@ with tabs[0]:
     _brief_date = ((getattr(st.session_state.analysis, "submission_date", "") or "").strip()
                    if st.session_state.analysis else "")
     if _typed_date and _brief_date and not _dates_look_equivalent(_typed_date, _brief_date):
-        st.warning(
-            f"**Submission date mismatch.** You've entered **{_typed_date}**, but the brief's "
-            f"own stated date reads **{_brief_date}**. The date you type here is the one "
-            f"printed on the cover -- check which is right before exporting."
-        )
+        st.warning(i18n.t("setup_date_mismatch_warning", typed_date=_typed_date, brief_date=_brief_date))
 
     def _render_signatory_fields() -> None:
         """The contact/signatory block. Shared by both proposal formats --
         see the two call sites below for why each renders it differently."""
         scol1, scol2 = st.columns(2)
         with scol1:
-            st.text_input("Sender name", key="letter_sender_name", placeholder="e.g. Jane Smith")
-            st.text_input("Sender title", key="letter_sender_title", placeholder="e.g. Project Director")
+            st.text_input(i18n.t("setup_sender_name_label"), key="letter_sender_name", placeholder=i18n.t("setup_sender_name_placeholder"))
+            st.text_input(i18n.t("setup_sender_title_label"), key="letter_sender_title", placeholder=i18n.t("setup_sender_title_placeholder"))
         with scol2:
-            st.text_input("Sender phone", key="letter_sender_phone")
-            st.text_input("Sender email", key="letter_sender_email")
+            st.text_input(i18n.t("setup_sender_phone_label"), key="letter_sender_phone")
+            st.text_input(i18n.t("setup_sender_email_label"), key="letter_sender_email")
         st.text_input(
-            "Registered / business address", key="letter_sender_address",
-            placeholder="e.g. Level 3, 100 Example St, Brisbane QLD 4000",
-            help="Used to fill the address labels on the client's returnable schedules. "
-                 "It is deliberately NOT added to the letter sign-off block, which stays "
-                 "name/title/phone/email by design.",
+            i18n.t("setup_sender_address_label"), key="letter_sender_address",
+            placeholder=i18n.t("setup_sender_address_placeholder"),
+            help=i18n.t("setup_sender_address_help"),
         )
 
     if _is_letter():
         st.divider()
-        st.markdown("#### Sign-off details")
-        st.caption(
-            "Who signs this pack off -- shown in the closing \"Regards\" block at the end of "
-            "the document. The cover page and footer already carry the project/client/bidder "
-            "details entered above, so nothing else is needed here. The address is used only "
-            "when filling the client's returnable schedules."
-        )
+        st.markdown(i18n.t("setup_signoff_heading"))
+        st.caption(i18n.t("setup_signoff_caption"))
         _render_signatory_fields()
     else:
         # Large Scope packs have no sign-off letter, which is why this block
@@ -148,14 +131,8 @@ with tabs[0]:
         # was fully capable of filling. Collapsed by default: it is optional
         # here, unlike in a letter pack.
         st.divider()
-        with st.expander("Contact / signatory details (optional)"):
-            st.caption(
-                "Not used in the Large Scope document itself. These are the values the "
-                "returnable-schedule filler puts into the client's own forms against "
-                "labels like \"Contact Person\", \"Telephone\", \"Email\" and "
-                "\"Registered Office\" -- leave them blank and those labels get a "
-                "[TO BE COMPLETED] placeholder instead."
-            )
+        with st.expander(i18n.t("setup_contact_expander")):
+            st.caption(i18n.t("setup_contact_expander_caption"))
             _render_signatory_fields()
 
 
@@ -164,22 +141,14 @@ with tabs[0]:
 # ---------------------------------------------------------------------------
 
 with tabs[1]:
-    st.subheader("Upload Documents")
-    st.caption("The tender brief is required. Everything else is optional but strongly improves draft quality.")
+    st.subheader(i18n.t("upload_subheader"))
+    st.caption(i18n.t("upload_caption"))
 
-    st.markdown(
-        "**Tender brief (required)** -- PDF, DOCX, TXT, or a whole tender-package **ZIP**. "
-        "Sometimes a brief arrives as several separate documents (e.g. the main RFT plus "
-        "addenda, schedules, or annexures) -- upload all of them here and they'll be combined "
-        "into one brief. A ZIP gets unpacked and sorted automatically: brief + addenda go into "
-        "the analysis, returnable schedules are kept aside for filling, drawings are set aside. "
-        "If you've already highlighted/commented on any document while reading, upload that "
-        "marked-up copy -- your notes get read too."
-    )
+    st.markdown(i18n.t("upload_brief_intro"))
     if st.session_state.get("_tender_uploader_version") is None:
         st.session_state._tender_uploader_version = 0
     tender_files = st.file_uploader(
-        "Upload the tender document(s)", type=["pdf", "docx", "txt", "zip"],
+        i18n.t("upload_tender_files_label"), type=["pdf", "docx", "txt", "zip"],
         accept_multiple_files=True,
         key=f"tender_uploader_{st.session_state._tender_uploader_version}",
     )
@@ -203,7 +172,7 @@ with tabs[1]:
         if IS_SAAS_MODE and current_user and not _access.get("unlimited"):
             _files_budget = limits.limits_for(current_user, _access)["tender_files"]
 
-        with st.spinner("Extracting text..." if len(tender_files) == 1 else f"Extracting text from {len(tender_files)} files..."):
+        with st.spinner(i18n.t("upload_extracting_single") if len(tender_files) == 1 else i18n.t("upload_extracting_multi", n=len(tender_files))):
             _doc_uploads_kept = _doc_uploads
             if _files_budget is not None and len(_doc_uploads) > _files_budget:
                 _doc_uploads_kept, _docs_limit_msg = limits.enforce_count_limit(_doc_uploads, "tender_files", _access)
@@ -228,30 +197,27 @@ with tabs[1]:
                     else:
                         _zip_skipped += 1
                         _trial_limit, _paid_limit = limits.UPLOAD_LIMITS["tender_files"]
-                        _cf.reason = (
-                            f"**Not ingested -- trial limit.** The free trial analyses up to "
-                            f"{_trial_limit} brief/addendum file(s) per upload; this one wasn't "
-                            f"included in the analysis. Paid accounts go up to {_paid_limit}. "
-                            f"Original filing: {_cf.reason}"
+                        _cf.reason = i18n.t(
+                            "upload_zip_not_ingested_reason",
+                            trial_limit=_trial_limit, paid_limit=_paid_limit, original_reason=_cf.reason,
                         )
                 for _sched in _pkg.schedules:
                     if _sched.file_bytes:
                         _package_schedules[_sched.filename.rsplit("/", 1)[-1]] = _sched.file_bytes
                 for _cf in _pkg.all_files():
                     _package_rows.append({
-                        "File": _cf.filename,
-                        "Filed as": package_intake.CATEGORY_LABELS.get(_cf.category, _cf.category),
-                        "Why / what to do": _cf.reason,
+                        i18n.t("upload_col_file"): _cf.filename,
+                        i18n.t("upload_col_filed_as"): package_intake.CATEGORY_LABELS.get(_cf.category, _cf.category),
+                        i18n.t("upload_col_why_what_to_do"): _cf.reason,
                         "_category": _cf.category,
                     })
                 _package_errors.extend(_pkg.warnings)
             if _zip_skipped:
                 _trial_limit, _paid_limit = limits.UPLOAD_LIMITS["tender_files"]
-                _package_errors.append(
-                    f"{_zip_skipped} file(s) inside the uploaded package(s) weren't ingested -- "
-                    f"the free trial analyses up to {_trial_limit} brief/addendum files total "
-                    f"(see the breakdown below for which). Paid accounts go up to {_paid_limit}."
-                )
+                _package_errors.append(i18n.t(
+                    "upload_zip_skipped_summary",
+                    n=_zip_skipped, trial_limit=_trial_limit, paid_limit=_paid_limit,
+                ))
             extracted = document_processor.combine_extracted_documents(per_file)
         st.session_state._tender_files_sig = _files_signature(tender_files)
         st.session_state._package_intake_rows = _package_rows or None
@@ -268,11 +234,7 @@ with tabs[1]:
         elif not extracted.text and _package_rows:
             # ZIP-only upload that contained no analysable brief/addenda --
             # a coherent outcome, not an error: say what WAS found instead.
-            st.session_state._tender_extract_error = (
-                "No brief or addenda were found in that package (see the breakdown below "
-                "for how each file was filed). Upload the brief itself -- as a PDF/DOCX, "
-                "or in another ZIP -- to run the analysis."
-            )
+            st.session_state._tender_extract_error = i18n.t("upload_no_brief_found_error")
         else:
             # A genuinely new/changed brief invalidates everything derived
             # from the old one -- see _reset_downstream_from_brief(). Runs
@@ -292,7 +254,7 @@ with tabs[1]:
         for _note in st.session_state._package_intake_notes:
             st.warning(_note)
     if st.session_state.get("_package_intake_rows"):
-        with st.expander("Tender package breakdown -- how each file was filed", expanded=True):
+        with st.expander(i18n.t("upload_breakdown_expander"), expanded=True):
             _rows = st.session_state._package_intake_rows
             st.dataframe(
                 [{k: v for k, v in r.items() if not k.startswith("_")} for r in _rows],
@@ -302,18 +264,14 @@ with tabs[1]:
             _n_drawings = sum(1 for r in _rows if r["_category"] == "drawing")
             _n_unreadable = sum(1 for r in _rows if r["_category"] == "unreadable")
             if _n_sched:
-                st.info(
-                    f"{_n_sched} returnable schedule(s) were kept aside -- see the "
-                    f"**Returnable Schedules** section on the Export Pack tab to fill them "
-                    f"from this project's data."
-                )
+                st.info(i18n.t("upload_schedules_kept_aside_info", n=_n_sched))
             if _n_drawings:
-                st.caption(f"{_n_drawings} drawing/image file(s) were set aside -- drawings aren't used in the text analysis.")
+                st.caption(i18n.t("upload_drawings_set_aside_caption", n=_n_drawings))
             if _n_unreadable:
-                st.markdown(
-                    f"{_n_unreadable} file(s) couldn't be read -- each row above says why and how to fix it, "
-                    f"or [email us the file]({package_intake.support_mailto('tender file')}) and we'll process it for you."
-                )
+                st.markdown(i18n.t(
+                    "upload_unreadable_markdown",
+                    n=_n_unreadable, mailto=package_intake.support_mailto('tender file'),
+                ))
 
     _ext = st.session_state.tender_extracted
     if _ext is not None and _ext.text:
@@ -323,21 +281,17 @@ with tabs[1]:
             # Standing badge for a project re-loaded from a save (the
             # detailed extraction warning above only exists right after
             # upload) -- the OCR caveat must follow the project around.
-            st.warning(
-                f"Parts of this brief were read with text recognition (OCR) from scanned "
-                f"pages. {document_processor.OCR_VERIFY_TAG}: double-check numbers, dates "
-                f"and names against the original document."
-            )
+            st.warning(i18n.t("upload_ocr_warning", ocr_tag=document_processor.OCR_VERIFY_TAG))
         tcol1, tcol2 = st.columns([8, 1])
         with tcol1:
-            st.success(
-                f"Tender brief loaded -- {len(_ext.text):,} characters"
-                + (f" across {_ext.page_count} pages" if _ext.page_count else "")
-                + f". Found {len(_ext.headings)} candidate headings, {len(_ext.tables)} table(s), "
-                + f"and {len(_ext.annotations)} existing annotation(s)."
-            )
+            st.success(i18n.t(
+                "upload_brief_loaded_success",
+                chars=f"{len(_ext.text):,}",
+                pages_part=(i18n.t("upload_brief_loaded_pages_part", pages=_ext.page_count) if _ext.page_count else ""),
+                headings=len(_ext.headings), tables=len(_ext.tables), annotations=len(_ext.annotations),
+            ))
         with tcol2:
-            if st.button("Clear all", key="clear_tender", help="Remove the uploaded tender document(s) and start over", type="primary"):
+            if st.button(i18n.t("upload_clear_all_button"), key="clear_tender", help=i18n.t("upload_clear_tender_help"), type="primary"):
                 _reset_downstream_from_brief()
                 st.session_state.tender_extracted = None
                 st.session_state._tender_extract_error = None
@@ -345,15 +299,15 @@ with tabs[1]:
                 st.session_state._tender_uploader_version += 1
                 st.rerun()
         if not tender_files:
-            st.caption("↩︎ Retained from your saved project (or an earlier upload). Re-upload only if the brief has changed.")
+            st.caption(i18n.t("upload_retained_caption"))
         if _ext.annotations:
-            with st.expander(f"Preview {len(_ext.annotations)} annotation(s) found in the PDF(s)"):
+            with st.expander(i18n.t("upload_annotations_expander", n=len(_ext.annotations))):
                 for a in _ext.annotations[:30]:
                     source = f"{a['source_file']}, " if a.get("source_file") else ""
-                    st.markdown(f"- **{source}p.{a['page']}** ({a['type']}): _{a.get('comment') or '(highlight only)'}_ — \"{a.get('highlighted_text','')[:150]}\"")
+                    st.markdown(f"- **{source}p.{a['page']}** ({a['type']}): _{a.get('comment') or i18n.t('upload_annotation_highlight_only')}_ — \"{a.get('highlighted_text','')[:150]}\"")
 
     st.divider()
-    st.markdown("**Optional company material** -- upload as many files as you like per category. Multiple files per category are combined.")
+    st.markdown(i18n.t("upload_company_material_heading"))
 
     LEGACY_MATERIAL_KEY = "(previously uploaded files)"
 
@@ -387,8 +341,7 @@ with tabs[1]:
         files = st.file_uploader(
             label, type=["pdf", "docx", "txt"], accept_multiple_files=True,
             key=f"upload_{key}_{st.session_state[f'_matuploader_version_{key}']}",
-            help="Uploading adds/updates these files; anything already stored for this category "
-                 "is kept, not replaced. Use 'Clear all' below to wipe the category and start over.",
+            help=i18n.t("upload_material_uploader_help"),
         )
         sig_key = f"_matsig_{key}"
         if files and _files_signature(files) != st.session_state.get(sig_key):
@@ -408,16 +361,22 @@ with tabs[1]:
                     _dropped_names = ", ".join(getattr(f, "name", None) or "unnamed file" for f in _dropped[:5])
                     if len(_dropped) > 5:
                         _dropped_names += f", and {len(_dropped) - 5} more"
-                    _tier_word = "paid" if limits.is_paid_tier(_access) else "free trial"
+                    _tier_word = i18n.t("limits_tier_paid") if limits.is_paid_tier(_access) else i18n.t("limits_tier_trial")
                     st.warning(
-                        f"The {_tier_word} plan handles up to {_cat_limit:,} {limits.UPLOAD_LABELS.get(key, key)} "
-                        f"for this project -- {_existing_count} already stored, so "
-                        + (f"{len(_kept)} of the {len(files)} newly selected file(s) were added"
-                           if _kept else "none of the newly selected file(s) were added")
-                        + f" and the rest left out: {_dropped_names}." + limits.upgrade_clause(key, _access)
+                        i18n.t(
+                            "upload_material_limit_warning",
+                            tier=_tier_word, limit=_cat_limit, label=limits.UPLOAD_LABELS.get(key, key),
+                            existing=_existing_count,
+                            added_clause=(
+                                i18n.t("upload_material_added_some", kept=len(_kept), total=len(files))
+                                if _kept else i18n.t("upload_material_added_none")
+                            ),
+                            dropped=_dropped_names,
+                        )
+                        + limits.upgrade_clause(key, _access)
                     )
                     files = _kept
-            with st.spinner(f"Extracting {label}..."):
+            with st.spinner(i18n.t("upload_extracting_category_spinner", label=label)):
                 updates = {}
                 for f in files:
                     doc = document_processor.extract_plain_text_from_file(f)
@@ -447,17 +406,9 @@ with tabs[1]:
             st.session_state[sig_key] = _files_signature(files)
 
         if key == "previous_proposals":
-            st.caption(
-                "📁 To pull in a proposal you've already archived, use the 'Add as reference to "
-                "project' button in the Proposal Library popover (top banner) instead of "
-                "re-uploading it here."
-            )
+            st.caption(i18n.t("upload_prev_proposals_caption"))
         if key == "project_references":
-            st.caption(
-                "📁 To pull in a firm reference project you've uploaded to the Project Reference "
-                "Library, use its 'Add to project references' button in the top banner instead "
-                "of re-uploading it here."
-            )
+            st.caption(i18n.t("upload_project_references_caption"))
 
         # The uploaded files themselves are shown by Streamlit's own uploader widget above
         # (each with its own x). Here we only show a one-line status of what's stored plus a
@@ -466,19 +417,19 @@ with tabs[1]:
         existing = (st.session_state.company_material_text.get(key) or "").strip()
         if existing:
             n_files = len([f for f in stored_files if f != LEGACY_MATERIAL_KEY])
-            count_bit = f"{n_files} file(s), " if n_files else ""
+            count_bit = i18n.t("upload_material_file_count_bit", n=n_files) if n_files else ""
             scol1, scol2 = st.columns([8, 1])
             with scol1:
-                st.caption(f"✅ {label}: {count_bit}{len(existing):,} characters stored.")
+                st.caption(i18n.t("upload_material_stored_caption", label=label, count_bit=count_bit, chars=len(existing)))
             with scol2:
-                if st.button("Clear all", key=f"clear_{key}", help=f"Remove all {label.lower()} and start over", type="primary"):
+                if st.button(i18n.t("upload_clear_all_button"), key=f"clear_{key}", help=i18n.t("upload_clear_category_help", label=label.lower()), type="primary"):
                     _clear_material_category(key)
                     st.rerun()
 
     if st.session_state.get("_photo_uploader_version") is None:
         st.session_state._photo_uploader_version = 0
     photo_files = st.file_uploader(
-        "Project photos", type=["png", "jpg", "jpeg"], accept_multiple_files=True,
+        i18n.t("upload_photos_label"), type=["png", "jpg", "jpeg"], accept_multiple_files=True,
         key=f"upload_photos_{st.session_state._photo_uploader_version}",
     )
     if photo_files and _files_signature(photo_files) != st.session_state.get("_photo_files_sig"):
@@ -489,12 +440,12 @@ with tabs[1]:
         st.session_state.project_photo_bytes = [f.getvalue() for f in photo_files]
         st.session_state._photo_files_sig = _files_signature(photo_files)
     if st.session_state.project_photo_bytes:
-        retained = " (retained from saved project)" if not photo_files else ""
+        retained = i18n.t("upload_retained_suffix") if not photo_files else ""
         pcol1, pcol2 = st.columns([8, 1])
         with pcol1:
-            st.caption(f"✅ {len(st.session_state.project_photo_bytes)} project photo(s) loaded -- the first is the cover image{retained}.")
+            st.caption(i18n.t("upload_photos_loaded_caption", n=len(st.session_state.project_photo_bytes), retained=retained))
         with pcol2:
-            if st.button("Clear all", key="clear_photos", help="Remove all project photos and start over", type="primary"):
+            if st.button(i18n.t("upload_clear_all_button"), key="clear_photos", help=i18n.t("upload_clear_photos_help"), type="primary"):
                 st.session_state.project_photo_bytes = []
                 st.session_state._photo_files_sig = None
                 st.session_state._photo_uploader_version += 1
@@ -503,7 +454,7 @@ with tabs[1]:
     if st.session_state.get("_branding_uploader_version") is None:
         st.session_state._branding_uploader_version = 0
     branding_files = st.file_uploader(
-        "Company branding / image library", type=["png", "jpg", "jpeg"], accept_multiple_files=True,
+        i18n.t("upload_branding_label"), type=["png", "jpg", "jpeg"], accept_multiple_files=True,
         key=f"upload_branding_{st.session_state._branding_uploader_version}",
     )
     if branding_files and _files_signature(branding_files) != st.session_state.get("_branding_files_sig"):
@@ -514,29 +465,23 @@ with tabs[1]:
         st.session_state.branding_bytes = [f.getvalue() for f in branding_files]
         st.session_state._branding_files_sig = _files_signature(branding_files)
     if st.session_state.branding_bytes:
-        retained = " (retained from saved project)" if not branding_files else ""
+        retained = i18n.t("upload_retained_suffix") if not branding_files else ""
         bcol1, bcol2 = st.columns([8, 1])
         with bcol1:
-            st.caption(f"✅ {len(st.session_state.branding_bytes)} branding image(s) loaded{retained}.")
+            st.caption(i18n.t("upload_branding_loaded_caption", n=len(st.session_state.branding_bytes), retained=retained))
         with bcol2:
-            if st.button("Clear all", key="clear_branding", help="Remove all branding images and start over", type="primary"):
+            if st.button(i18n.t("upload_clear_all_button"), key="clear_branding", help=i18n.t("upload_clear_branding_help"), type="primary"):
                 st.session_state.branding_bytes = []
                 st.session_state._branding_files_sig = None
                 st.session_state._branding_uploader_version += 1
                 st.rerun()
 
     st.divider()
-    st.markdown("#### Reference projects (Relevant Experience section)")
-    st.caption(
-        "Draft, then review and edit, the distinct past projects the exported pack will show in "
-        "Relevant Experience -- revised for consistent tone and relevance to THIS tender, not the "
-        "raw uploaded text pasted in. Add a photo per project if you have one, and confirm which "
-        "of your key personnel worked on each -- that feeds the Section 2 x Section 3 "
-        "cross-reference table automatically. Best done here, early, so it's ready before Export."
-    )
+    st.markdown(i18n.t("upload_refprojects_heading"))
+    st.caption(i18n.t("upload_refprojects_caption"))
     raw_refs_text = (st.session_state.company_material_text.get("project_references") or "").strip()
     if not raw_refs_text:
-        st.info("Upload 'Project references' material above to draft reference projects from it, or add one manually below.")
+        st.info(i18n.t("upload_refprojects_upload_first_info"))
     elif not st.session_state.reference_projects:
         # Uploading the raw material only extracts its text -- it does NOT
         # automatically turn into reference project entries. That second
@@ -545,19 +490,15 @@ with tabs[1]:
         # confirmation that looks like the whole job is done. Called out
         # explicitly here so "I uploaded my references but nothing's
         # happening" has an obvious next step instead of looking broken.
-        st.info(
-            "Material uploaded and read. Click **Draft reference projects from uploaded material** "
-            "below to have the AI turn it into the individual project entries shown further down -- "
-            "uploading alone doesn't create them yet."
-        )
+        st.info(i18n.t("upload_refprojects_draft_hint_info"))
 
     refs_ai_ready = bool(st.session_state.ai_config.get("api_key")) and bool(raw_refs_text) and _current_project_already_paid()
-    if st.button("Draft reference projects from uploaded material", disabled=not refs_ai_ready,
+    if st.button(i18n.t("upload_draft_refprojects_button"), disabled=not refs_ai_ready,
                  help=None if refs_ai_ready else (
                      _ai_block_reason() if not _current_project_already_paid()
-                     else f"Upload 'Project references' material above and {_AI_HINT_CLAUSE}."
+                     else i18n.t("upload_draft_refprojects_help", ai_hint=_AI_HINT_CLAUSE)
                  ), type="primary"):
-        with st.spinner("Reading project reference material and drafting revised, relevance-led entries..."):
+        with st.spinner(i18n.t("upload_draft_refprojects_spinner")):
             try:
                 _record_ai_click()
                 analysis_for_context = st.session_state.analysis
@@ -575,11 +516,11 @@ with tabs[1]:
                 )
                 st.session_state.reference_projects = drafted
                 st.session_state.reference_project_warnings = warnings
-                st.success(f"Drafted {len(drafted)} reference project(s). Review and edit every field below before export.")
+                st.success(i18n.t("upload_refprojects_drafted_success", n=len(drafted)))
                 if not analysis_for_context:
-                    st.info("Tender Analysis hasn't run yet -- re-run this once it has, so relevance can be tailored to the actual brief.")
+                    st.info(i18n.t("upload_refprojects_no_analysis_info"))
             except Exception as exc:
-                _show_error("Reference project drafting failed", exc)
+                _show_error(i18n.t("upload_refprojects_drafting_failed_error"), exc)
 
     if st.session_state.reference_project_warnings:
         st.warning("\n\n".join(st.session_state.reference_project_warnings))
@@ -597,33 +538,33 @@ with tabs[1]:
 
     _remove_ref_index = None
     for i, proj in enumerate(st.session_state.reference_projects):
-        with st.expander(f"{proj.title or f'Reference project {i + 1}'}" + (f" -- {proj.client}" if proj.client else ""), expanded=False):
-            proj.title = st.text_input("Project title", value=proj.title, key=f"ref_title_{i}")
-            proj.client = st.text_input("Client", value=proj.client, key=f"ref_client_{i}")
-            proj.description = st.text_area("Description (revised for consistency/relevance)", value=proj.description, key=f"ref_desc_{i}", height=110)
-            proj.relevance_text = st.text_area("Relevance to this tender", value=proj.relevance_text, key=f"ref_rel_{i}", height=70)
+        with st.expander(f"{proj.title or i18n.t('upload_refproject_untitled', n=i + 1)}" + (f" -- {proj.client}" if proj.client else ""), expanded=False):
+            proj.title = st.text_input(i18n.t("upload_ref_project_title_label"), value=proj.title, key=f"ref_title_{i}")
+            proj.client = st.text_input(i18n.t("upload_ref_client_label"), value=proj.client, key=f"ref_client_{i}")
+            proj.description = st.text_area(i18n.t("upload_ref_description_label"), value=proj.description, key=f"ref_desc_{i}", height=110)
+            proj.relevance_text = st.text_area(i18n.t("upload_ref_relevance_label"), value=proj.relevance_text, key=f"ref_rel_{i}", height=70)
             options = sorted(set(_known_personnel_names) | set(proj.personnel_involved))
             proj.personnel_involved = st.multiselect(
-                "Key personnel who worked on this project", options,
+                i18n.t("upload_ref_personnel_label"), options,
                 default=[n for n in proj.personnel_involved if n in options], key=f"ref_pers_{i}",
             )
-            photo = st.file_uploader("Project photo (optional)", type=["png", "jpg", "jpeg"], key=f"ref_photo_{i}")
+            photo = st.file_uploader(i18n.t("upload_ref_photo_label"), type=["png", "jpg", "jpeg"], key=f"ref_photo_{i}")
             if photo is not None:
                 st.session_state.reference_project_photos[photo_key_for(proj, proj.title)] = photo.getvalue()
             existing_ref_photo = st.session_state.reference_project_photos.get(photo_key_for(proj, proj.title))
             if existing_ref_photo:
                 st.image(existing_ref_photo, width=160)
-            if st.button("Remove this reference project", key=f"ref_remove_{i}", type="primary"):
+            if st.button(i18n.t("upload_ref_remove_button"), key=f"ref_remove_{i}", type="primary"):
                 _remove_ref_index = i
     if _remove_ref_index is not None:
         st.session_state.reference_projects.pop(_remove_ref_index)
         st.rerun()
 
     with st.form("add_reference_project_form", clear_on_submit=True):
-        st.markdown("**Add a reference project manually**")
-        new_ref_title = st.text_input("Project title")
-        new_ref_client = st.text_input("Client")
-        if st.form_submit_button("Add reference project", type="primary") and new_ref_title.strip():
+        st.markdown(i18n.t("upload_add_ref_manual_heading"))
+        new_ref_title = st.text_input(i18n.t("upload_ref_project_title_label"))
+        new_ref_client = st.text_input(i18n.t("upload_ref_client_label"))
+        if st.form_submit_button(i18n.t("upload_add_ref_button"), type="primary") and new_ref_title.strip():
             st.session_state.reference_projects.append(
                 reference_projects_module.ReferenceProject(title=new_ref_title.strip(), client=new_ref_client.strip())
             )
@@ -635,8 +576,8 @@ with tabs[1]:
 # ---------------------------------------------------------------------------
 
 with tabs[2]:
-    st.subheader("Tender Analysis")
-    st.caption("Extracts scope, objectives, mandatory requirements, evaluation criteria, weightings, page limits, deliverables, forms, and risks from the uploaded brief.")
+    st.subheader(i18n.t("analysis_subheader"))
+    st.caption(i18n.t("analysis_caption"))
 
     # A project name is required before Tender Analysis can run at all --
     # not just a UX nicety. It's the identity that anchors the paywall: see
@@ -657,9 +598,9 @@ with tabs[2]:
     )
     if not ready:
         if st.session_state.tender_extracted is not None and not _has_project_name:
-            st.info("Enter a project name on the Project Setup tab before running Tender Analysis.")
+            st.info(i18n.t("analysis_need_project_name_info"))
         else:
-            st.info(f"Upload a tender brief (Upload Docs) and {_AI_HINT_CLAUSE} to run analysis.")
+            st.info(i18n.t("analysis_need_brief_and_ai_info", ai_hint=_AI_HINT_CLAUSE))
 
     # This is the metered action: the first time a given project+document
     # runs Tender Analysis, it consumes the account's free trial bid(s) (see
@@ -741,29 +682,19 @@ with tabs[2]:
         if st.button(i18n.t("passes_topup_button"), key="_tab3_passes_topup_btn", type="primary"):
             try:
                 _checkout_url = billing.create_bid_checkout_session(current_user, topup_project_key=_project_key)
-                st.link_button("Continue to payment", _checkout_url, type="primary")
+                st.link_button(i18n.t("export_continue_to_payment_button"), _checkout_url, type="primary")
             except Exception as exc:
-                _show_error("Couldn't start checkout", exc)
+                _show_error(i18n.t("analysis_checkout_failed_error"), exc)
     elif _trial_blocked or (IS_SAAS_MODE and current_user and _access["limit_reached"] and not _already_counted):
         if _access["past_due"]:
             # Same monthly quota as an active subscriber (see
             # auth.get_access_status), but the actionable fix here is fixing
             # payment, not buying more -- lead with that.
-            st.warning(
-                "Your payment is past due, and you've also used this cycle's "
-                f"{_access['subscription_bid_limit']} included bid(s). Update your payment method to keep "
-                "your subscription active, or buy a pay-as-you-go bid to keep going right now."
-            )
+            st.warning(i18n.t("analysis_past_due_warning", limit=_access['subscription_bid_limit']))
         elif _access["subscribed"]:
-            st.warning(
-                f"You've used all {_access['subscription_bid_limit']} bid(s) included in this billing "
-                "cycle's Monthly plan. Buy a pay-as-you-go bid to keep going now, or wait for renewal."
-            )
+            st.warning(i18n.t("analysis_subscribed_limit_warning", limit=_access['subscription_bid_limit']))
         else:
-            st.warning(
-                f"You've used all {_access['trial_limit']} free trial bid(s). "
-                "Upgrade to keep going -- pay per bid, or subscribe monthly. See pricing on the homepage."
-            )
+            st.warning(i18n.t("analysis_trial_exhausted_warning", limit=_access['trial_limit']))
         _render_upgrade_buttons(current_user, key_prefix="_tab3",
                                  already_subscribed=_access["subscribed"] or _access["past_due"])
     elif _extra_blocked_msg:
@@ -795,23 +726,20 @@ with tabs[2]:
                        + " -- running analysis again will use one.")
         elif _access["subscribed"] or _access["past_due"]:
             if _access["subscription_bids_remaining"] > 0:
-                st.caption(
-                    f"This will use 1 of your {_access['subscription_bids_remaining']} remaining bid(s) "
-                    "in this billing cycle."
-                )
+                st.caption(i18n.t("analysis_subscription_bids_caption", remaining=_access['subscription_bids_remaining']))
             else:
-                st.caption(f"This will use 1 pay-as-you-go bid credit (you have {_access['bid_credits']} left).")
+                st.caption(i18n.t("analysis_payg_caption", credits=_access['bid_credits']))
         elif _access["trial_remaining"] > 0:
-            st.caption(f"This will use your {_access['trial_remaining']} free trial bid -- make sure this is the right document first.")
+            st.caption(i18n.t("analysis_trial_remaining_caption", remaining=_access['trial_remaining']))
         else:
-            st.caption(f"This will use 1 pay-as-you-go bid credit (you have {_access['bid_credits']} left).")
+            st.caption(i18n.t("analysis_payg_caption", credits=_access['bid_credits']))
 
-    if st.button("Run Tender Analysis", type="primary", disabled=not ready or _trial_blocked or _repeat_blocked or bool(_extra_blocked_msg)):
+    if st.button(i18n.t("analysis_run_button"), type="primary", disabled=not ready or _trial_blocked or _repeat_blocked or bool(_extra_blocked_msg)):
         extracted = st.session_state.tender_extracted
-        progress = st.progress(0.0, text="Analysing...")
+        progress = st.progress(0.0, text=i18n.t("analysis_progress_text"))
 
         def _progress_cb(done, total):
-            progress.progress((done + 1) / max(total, 1), text=f"Analysing part {done + 1}/{total}...")
+            progress.progress((done + 1) / max(total, 1), text=i18n.t("analysis_progress_detail", done=done + 1, total=total))
 
         try:
             _record_ai_click()
@@ -839,14 +767,14 @@ with tabs[2]:
                 # their weightings usually live.
                 kwargs={"tables": getattr(extracted, "tables", None)},
                 progress=progress,
-                queued_text="Queued for analysis...", running_text="Analysing...",
+                queued_text=i18n.t("analysis_queued_text"), running_text=i18n.t("analysis_progress_text"),
                 inline_extra_kwargs={"progress_callback": _progress_cb},
                 queue_func=job_queue.run_tender_analysis_job,
                 queue_args=(extracted.text, extracted.annotations, _redacted_ai_config),
             )
             st.session_state.analysis = analysis
-            progress.progress(1.0, text="Done.")
-            st.success("Tender analysis complete.")
+            progress.progress(1.0, text=i18n.t("drafting_done_text"))
+            st.success(i18n.t("analysis_complete_success"))
             if IS_SAAS_MODE and current_user:
                 if _already_counted:
                     # Part B2: this is a repeat run on an already-funded
@@ -867,58 +795,54 @@ with tabs[2]:
                 # cycle actually completes) rather than on every rerun.
                 _maybe_snapshot_paid_identity()
         except Exception as exc:
-            _show_error("Analysis failed", exc)
+            _show_error(i18n.t("analysis_failed_error"), exc)
 
     analysis = st.session_state.analysis
     if analysis:
         if getattr(st.session_state.tender_extracted, "ocr_used", False):
-            st.warning(
-                f"This analysis is based on text read with OCR from scanned pages. "
-                f"{document_processor.OCR_VERIFY_TAG}: double-check extracted requirements, "
-                f"dates, and numbers against the original document."
-            )
-        st.markdown("#### Project scope")
-        st.write(analysis.project_scope or "_not extracted_")
+            st.warning(i18n.t("analysis_ocr_warning", ocr_tag=document_processor.OCR_VERIFY_TAG))
+        st.markdown(i18n.t("analysis_project_scope_heading"))
+        st.write(analysis.project_scope or i18n.t("analysis_not_extracted"))
 
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("#### Client objectives")
-            st.write(analysis.client_objectives or "_none extracted_")
-            st.markdown("#### Mandatory requirements")
-            st.write(analysis.mandatory_requirements or "_none extracted_")
-            st.markdown("#### Deliverables")
-            st.write(analysis.deliverables or "_none extracted_")
+            st.markdown(i18n.t("analysis_client_objectives_heading"))
+            st.write(analysis.client_objectives or i18n.t("analysis_none_extracted"))
+            st.markdown(i18n.t("analysis_mandatory_requirements_heading"))
+            st.write(analysis.mandatory_requirements or i18n.t("analysis_none_extracted"))
+            st.markdown(i18n.t("analysis_deliverables_heading"))
+            st.write(analysis.deliverables or i18n.t("analysis_none_extracted"))
         with col2:
-            st.markdown(f"**Submission date:** {analysis.submission_date or '_not stated_'}")
-            st.markdown(f"**Total page limit:** {analysis.total_page_limit or '_not stated_'}")
-            st.markdown(f"**Fee cap:** {analysis.fee_cap or '_not stated_'}")
-            st.markdown(f"**Uses named selection criteria (SC1/SC2 style):** {'Yes' if analysis.uses_named_selection_criteria else 'No'}")
-            st.markdown("#### Required forms / schedules")
-            st.write(analysis.required_forms or "_none extracted_")
+            st.markdown(i18n.t("analysis_submission_date_label", text=analysis.submission_date or i18n.t("analysis_not_stated")))
+            st.markdown(i18n.t("analysis_total_page_limit_label", text=analysis.total_page_limit or i18n.t("analysis_not_stated")))
+            st.markdown(i18n.t("analysis_fee_cap_label", text=analysis.fee_cap or i18n.t("analysis_not_stated")))
+            st.markdown(i18n.t("analysis_uses_named_criteria_label", answer=(i18n.t("analysis_yes") if analysis.uses_named_selection_criteria else i18n.t("analysis_no"))))
+            st.markdown(i18n.t("analysis_required_forms_heading"))
+            st.write(analysis.required_forms or i18n.t("analysis_none_extracted"))
 
-        st.markdown("#### Evaluation / selection criteria")
+        st.markdown(i18n.t("analysis_evaluation_criteria_heading"))
         if analysis.evaluation_criteria:
             st.dataframe(
                 [{
-                    "Code": c.criterion_code or "-", "Name": c.name,
-                    "Weighting": f"{c.detected_weighting:.0f}%" if c.detected_weighting is not None else ("Mandatory gate" if c.is_mandatory_gate else "-"),
-                    "Page limit": c.page_limit or "-", "Format rules": c.format_requirements or "-",
+                    i18n.t("analysis_col_code"): c.criterion_code or "-", i18n.t("analysis_col_name"): c.name,
+                    i18n.t("analysis_col_weighting"): f"{c.detected_weighting:.0f}%" if c.detected_weighting is not None else (i18n.t("analysis_mandatory_gate") if c.is_mandatory_gate else "-"),
+                    i18n.t("analysis_col_page_limit"): c.page_limit or "-", i18n.t("analysis_col_format_rules"): c.format_requirements or "-",
                 } for c in analysis.evaluation_criteria],
                 use_container_width=True,
             )
         else:
-            st.write("_No evaluation criteria extracted._")
+            st.write(i18n.t("analysis_no_evaluation_criteria"))
 
         if analysis.user_flagged_items:
-            st.markdown("#### Items you flagged via annotations")
+            st.markdown(i18n.t("analysis_flagged_items_heading"))
             for item in analysis.user_flagged_items:
                 st.markdown(f"- **p.{item.get('page','?')}:** {item.get('note')} — _{item.get('context','')[:150]}_")
 
         if analysis.risks:
-            st.markdown("#### Risks noted in the brief")
+            st.markdown(i18n.t("analysis_risks_heading"))
             st.write(analysis.risks)
 
         if analysis.analysis_warnings:
-            st.warning("Extraction warnings -- verify these manually against the brief:\n\n" + "\n".join(f"- {w}" for w in analysis.analysis_warnings))
+            st.warning(i18n.t("analysis_extraction_warnings_prefix") + "\n".join(f"- {w}" for w in analysis.analysis_warnings))
 
 

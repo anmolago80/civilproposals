@@ -63,6 +63,12 @@ UPLOAD_LABELS = {
     "branding_images": "branding image(s)",
 }
 
+# TODO A2 i18n: PAID_PLAN_UPGRADE_NOTE is a module-level string constant, so it
+# can't safely call i18n.t() here (that needs session_state, which isn't live
+# at import time). It stays hardcoded English -- to translate it, it would
+# need to become a function (e.g. paid_plan_upgrade_note()) called at each use
+# site, or be looked up directly at each call site instead of via this shared
+# constant. Left as-is; not restructured as part of this pass.
 PAID_PLAN_UPGRADE_NOTE = "See pricing on the homepage to upgrade."
 
 
@@ -106,7 +112,8 @@ def upgrade_clause(key: str, access: dict | None) -> str:
         return ""
     _, paid_limit = UPLOAD_LIMITS[key]
     label = UPLOAD_LABELS.get(key, key)
-    return f" Paid accounts go up to {paid_limit:,} {label}."
+    from modules import i18n
+    return " " + i18n.t("limits_upgrade_clause", paid_limit=paid_limit, label=label)
 
 
 def enforce_count_limit(items: list, key: str, access: dict | None, item_label_fn=None) -> tuple[list, str | None]:
@@ -130,10 +137,11 @@ def enforce_count_limit(items: list, key: str, access: dict | None, item_label_f
     shown = ", ".join(name_fn(f) for f in dropped[:5])
     if len(dropped) > 5:
         shown += f", and {len(dropped) - 5} more"
-    tier = "paid" if is_paid_tier(access) else "free trial"
+    from modules import i18n
+    tier = i18n.t("limits_tier_paid") if is_paid_tier(access) else i18n.t("limits_tier_trial")
     msg = (
-        f"The {tier} plan handles up to {limit:,} {label} at a time -- we've used the first "
-        f"{limit:,} and left out: {shown}." + upgrade_clause(key, access)
+        i18n.t("limits_count_limit_message", tier=tier, limit=limit, label=label, shown=shown)
+        + upgrade_clause(key, access)
     )
     return kept, msg
 
@@ -152,12 +160,14 @@ def tender_page_cap_message(page_count: int, access: dict | None) -> str | None:
     trial_limit, _ = UPLOAD_LIMITS["tender_pages"]
     if page_count <= trial_limit:
         return None
+    from modules import i18n
     return (
-        f"This brief runs to about {page_count:,} pages, and the free trial analyses up to "
-        f"{trial_limit:,}. Trim the package to the essentials (standard conditions of contract "
-        f"and similar boilerplate are usually safe to drop), or upgrade to a paid plan "
-        f"(up to {UPLOAD_LIMITS['tender_pages'][1]:,} pages) to run this brief as-is. "
-        + PAID_PLAN_UPGRADE_NOTE
+        i18n.t(
+            "limits_tender_page_cap_message",
+            page_count=page_count, trial_limit=trial_limit,
+            paid_limit=UPLOAD_LIMITS["tender_pages"][1],
+        )
+        + " " + PAID_PLAN_UPGRADE_NOTE
     )
 
 
@@ -173,6 +183,12 @@ TRIAL_AI_SPEND_CEILING_USD = 5.00
 # never blocks anything for a non-trial account.
 ADMIN_PROJECT_COST_ALERT_USD = 25.00
 
+# TODO A2 i18n: TRIAL_SPEND_CEILING_MESSAGE is a module-level string constant,
+# so it can't safely call i18n.t() here (that needs session_state, which isn't
+# live at import time). It stays hardcoded English -- ai_spend_block_reason()
+# below builds its own translated version at call time instead of returning
+# this constant. Left as-is (unused internally now) rather than restructured,
+# per this pass's scope; a future pass could turn it into a function or drop it.
 TRIAL_SPEND_CEILING_MESSAGE = (
     "Your free trial's AI allowance is used up -- upgrade to keep going; your work is saved. "
     + PAID_PLAN_UPGRADE_NOTE
@@ -191,7 +207,8 @@ def ai_spend_block_reason(user_id: str | None, access: dict | None, account_ai_c
         return None
     cost = account_ai_cost() if callable(account_ai_cost) else account_ai_cost
     if (cost or 0.0) >= TRIAL_AI_SPEND_CEILING_USD:
-        return TRIAL_SPEND_CEILING_MESSAGE
+        from modules import i18n
+        return i18n.t("limits_trial_spend_ceiling_message") + " " + PAID_PLAN_UPGRADE_NOTE
     return None
 
 
@@ -242,6 +259,14 @@ _ai_rate_redis_client = None
 # In-memory fallback: {key: (count, window_expiry_ts)}
 _ai_rate_local: dict[str, tuple[int, float]] = {}
 
+# TODO A2 i18n: AI_RATE_LIMIT_MESSAGE / AI_RATE_LIMIT_MESSAGE_PAID are
+# module-level string constants, so they can't safely call i18n.t() here
+# (that needs session_state, which isn't live at import time). They stay
+# hardcoded English -- record_ai_call() and ai_rate_limit_peek() below build
+# their own translated version at call time instead of returning these
+# constants. Left as-is (unused internally now) rather than restructured,
+# per this pass's scope; a future pass could turn them into functions or drop
+# them.
 AI_RATE_LIMIT_MESSAGE = "Give it a few minutes -- the trial has a fair-use speed limit."
 AI_RATE_LIMIT_MESSAGE_PAID = "Give it a few minutes -- there's a brief fair-use speed limit."
 
@@ -300,7 +325,8 @@ def record_ai_call(user_id: str | None, is_trial: bool) -> str | None:
         if len(_ai_rate_local) > 5000:
             _ai_rate_local.clear()
     if count > cap:
-        return AI_RATE_LIMIT_MESSAGE if is_trial else AI_RATE_LIMIT_MESSAGE_PAID
+        from modules import i18n
+        return i18n.t("limits_ai_rate_limit_trial") if is_trial else i18n.t("limits_ai_rate_limit_paid")
     return None
 
 
@@ -328,5 +354,6 @@ def ai_rate_limit_peek(user_id: str | None, is_trial: bool) -> str | None:
         prev_count, window_until = _ai_rate_local.get(key, (0, 0.0))
         count = prev_count if window_until >= now else 0
     if count >= cap:
-        return AI_RATE_LIMIT_MESSAGE if is_trial else AI_RATE_LIMIT_MESSAGE_PAID
+        from modules import i18n
+        return i18n.t("limits_ai_rate_limit_trial") if is_trial else i18n.t("limits_ai_rate_limit_paid")
     return None

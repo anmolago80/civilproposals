@@ -23,21 +23,17 @@ from __future__ import annotations
 # re-entering `with tabs[8]:` (Streamlit appends to the same tab, and only
 # one branch ever renders anything, so the result is identical).
 with tabs[8]:
-    st.subheader("Fees & Program" if _is_letter() else "Fee Estimate")
+    st.subheader(i18n.t("fee_small_tab_title_fees_program") if _is_letter() else i18n.t("fee_small_tab_title_fee_estimate"))
 
     if _is_letter():
-        st.caption(
-            "The **discipline fee build-up ($)** and **discipline fee split (%)** below are the "
-            "two tables that actually go into the pack, along with the delivery program. The "
-            "scope-item table is internal tracking only and is never exported."
-        )
+        st.caption(i18n.t("fee_small_letter_caption"))
         _fee_inclusion_summary()
         analysis = st.session_state.analysis
         scope_items = analysis.scope_items if analysis else []
         if analysis is None:
-            st.info("Run the Tender Analysis first -- the fee tables are built from the brief's own disciplines and scope items.")
+            st.info(i18n.t("fee_small_run_analysis_first"))
         elif not scope_items:
-            st.info("Run Tender Analysis to extract scope items first.")
+            st.info(i18n.t("fee_small_run_tender_scope_items"))
         else:
             @st.fragment
             def _render_letter_scope_fee_table():
@@ -47,25 +43,17 @@ with tabs[8]:
                 # script's locals, since this fragment can rerun independently.
                 analysis = st.session_state.analysis
                 scope_items = analysis.scope_items if analysis else []
-                st.markdown("#### Scope item fees")
+                st.markdown(i18n.t("fee_small_scope_items_heading"))
                 _fee_include_checkbox("scope_buildup", "_inc_letter_scope")
+                # TODO A2 i18n: shared constant from fee_estimation_engine.py, not owned by this file.
                 st.caption(fee_estimation_engine.SCOPE_FEE_SEED_NOTE)
-                st.caption(
-                    "How the starting figures are seeded: each scope item gets a weight of "
-                    "1 + however many tasks it lists (so even a bare item with no tasks gets a "
-                    "base share), then the ballpark total below is split across items in "
-                    "proportion to that weight and rounded to the nearest $50. It's a rough "
-                    "task-count proxy for effort, not a real estimate -- edit every row before "
-                    "relying on it. This table is for your own internal tracking only; it is "
-                    "**not** included in the exported pack -- the discipline fee split further "
-                    "down (which mirrors the fee build-up table) is what's exported."
-                )
+                st.caption(i18n.t("fee_small_scope_seed_explanation"))
                 seed_col1, seed_col2 = st.columns([2, 1])
                 with seed_col1:
-                    st.number_input("Ballpark total project value ($, excl. GST)", min_value=0.0, step=500.0, key="fee_seed_total")
+                    st.number_input(i18n.t("fee_small_ballpark_total_label"), min_value=0.0, step=500.0, key="fee_seed_total")
                 with seed_col2:
                     st.write("")
-                    if st.button("Seed fee table from total", type="primary"):
+                    if st.button(i18n.t("fee_small_seed_button"), type="primary"):
                         st.session_state.scope_item_fees = fee_estimation_engine.seed_scope_item_fees(
                             scope_items, st.session_state.fee_seed_total,
                         )
@@ -85,7 +73,7 @@ with tabs[8]:
                         if item.title.strip().lower() not in existing_titles:
                             st.session_state.scope_item_fees.append(
                                 fee_estimation_engine.ScopeItemFee(item_title=item.title, fee_amount=0.0,
-                                                                   notes="Enter fee -- no estimate seeded")
+                                                                   notes=i18n.t("fee_small_scope_note_default"))
                             )
                             # Force the data_editor below to actually pick up this new row --
                             # it ignores its `data` argument once its widget state already
@@ -117,16 +105,12 @@ with tabs[8]:
                     use_container_width=True, hide_index=True,
                     num_rows="dynamic",
                     column_config={
-                        "item_title": st.column_config.TextColumn("Scope item / deliverable", required=True),
-                        "fee_amount": st.column_config.NumberColumn("Fee ($, excl. GST)", min_value=0.0, step=50.0, format="$%.0f"),
-                        "notes": st.column_config.TextColumn("Notes"),
+                        "item_title": st.column_config.TextColumn(i18n.t("fee_small_col_scope_item_deliverable"), required=True),
+                        "fee_amount": st.column_config.NumberColumn(i18n.t("fee_small_col_fee_amount"), min_value=0.0, step=50.0, format="$%.0f"),
+                        "notes": st.column_config.TextColumn(i18n.t("fee_small_col_notes")),
                     },
                 )
-                st.caption(
-                    "To delete a row: tick the checkbox on its left, then either press "
-                    "Delete/Backspace on your keyboard or click the 🗑 icon that appears "
-                    "above the table."
-                )
+                st.caption(i18n.t("fee_small_delete_row_hint"))
                 # Deferred apply -- same pattern as the discipline fee build-up
                 # table's checkbox (see the comment there for the full
                 # rationale). Rebuilding the model and re-adding Project
@@ -161,20 +145,19 @@ with tabs[8]:
                     st.session_state.scope_item_fees = fee_estimation_engine.ensure_project_management_present(rebuilt_scope_fees)
                     if not _had_pm:
                         st.session_state._scope_fee_editor_version += 1
-                        st.info("Project Management is a fixed line item and has been re-added.")
+                        st.info(i18n.t("fee_small_scope_pm_readded_info"))
                     st.session_state._scope_fee_last_applied_editor_sig = _scope_raw_sig
                 else:
                     st.caption(
-                        "The total below is from the last time you ticked the box above -- "
-                        "tick it again to bring it up to date."
+                        i18n.t("fee_small_scope_ticked_stale")
                         if _scope_pending else
-                        "The total below reflects the ticked data above."
+                        i18n.t("fee_small_scope_ticked_current")
                     )
 
                 total = sum(f.fee_amount for f in st.session_state.scope_item_fees)
-                st.markdown(f"**Total: ${total:,.0f}**")
+                st.markdown(i18n.t("fee_small_scope_total", total=f"{total:,.0f}"))
                 if any(f.fee_amount <= 0 for f in st.session_state.scope_item_fees):
-                    st.warning("At least one scope item still has no fee entered -- the exported pack flags this in red until every row is priced.")
+                    st.warning(i18n.t("fee_small_scope_unpriced_warning"))
 
             # Deliberately rendered LAST and collapsed. This table is not
             # exported; the two below it are. It used to sit first and open,
@@ -188,17 +171,9 @@ with tabs[8]:
             def _render_letter_discipline_fee_table():
                 # Same fragment-wrap rationale as the Large Scope discipline
                 # table -- see _render_large_discipline_fee_table().
-                st.markdown("#### First-pass discipline fee build-up")
+                st.markdown(i18n.t("fee_small_discipline_heading"))
                 _fee_include_checkbox("discipline_buildup", "_inc_letter_disc")
-                st.caption(
-                    "Your own first-pass fee per discipline, built from hours x rate -- the same "
-                    "build-up as the Large Scope pack's Fee Estimate tab, and the same figures if "
-                    "you switch a project between pack sizes. The table is seeded from the "
-                    "disciplines the brief calls for, plus Project Management (always included). "
-                    "Enter total hours and an hourly rate per discipline -- the Total column is "
-                    "calculated automatically. A per-discipline total (not the hours/rates "
-                    "themselves) is included in the exported pack's Fees section."
-                )
+                st.caption(i18n.t("fee_small_discipline_caption"))
                 letter_brief_disc = st.session_state.analysis.disciplines_involved if st.session_state.analysis else []
                 if st.session_state.get("dismissed_fee_disciplines") is None:
                     st.session_state.dismissed_fee_disciplines = []
@@ -223,10 +198,7 @@ with tabs[8]:
                 # tab. Hours stay the user's.
                 _letter_prefilled_rates = _prefill_rates_from_firm_profile()
                 if _letter_prefilled_rates:
-                    st.caption(
-                        f"Filled the rate on {_letter_prefilled_rates} discipline(s) from your "
-                        "Firm Profile rate card. Hours are still yours to enter."
-                    )
+                    st.caption(i18n.t("fee_small_rate_prefilled", n=_letter_prefilled_rates))
                 _target_fee_prefill("letter")
 
                 letter_disc_fee_rows = [
@@ -247,19 +219,15 @@ with tabs[8]:
                     use_container_width=True,
                     hide_index=True, num_rows="dynamic",
                     column_config={
-                        "discipline": st.column_config.TextColumn("Discipline", required=True),
-                        "total_hours": st.column_config.NumberColumn("Total hours", min_value=0.0, step=1.0, format="%.1f"),
-                        "rate_per_hour": st.column_config.NumberColumn("Rate per hour ($)", min_value=0.0, step=5.0, format="$%.0f"),
-                        "total": st.column_config.NumberColumn("Total ($, excl. GST)", format="$%.0f", disabled=True,
-                                                                help="Calculated automatically -- total hours x rate per hour."),
-                        "note": st.column_config.TextColumn("Note"),
+                        "discipline": st.column_config.TextColumn(i18n.t("fee_small_col_discipline"), required=True),
+                        "total_hours": st.column_config.NumberColumn(i18n.t("fee_small_col_total_hours"), min_value=0.0, step=1.0, format="%.1f"),
+                        "rate_per_hour": st.column_config.NumberColumn(i18n.t("fee_small_col_rate_per_hour"), min_value=0.0, step=5.0, format="$%.0f"),
+                        "total": st.column_config.NumberColumn(i18n.t("fee_small_col_total_amount"), format="$%.0f", disabled=True,
+                                                                help=i18n.t("fee_small_col_total_amount_help")),
+                        "note": st.column_config.TextColumn(i18n.t("fee_small_col_note")),
                     },
                 )
-                st.caption(
-                    "To delete a row: tick the checkbox on its left, then either press "
-                    "Delete/Backspace on your keyboard or click the 🗑 icon that appears "
-                    "above the table."
-                )
+                st.caption(i18n.t("fee_small_delete_row_hint"))
                 # Deferred apply -- same rationale as the Large Scope discipline
                 # table's checkbox (see the comment there): the rebuild and the
                 # Excel/chart cache below only run once the user explicitly
@@ -304,7 +272,7 @@ with tabs[8]:
                     letter_missing_always = set(resourcing.ensure_project_management_present(letter_present)) - set(letter_present)
                     for missing in letter_missing_always:
                         letter_rebuilt.append(resourcing.DisciplineFeeLine(discipline=missing,
-                                                                            note="Always included -- re-added automatically"))
+                                                                            note=i18n.t("fee_small_note_always_included")))
                     if letter_missing_always:
                         # The user deleted Project Management via the editor's row-delete
                         # control -- it's being silently re-added to the data model, but the
@@ -314,10 +282,9 @@ with tabs[8]:
                     st.session_state._letter_disc_fee_last_applied_editor_sig = letter_raw_sig
                 else:
                     st.caption(
-                        "Totals, the chart, and the Excel export below are from the last time "
-                        "you ticked the box above -- tick it again to bring them up to date."
+                        i18n.t("fee_small_ticked_stale")
                         if letter_pending else
-                        "Totals, the chart, and the Excel export below reflect the ticked data above."
+                        i18n.t("fee_small_ticked_current")
                     )
 
                 # Always display from the applied model (session_state) -- see
@@ -329,13 +296,14 @@ with tabs[8]:
                 letter_avg_rate = (letter_disc_total / letter_total_hours_all) if letter_total_hours_all else None
                 bcol1, bcol2 = st.columns(2)
                 with bcol1:
-                    st.markdown(f"**Discipline fee total: ${letter_disc_total:,.0f}**")
+                    st.markdown(i18n.t("fee_small_disc_total_label", value=f"{letter_disc_total:,.0f}"))
                 with bcol2:
-                    st.markdown(f"**Average rate across project: {f'${letter_avg_rate:,.0f}/hr' if letter_avg_rate else '-- (enter hours to calculate)'}**")
+                    _letter_avg_rate_value = f"${letter_avg_rate:,.0f}/hr" if letter_avg_rate else i18n.t("fee_small_avg_rate_unset")
+                    st.markdown(i18n.t("fee_small_avg_rate_label", value=_letter_avg_rate_value))
                 if not any(resourcing.canonical_discipline(l.discipline) == resourcing.ALWAYS_INCLUDED_DISCIPLINE
                            or l.discipline.strip().lower() == resourcing.ALWAYS_INCLUDED_DISCIPLINE.lower()
                            for l in letter_rebuilt):
-                    st.info("Project Management is always part of the fee build-up and has been re-added.")
+                    st.info(i18n.t("fee_small_pm_readded_info"))
 
                 # Cached the same way as the Large Scope discipline table --
                 # see the comment on _disc_fee_cache_sig there for why (skips
@@ -350,19 +318,19 @@ with tabs[8]:
                         project_info=_project_info())
                     st.session_state._letter_disc_fee_cache_pie = graphics_engine.generate_fee_distribution_pie(
                         [(l.discipline, l.fee_amount) for l in letter_rebuilt],
-                        "Fee distribution by discipline (hours x rate)",
+                        i18n.t("fee_small_pie_title_discipline_buildup"),
                     )
                 letter_hours_xlsx = st.session_state._letter_disc_fee_cache_xlsx
                 letter_hours_pie_png = st.session_state._letter_disc_fee_cache_pie
                 if letter_hours_xlsx:
                     st.download_button(
-                        "Export to Excel", data=letter_hours_xlsx, key="letter_download_hours_fee_xlsx",
+                        i18n.t("fee_small_export_excel_button"), data=letter_hours_xlsx, key="letter_download_hours_fee_xlsx",
                         file_name="discipline_fee_build_up.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        help="Includes a Total row and the average rate across the project (total fee / total hours).",
+                        help=i18n.t("fee_small_export_hours_help"),
                      type="primary")
                 else:
-                    st.caption("Excel export isn't available right now -- please email hello@civilproposals.com if this keeps happening.")
+                    st.caption(i18n.t("fee_small_export_unavailable_caption"))
 
                 if letter_hours_pie_png:
                     st.image(letter_hours_pie_png, use_container_width=True)
@@ -371,26 +339,23 @@ with tabs[8]:
 
             if _render_deferred_scope_table:
                 st.divider()
-                with st.expander("Scope item fees (internal tracking only -- not exported)"):
+                with st.expander(i18n.t("fee_small_scope_expander_title")):
                     _render_letter_scope_fee_table()
 
             st.divider()
-            st.markdown("#### Delivery program")
+            st.markdown(i18n.t("fee_small_delivery_program_heading"))
             pcol1, pcol2, pcol3 = st.columns([2, 2, 1])
             with pcol1:
-                st.number_input("Number of weeks", min_value=1, max_value=52, step=1, key="program_num_weeks")
+                st.number_input(i18n.t("fee_small_num_weeks_label"), min_value=1, max_value=52, step=1, key="program_num_weeks")
             with pcol2:
                 st.date_input(
-                    "Anticipated start date (optional)", value=None, key="program_start_date",
+                    i18n.t("fee_small_start_date_label"), value=None, key="program_start_date",
                     format="DD/MM/YYYY",
-                    help="Your own expected start, not something read from the brief. Set it "
-                         "and every week header becomes a real date (\"Wk 1 - 6 Oct\") in the "
-                         "program table and the program PowerPoint. Leave it blank to keep "
-                         "plain week numbers.",
+                    help=i18n.t("fee_small_start_date_help"),
                 )
             with pcol3:
                 st.write("")
-                if st.button("Generate default program", type="primary"):
+                if st.button(i18n.t("fee_small_generate_program_button"), type="primary"):
                     st.session_state.program_schedule = program_schedule.build_default_program(
                         scope_items, st.session_state.program_num_weeks,
                     )
@@ -412,7 +377,7 @@ with tabs[8]:
                     {"Scope item": title, **{lbl: bool(v) for lbl, v in zip(labels, active)}}
                     for title, active in st.session_state.program_schedule.items()
                 ]
-                column_config = {"Scope item": st.column_config.TextColumn("Scope item", disabled=True)}
+                column_config = {"Scope item": st.column_config.TextColumn(i18n.t("fee_small_col_scope_item"), disabled=True)}
                 for lbl in labels:
                     column_config[lbl] = st.column_config.CheckboxColumn(lbl)
                 edited_program = st.data_editor(
@@ -425,7 +390,7 @@ with tabs[8]:
                 st.divider()
                 _program_style_control("small")
             else:
-                st.info("Click 'Generate default program' for an editable starting grid, sized by how many tasks each scope item lists -- adjust the weeks freely afterwards.")
+                st.info(i18n.t("fee_small_program_empty_info"))
 
         st.divider()
         @st.fragment
@@ -435,12 +400,10 @@ with tabs[8]:
             # regen below -- the worst case of the edit-commit race across all the
             # fee tables). See _render_large_discipline_fee_table() for the general
             # rationale.
-            with st.expander("Discipline fee split (%)", expanded=False):
+            with st.expander(i18n.t("fee_small_pct_split_expander"), expanded=False):
                 _fee_include_checkbox("pct_split", "_inc_letter_pct")
-                st.caption(
-                    "Its discipline list always matches the discipline fee build-up table above "
-                    "-- add or remove disciplines up there, not here."
-                )
+                st.caption(i18n.t("fee_small_pct_split_caption"))
+                # TODO A2 i18n: shared constant from fee_estimation_engine.py, not owned by this file.
                 st.warning(fee_estimation_engine.INDICATIVE_NOTE)
 
                 letter_buildup_discs = [l.discipline for l in st.session_state.discipline_fee_lines]
@@ -454,12 +417,9 @@ with tabs[8]:
                     st.session_state.letter_fee_total_override = letter_buildup_total
 
                 st.number_input(
-                    "Total project fee ($, excl. GST) -- used to convert Fee % into a $ figure below",
+                    i18n.t("fee_small_total_fee_label"),
                     min_value=0.0, step=1000.0, key="letter_fee_total_override",
-                    help="Starts prepopulated from the discipline fee build-up total above, then "
-                         "stays independently editable -- change it here to use a different total "
-                         "for this % split's $ column, Excel export, and chart only. Doesn't change "
-                         "the build-up table itself.",
+                    help=i18n.t("fee_small_total_fee_help"),
                 )
                 letter_fee_total = st.session_state.letter_fee_total_override
 
@@ -486,33 +446,36 @@ with tabs[8]:
 
                 bcol1, bcol2, bcol3 = st.columns(3)
                 with bcol1:
-                    if st.button("Reset % from discipline fee build-up", key="letter_reset_from_buildup_btn", type="primary"):
+                    if st.button(i18n.t("fee_small_reset_pct_button"), key="letter_reset_from_buildup_btn", type="primary"):
                         if letter_buildup_total > 0:
                             st.session_state.fee_estimates = [
                                 fee_estimation_engine.DisciplineFeeEstimate(
                                     discipline=l.discipline,
                                     fee_percentage=round(l.fee_amount / letter_buildup_total * 100, 1),
-                                    source="From discipline fee build-up",
-                                    confidence="User-set",
+                                    source=i18n.t("fee_small_source_from_buildup"),
+                                    confidence=i18n.t("fee_small_confidence_user_set"),
                                 )
                                 for l in st.session_state.discipline_fee_lines
                             ]
                         else:
-                            st.warning("Enter hours and rates in the discipline fee build-up table above first.")
+                            st.warning(i18n.t("fee_small_enter_hours_first_warning"))
                 with bcol2:
-                    if st.button("Estimate from bundled benchmarks", key="letter_benchmark_btn", type="primary"):
+                    if st.button(i18n.t("fee_small_benchmark_button"), key="letter_benchmark_btn", type="primary"):
                         fee_cap = st.session_state.analysis.fee_cap if st.session_state.analysis else None
                         estimates = fee_estimation_engine.estimate_fee_split(st.session_state.project_type, fee_cap)
                         st.session_state.fee_estimates = _letter_reconcile_estimates(estimates)
                 with bcol3:
                     refresh_ready = bool(st.session_state.ai_config.get("api_key")) and _current_project_already_paid()
+                    # TODO A2 i18n: AI_BENCHMARK_LABEL / _ai_block_reason() / _AI_HINT_SENTENCE are
+                    # shared constants/helpers from fee_estimation_engine.py and 10_state_helpers.py,
+                    # not owned by this file.
                     if st.button(fee_estimation_engine.AI_BENCHMARK_LABEL, disabled=not refresh_ready,
                                  help=None if refresh_ready else (
                                      _ai_block_reason() if not _current_project_already_paid()
                                      else _AI_HINT_SENTENCE
                                  ), key="letter_refresh_btn", type="primary"):
                         fee_cap = st.session_state.analysis.fee_cap if st.session_state.analysis else None
-                        with st.spinner("Asking the AI how a fee like this typically divides..."):
+                        with st.spinner(i18n.t("fee_small_ai_spinner")):
                             _record_ai_click()
                             estimates, _refresh_error = _fee_ai_refresh(letter_buildup_discs, fee_cap)
                         if _refresh_error:
@@ -539,20 +502,18 @@ with tabs[8]:
                 letter_edited_pct = st.data_editor(
                     letter_fee_pct_rows, key="letter_fee_pct_editor", use_container_width=True, hide_index=True,
                     column_config={
-                        "discipline": st.column_config.TextColumn("Discipline", disabled=True),
-                        "fee_percentage": st.column_config.NumberColumn("Fee %", min_value=0.0, max_value=100.0, step=0.5, format="%.1f%%"),
+                        "discipline": st.column_config.TextColumn(i18n.t("fee_small_col_discipline"), disabled=True),
+                        "fee_percentage": st.column_config.NumberColumn(i18n.t("fee_small_col_fee_pct"), min_value=0.0, max_value=100.0, step=0.5, format="%.1f%%"),
                         "indicative_amount": st.column_config.TextColumn(
-                            "Indicative $", disabled=True,
-                            help="Fee % x the total project fee entered above -- recalculated automatically.",
+                            i18n.t("fee_small_col_indicative_amount"), disabled=True,
+                            help=i18n.t("fee_small_col_indicative_amount_help"),
                         ),
                         "typical_range": st.column_config.TextColumn(
-                            "Typical range", disabled=True,
-                            help="The band the source actually supports -- the single Fee % is its "
-                                 "mid-point. Blank where the source gave a point estimate "
-                                 "rather than a range.",
+                            i18n.t("fee_small_col_typical_range"), disabled=True,
+                            help=i18n.t("fee_small_col_typical_range_help"),
                         ),
-                        "confidence": st.column_config.TextColumn("Confidence"),
-                        "source": st.column_config.TextColumn("Source"),
+                        "confidence": st.column_config.TextColumn(i18n.t("fee_small_col_confidence")),
+                        "source": st.column_config.TextColumn(i18n.t("fee_small_col_source")),
                     },
                 )
 
@@ -591,14 +552,13 @@ with tabs[8]:
                     st.session_state._letter_pct_fee_last_applied_editor_sig = letter_pct_raw_sig
                 else:
                     st.caption(
-                        "Totals, the chart, and the Excel export below are from the last time "
-                        "you ticked the box above -- tick it again to bring them up to date."
+                        i18n.t("fee_small_ticked_stale")
                         if letter_pct_pending else
-                        "Totals, the chart, and the Excel export below reflect the ticked data above."
+                        i18n.t("fee_small_ticked_current")
                     )
 
                 letter_pct_total = sum(e.fee_percentage for e in st.session_state.fee_estimates)
-                st.caption(f"Total: {letter_pct_total:.1f}% (doesn't need to sum to exactly 100%).")
+                st.caption(i18n.t("fee_small_pct_total_caption", pct=f"{letter_pct_total:.1f}"))
 
                 _letter_pct_indicative_amounts = {
                     e.discipline: (letter_fee_total * e.fee_percentage / 100 if letter_fee_total else None)
@@ -612,12 +572,12 @@ with tabs[8]:
                 )
                 if letter_pct_xlsx:
                     st.download_button(
-                        "Export to Excel", data=letter_pct_xlsx, key="letter_download_pct_fee_xlsx",
+                        i18n.t("fee_small_export_excel_button"), data=letter_pct_xlsx, key="letter_download_pct_fee_xlsx",
                         file_name="indicative_fee_split.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                      type="primary")
                 else:
-                    st.caption("Excel export isn't available right now -- please email hello@civilproposals.com if this keeps happening.")
+                    st.caption(i18n.t("fee_small_export_unavailable_caption"))
 
                 # Chart the $ split once a total is available (matches the $ column and
                 # Excel export); otherwise chart the raw percentages.
@@ -630,7 +590,7 @@ with tabs[8]:
                     letter_pie_fmt = lambda v: f"{v:.0f}%"
                     letter_pie_legend_value = "share"
                 letter_pie_png = graphics_engine.generate_fee_distribution_pie(
-                    letter_pie_items, "Discipline fee split", value_fmt=letter_pie_fmt,
+                    letter_pie_items, i18n.t("fee_small_pie_title_pct_split"), value_fmt=letter_pie_fmt,
                     legend_value=letter_pie_legend_value,
                 )
                 if letter_pie_png:
