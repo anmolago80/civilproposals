@@ -70,8 +70,15 @@ _BORDER_COLOR = RGBColor(0xBF, 0xBF, 0xBF)
 
 _FONT = "Calibri"
 
-_SLIDE_W = Inches(13.333)
-_SLIDE_H = Inches(7.5)
+# A4 landscape -- the same precise dimensions modules/program_pptx.py and
+# modules/methodology_pptx.py already use (both say so in their own
+# comments: "same slide size as org_chart_pptx.py"), which this module had
+# drifted from (it was 13.333in x 7.5in, 16:9). Matches the fix brief and
+# modules/org_chart_render.py's PAGE_W_IN/PAGE_H_IN, so the companion deck is
+# the same physical page as the printed/pasted chart, not a wider 16:9 slide
+# with the same content floating in the top of it.
+_SLIDE_W = Inches(11.6929)
+_SLIDE_H = Inches(8.2677)
 
 def _tint(rgb: RGBColor, amount: float) -> RGBColor:
     """Blend towards white. amount=0 -> unchanged, 1 -> white."""
@@ -225,25 +232,37 @@ def _stack(slide, x, y, w, h, lines, align=PP_ALIGN.LEFT):
     """A textbox holding a person's stacked lines, vertically centred."""
     box = slide.shapes.add_textbox(Emu(int(x)), Emu(int(y)), Emu(int(w)), Emu(int(h)))
     _set_text(box.text_frame, lines, align=align)
-    return box
 
 
-def _person_lines(person, role_colour: RGBColor):
+# Reference (scale=1.0) font sizes for a person's two stacked lines. Matches
+# org_chart_render.py's boosted sizes (up from the old fixed 11pt/8.5pt that
+# never changed regardless of team size) so the companion deck and the
+# on-screen/DOCX chart land in the same ballpark at the same team size, not
+# just the same physical page size.
+_NAME_PT_REF = 14.5
+_ROLE_PT_REF = 10.5
+_NAME_PT_MIN = 8.0
+_ROLE_PT_MIN = 6.5
+
+
+def _person_lines(person, role_colour: RGBColor, scale: float = 1.0):
     """The (text, size, bold, colour) rows for one person -- ALWAYS exactly
     two: name (or "TBC"), then role/title. Qualifications are deliberately
     never drawn on the chart (see org_chart_render's module docstring); a
     full CV sentence on a card overflowed the card and collided with
     whatever sat above it."""
+    name_pt = max(_NAME_PT_MIN, _NAME_PT_REF * scale)
+    role_pt = max(_ROLE_PT_MIN, _ROLE_PT_REF * scale)
     if person.is_tbc:
-        return [("TBC", 11, True, _RED_TBC),
-                (person.role or "", 8.5, True, _RED_TBC)]
-    lines = [(person.name, 11, True, _INK)]
+        return [("TBC", name_pt, True, _RED_TBC),
+                (person.role or "", role_pt, True, _RED_TBC)]
+    lines = [(person.name, name_pt, True, _INK)]
     if person.role:
         if person.role_is_placeholder:
             colour = _RED_TBC
         else:
             colour = role_colour if person.is_lead else _GREY_TEXT
-        lines.append((person.role, 8.5, True, colour))
+        lines.append((person.role, role_pt, True, colour))
     return lines
 
 
@@ -261,10 +280,86 @@ def _title_block(slide, model, style_note: str = ""):
     return int(Inches(0.95))
 
 
+# ---------------------------------------------------------------------------
+# Fixed A4-landscape page, scale-to-fill layout -- see org_chart_render.py's
+# identical-in-spirit engine and its module note for WHY: the deck used to
+# grow (via _grow, below -- now only a defensive last resort, not the normal
+# path) or shrink around fixed-size shapes; now the SLIDE is fixed and the
+# shapes scale to fill it.
+# ---------------------------------------------------------------------------
+
+CONTENT_TOP_EMU = int(Inches(0.95))
+CONTENT_BOTTOM_EMU = int(_SLIDE_H - _STYLE_MARGIN)
+AVAIL_H_EMU = CONTENT_BOTTOM_EMU - CONTENT_TOP_EMU
+AVAIL_W_EMU = int(_SLIDE_W - 2 * _STYLE_MARGIN)
+
+MIN_SCALE = 0.55
+MAX_SCALE = 1.35
+
+
+class _PFlow:
+    """EMU-space counterpart to org_chart_render._Flow -- see that class's
+    docstring for the full rationale (fixed-size blocks, stretchable gaps
+    that also draw, e.g. a connector line, so leftover page height becomes
+    breathing room at every seam rather than one dead band). PowerPoint's
+    EMU y-axis already increases downward from the top of the slide, so
+    there's no fraction/axes conversion to do here -- everything is plain
+    integer EMU arithmetic."""
+
+    def __init__(self):
+        self._items = []
+
+    def block(self, height_emu, draw) -> None:
+        self._items.append({"kind": "block", "h": max(0, int(height_emu)), "draw": draw})
+
+    def gap(self, height_emu, draw=None) -> None:
+        self._items.append({"kind": "gap", "h": max(0, int(height_emu)), "draw": draw})
+
+    def connector(self, height_emu, draw) -> None:
+        self.gap(height_emu, draw=draw)
+
+    def natural_height(self) -> int:
+        return sum(it["h"] for it in self._items)
+
+    def render(self, top_emu: int, scale: float, avail_emu: int = AVAIL_H_EMU) -> int:
+        n_gaps = sum(1 for it in self._items if it["kind"] == "gap")
+        used = int(self.natural_height() * scale)
+        leftover = max(0, avail_emu - used)
+        extra_per_gap = (leftover // n_gaps) if n_gaps else 0
+        y = top_emu
+        for it in self._items:
+            h = int(it["h"] * scale) + (extra_per_gap if it["kind"] == "gap" else 0)
+            y_bottom = y + h
+            if it["draw"] is not None:
+                it["draw"](y, y_bottom, scale)
+            y = y_bottom
+        return y
+
+
+def _psolve_scale(build_flow, per_row_candidates, avail_w_emu=AVAIL_W_EMU, avail_h_emu=AVAIL_H_EMU):
+    """EMU counterpart to org_chart_render._solve_scale -- same fewest-rows-
+    first search, same >6% margin before a more-wrapped candidate takes
+    over (see that function's docstring for why the margin matters)."""
+    best = None
+    for per_row in per_row_candidates:
+        flow, row_w = build_flow(per_row)
+        natural_h = flow.natural_height()
+        height_fit = (avail_h_emu / natural_h) if natural_h > 0 else MAX_SCALE
+        width_fit = (avail_w_emu / row_w) if row_w > 0 else MAX_SCALE
+        scale = max(MIN_SCALE, min(MAX_SCALE, min(height_fit, width_fit)))
+        if best is None or scale > best[1] * 1.06:
+            best = (flow, scale, per_row)
+    return best
+
+
 def _grow(prs, needed: float) -> None:
-    """A taller slide is a normal thing to paste from; a chart whose last row
-    is stored off the bottom edge -- which PowerPoint renders as simply not
-    there -- is not."""
+    """A defensive last resort only: every style now sizes itself to fit the
+    fixed A4 slide via the scale-to-fill search above, but an extreme edge
+    case (a great many disciplines each with many support members, all
+    already at MIN_SCALE) could still in principle need slightly more room
+    than the page. Growing the slide keeps that content visible rather than
+    stored off the bottom edge -- which PowerPoint renders as simply not
+    there -- but this should not fire in ordinary use."""
     if int(needed) > int(prs.slide_height):
         prs.slide_height = Emu(int(needed))
 
@@ -283,254 +378,404 @@ def _save(prs) -> bytes:
     return buffer.read()
 
 
-def _wrap_columns(count: int, available: float, min_w: float, gap: float, max_w: float):
-    """How many columns fit per row, and how wide they are, without squeezing
-    any of them below a legible width. Past a handful of disciplines a single
-    row makes every card too narrow to hold a name, so wrap instead."""
-    count = max(1, count)
-    per_row = max(1, int((available + gap) // (min_w + gap)))
-    rows = -(-count // per_row)
-    per_row = -(-count // rows)
-    width = min(max_w, (available - (per_row - 1) * gap) / per_row)
-    return per_row, width
-
-
 def _client_label(model) -> tuple[str, RGBColor]:
     name = (model.client_name or "").strip()
     return (name or "[CLIENT NAME]", _WHITE if name else _RED_TBC_ON_DARK)
 
 
-def _peer_review_panel(slide, x, y, w, model) -> int:
-    """A bordered "Peer Review" panel: one row per discipline against its
-    nominated reviewer (resourcing.ResourceAssignment.peer_reviewer, on the
-    discipline's lead row), red TBC until one is entered. Unconditional
-    whenever the plan has at least one discipline -- see
-    org_chart_render's module docstring for why this, unlike the assurance
-    strip, never depends on whether a reviewer has been named yet. Returns
-    the panel's bottom y (EMU) so callers can make sure whatever comes next
-    clears it rather than overlapping it."""
-    if not model.disciplines:
-        return int(y)
-    row_h = int(Inches(0.30))
-    title_h = int(Inches(0.26))
-    panel_h = title_h + row_h * len(model.disciplines)
-    _round(slide, Emu(int(x)), Emu(int(y)), Emu(int(w)), Emu(panel_h),
-           _ASSURANCE_FILL, line=_ASSURANCE_AMBER, radius=0.05)
-    _stack(slide, Emu(int(x)), Emu(int(y)), Emu(int(w)), Emu(title_h),
-           [("PEER REVIEW", 9, True, _ASSURANCE_AMBER)], align=PP_ALIGN.CENTER)
-    row_y = int(y) + title_h
-    pad = int(Inches(0.08))
+# ---------------------------------------------------------------------------
+# Peer Review panel -- shared by the cards, columns and tree styles (bands
+# folds the same information into its "Assurance" band instead, see below).
+# Unconditional whenever the plan has at least one discipline: one row per
+# discipline against its nominated reviewer, red TBC until one is entered.
+# ---------------------------------------------------------------------------
+
+_PANEL_HEADER_EMU = int(Inches(0.30))
+_PANEL_ROW_EMU = int(Inches(0.28))
+_PANEL_W_EMU = int(Inches(3.1))
+
+
+def _draw_peer_review_panel(slide, model, scale: float, x_emu: int, top_emu: int, w_emu_ref: int) -> int:
+    """Draws the panel anchored at its top-left corner and returns its
+    bottom y (EMU), so a caller that needs to clear it knows how far down
+    it reaches."""
+    n = len(model.disciplines)
+    if not n:
+        return top_emu
+    w = int(w_emu_ref * scale)
+    header_h = int(_PANEL_HEADER_EMU * scale)
+    row_h = int(_PANEL_ROW_EMU * scale)
+    total_h = header_h + row_h * n
+    _round(slide, Emu(int(x_emu)), Emu(int(top_emu)), Emu(w), Emu(total_h),
+          _ASSURANCE_FILL, line=_ASSURANCE_AMBER, radius=0.05)
+    _stack(slide, Emu(int(x_emu)), Emu(int(top_emu)), Emu(w), Emu(header_h),
+          [("PEER REVIEW", max(7.0, 9.0 * scale), True, _ASSURANCE_AMBER)], align=PP_ALIGN.CENTER)
+    row_y = top_emu + header_h
+    pad = int(w * 0.06)
     for group in model.disciplines:
         reviewer = (group.peer_reviewer or "").strip()
         tbc = not reviewer
-        _stack(slide, Emu(int(x + pad)), Emu(row_y), Emu(int(w * 0.56 - pad)), Emu(row_h),
-               [(group.name, 8.5, True, _INK)], align=PP_ALIGN.LEFT)
-        _stack(slide, Emu(int(x + w * 0.56)), Emu(row_y), Emu(int(w * 0.44 - pad)), Emu(row_h),
-               [(reviewer or "TBC", 8.5, True, _RED_TBC if tbc else _ASSURANCE_AMBER)],
-               align=PP_ALIGN.RIGHT)
+        _stack(slide, Emu(int(x_emu + pad)), Emu(row_y), Emu(int(w * 0.55 - pad)), Emu(row_h),
+              [(group.name, max(6.5, 8.5 * scale), True, _INK)], align=PP_ALIGN.LEFT)
+        _stack(slide, Emu(int(x_emu + w * 0.55)), Emu(row_y), Emu(int(w * 0.45 - pad)), Emu(row_h),
+              [(reviewer or "TBC", max(6.5, 8.5 * scale), True, _RED_TBC if tbc else _ASSURANCE_AMBER)],
+              align=PP_ALIGN.RIGHT)
         row_y += row_h
-    return int(y) + panel_h
+    return top_emu + total_h
 
 
 # --- A. Executive cards ----------------------------------------------------
 
-def _slide_cards(model, accent: RGBColor) -> bytes:
-    prs, slide = _new_deck()
-    y = _title_block(slide, model)
+_CARDS_CLIENT_W = int(Inches(3.0))
+_CARDS_CLIENT_H = int(Inches(0.55))
+_CARDS_CARD_W = int(Inches(2.55))
+_CARDS_CARD_H = int(Inches(0.66))
+_CARDS_COL_GAP = int(Inches(0.26))
+_CARDS_ROW_GAP = int(Inches(0.14))
+_CARDS_CONNECTOR = int(Inches(0.22))
+_CARDS_CAPTION = int(Inches(0.26))
+_CARDS_SECTION_GAP = int(Inches(0.24))
+_CARDS_ROW_TO_ROW = int(Inches(0.22))
+
+
+def _avatar_card(slide, x, y, w, h, person, accent: RGBColor, scale: float, badge: str = ""):
+    tbc = person.is_tbc
+    _round(slide, Emu(int(x)), Emu(int(y)), Emu(int(w)), Emu(int(h)),
+          _TBC_FILL if tbc else _WHITE, line=_RED_TBC if tbc else _CARD_EDGE, dashed=tbc, radius=0.12)
+    bar_colour = _ASSURANCE_AMBER if badge else accent
+    if not tbc and person.is_lead:
+        bar_h = int(h * 0.09)
+        _bar(slide, x + int(w * 0.04), y, w - int(w * 0.08), bar_h, bar_colour)
+    if badge and not tbc:
+        badge_w, badge_h = int(w * 0.46), int(h * 0.30)
+        bx = x + w - badge_w - int(w * 0.02)
+        by = y - int(badge_h * 0.45)
+        _round(slide, Emu(int(bx)), Emu(int(by)), Emu(badge_w), Emu(badge_h),
+              _ASSURANCE_FILL, line=_ASSURANCE_AMBER, radius=0.3)
+        _stack(slide, Emu(int(bx)), Emu(int(by)), Emu(badge_w), Emu(badge_h),
+              [(badge.upper(), max(5.5, 7.0 * scale), True, _ASSURANCE_AMBER)], align=PP_ALIGN.CENTER)
+    avatar_d = int(h * 0.55)
+    _circle(slide, x + int(h * 0.42), y + h // 2, avatar_d,
+           _TBC_FILL if tbc else _tint(bar_colour, 0.86),
+           person.initials, _RED_TBC if tbc else bar_colour)
+    _stack(slide, Emu(int(x + h * 0.78)), Emu(int(y)), Emu(int(w - h * 0.82)), Emu(int(h)),
+          _person_lines(person, bar_colour, scale))
+
+
+def _render_cards_slide(prs, slide, model, accent: RGBColor):
+    from modules.org_chart_render import _row_candidates, _balanced_wrap
 
     centre = int(_SLIDE_W / 2)
-    card_w, card_h = Inches(2.5), Inches(0.72)
-    gap = Inches(0.22)
+    # Same split as org_chart_render.py's cards style: the leadership
+    # section sits beside the Peer Review panel and gives up width for it;
+    # the discipline rows always sit below the panel (panel_extra below
+    # pushes them down whenever the panel is taller than the leadership
+    # section) and keep the full-width centre.
+    _panel_reserve_emu = int(_PANEL_W_EMU * MAX_SCALE) if model.disciplines else 0
+    lead_centre = (int(_STYLE_MARGIN) + (AVAIL_W_EMU - _panel_reserve_emu) // 2
+                  if model.disciplines else centre)
 
-    client_w, client_h = Inches(2.9), Inches(0.5)
-    _round(slide, centre - client_w / 2, y, client_w, client_h, _CLIENT_DARK)
-    label, colour = _client_label(model)
-    _stack(slide, centre - client_w / 2, y, client_w, client_h,
-           [(label, 12, True, colour), (model.client_role, 8, True, _GREY_TEXT)],
-           align=PP_ALIGN.CENTER)
-    y += int(client_h)
+    lead_people = list(model.leadership)
+    top_person = lead_people[0] if lead_people else None
+    rank = [(p, "") for p in lead_people[1:]] + [(p, "QA / Review") for p in model.assurance]
+    rank_per_row = _balanced_wrap(len(rank), 4) if rank else 0
+    rank_rows = -(-len(rank) // rank_per_row) if rank else 0
+    rank_h = (rank_rows * _CARDS_CARD_H + max(0, rank_rows - 1) * _CARDS_ROW_GAP) if rank else 0
 
-    def card(x, top, w, person, badge=""):
-        tbc = person.is_tbc
-        _round(slide, x, top, w, card_h,
-               _TBC_FILL if tbc else _WHITE,
-               line=_RED_TBC if tbc else _CARD_EDGE, dashed=tbc)
-        bar_colour = _ASSURANCE_AMBER if badge else accent
-        if not tbc and person.is_lead:
-            _bar(slide, x + Inches(0.06), top + Inches(0.02), w - Inches(0.12),
-                 Inches(0.05), bar_colour)
-        if badge and not tbc:
-            _round(slide, x + w * 0.5, top - Inches(0.06), w * 0.5, Inches(0.19),
-                   _ASSURANCE_FILL, line=_ASSURANCE_AMBER, radius=0.3)
-            _stack(slide, x + w * 0.5, top - Inches(0.06), w * 0.5, Inches(0.19),
-                   [(badge.upper(), 7, True, _ASSURANCE_AMBER)], align=PP_ALIGN.CENTER)
-        avatar = Inches(0.34)
-        _circle(slide, x + Inches(0.30), top + card_h / 2, avatar,
-                _TBC_FILL if tbc else _tint(bar_colour, 0.86),
-                person.initials, _RED_TBC if tbc else bar_colour)
-        _stack(slide, x + Inches(0.52), top, w - Inches(0.6), card_h,
-               _person_lines(person, bar_colour))
-
-    leadership = list(model.leadership)
-    top_person = leadership.pop(0) if leadership else None
+    leadership_h = _CARDS_CLIENT_H
     if top_person is not None:
-        y += int(Inches(0.22))
-        _connector(slide, MSO_CONNECTOR.STRAIGHT, centre, y - Inches(0.22), centre, y)
-        card(centre - card_w / 2, y, card_w, top_person)
-        y += int(card_h)
-
-    rank = [(person, "") for person in leadership]
-    rank += [(person, "QA / Review") for person in model.assurance]
+        leadership_h += _CARDS_CONNECTOR + _CARDS_CARD_H
     if rank:
-        y += int(Inches(0.28))
-        _connector(slide, MSO_CONNECTOR.STRAIGHT, centre, y - Inches(0.28), centre, y)
-        # Wrapped like the discipline columns below, rather than one
-        # fixed-width row -- several co-leads plus a reviewer could
-        # otherwise run the end cards off the slide's left/right edge.
-        available = int(_SLIDE_W - 2 * _STYLE_MARGIN)
-        per_row, rank_w = _wrap_columns(len(rank), available, int(Inches(2.15)), int(gap), int(card_w))
-        rank_chunks = [rank[i:i + per_row] for i in range(0, len(rank), per_row)]
-        for chunk in rank_chunks:
-            total = len(chunk) * rank_w + (len(chunk) - 1) * int(gap)
-            x = int(centre - total / 2)
-            for person, badge in chunk:
-                card(x, y, rank_w, person, badge=badge)
-                x += rank_w + int(gap)
-            y += int(card_h + Inches(0.12))
-        y -= int(Inches(0.12))  # undo the last row's trailing gap
+        leadership_h += _CARDS_CONNECTOR + rank_h
+    panel_h = (_PANEL_HEADER_EMU + len(model.disciplines) * _PANEL_ROW_EMU) if model.disciplines else 0
+    panel_extra = max(0, panel_h - leadership_h)
 
-    # Peer Review panel, top-right -- unconditional whenever the plan has at
-    # least one discipline. Anchored under the title rather than the
-    # flowing cursor above, so it never depends on how tall the leadership
-    # rows happened to be -- but the discipline columns below still have to
-    # start below it, not underneath it.
-    panel_w = int(Inches(3.4))
-    panel_bottom = _peer_review_panel(
-        slide, int(_SLIDE_W - _STYLE_MARGIN - panel_w), int(Inches(0.95)), panel_w, model)
-    y = max(y, panel_bottom)
+    def build_flow(per_row):
+        disciplines = model.disciplines
+        chunks = ([disciplines[i:i + per_row] for i in range(0, len(disciplines), per_row)]
+                 if disciplines else [])
+        row_infos = []
+        disc_width = 0
+        for chunk in chunks:
+            tallest = max(len(g.people) for g in chunk)
+            row_h = _CARDS_CAPTION + tallest * _CARDS_CARD_H + max(0, tallest - 1) * _CARDS_ROW_GAP
+            row_infos.append((chunk, row_h))
+            width = len(chunk) * _CARDS_CARD_W + (len(chunk) - 1) * _CARDS_COL_GAP
+            disc_width = max(disc_width, width)
+        rank_width = (rank_per_row * _CARDS_CARD_W + max(0, rank_per_row - 1) * _CARDS_COL_GAP) if rank else 0
+        leadership_width = max(_CARDS_CLIENT_W, _CARDS_CARD_W, rank_width)
+        # Same split fit as org_chart_render.py's cards style: the
+        # leadership section's own available width excludes the panel's
+        # reserved slice, the discipline rows' doesn't, so each gets its own
+        # fraction and the larger (more binding) one wins.
+        lead_avail = (AVAIL_W_EMU - _panel_reserve_emu) if disciplines else AVAIL_W_EMU
+        lead_ratio = (leadership_width / lead_avail) if lead_avail > 0 else 1.0
+        disc_ratio = (disc_width / AVAIL_W_EMU) if disc_width > 0 else 0.0
+        row_width = int(max(lead_ratio, disc_ratio) * AVAIL_W_EMU)
+
+        flow = _PFlow()
+
+        def draw_client(y_top, y_bottom, scale):
+            w = int(_CARDS_CLIENT_W * scale)
+            h = y_bottom - y_top
+            x = lead_centre - w // 2
+            _round(slide, Emu(int(x)), Emu(int(y_top)), Emu(w), Emu(h), _CLIENT_DARK)
+            label, colour = _client_label(model)
+            _stack(slide, Emu(int(x)), Emu(int(y_top)), Emu(w), Emu(h),
+                  [(label, max(9.0, 12.0 * scale), True, colour),
+                   (model.client_role, max(6.5, 9.0 * scale), True, _GREY_TEXT)], align=PP_ALIGN.CENTER)
+        flow.block(_CARDS_CLIENT_H, draw_client)
+
+        if top_person is not None:
+            def draw_conn1(y_top, y_bottom, scale):
+                _connector(slide, MSO_CONNECTOR.STRAIGHT, lead_centre, y_top, lead_centre, y_bottom)
+            flow.connector(_CARDS_CONNECTOR, draw_conn1)
+
+            def draw_top(y_top, y_bottom, scale):
+                w = int(_CARDS_CARD_W * scale)
+                h = y_bottom - y_top
+                x = lead_centre - w // 2
+                _avatar_card(slide, x, y_top, w, h, top_person, accent, scale)
+            flow.block(_CARDS_CARD_H, draw_top)
+
+        if rank:
+            def draw_conn2(y_top, y_bottom, scale):
+                _connector(slide, MSO_CONNECTOR.STRAIGHT, lead_centre, y_top, lead_centre, y_bottom)
+            flow.connector(_CARDS_CONNECTOR, draw_conn2)
+
+            def draw_rank(y_top, y_bottom, scale):
+                row_h = int(_CARDS_CARD_H * scale)
+                row_gap = int(_CARDS_ROW_GAP * scale)
+                col_gap = int(_CARDS_COL_GAP * scale)
+                col_w = int(_CARDS_CARD_W * scale)
+                row_chunks = [rank[i:i + rank_per_row] for i in range(0, len(rank), rank_per_row)]
+                ry = y_top
+                for row_chunk in row_chunks:
+                    total = len(row_chunk) * col_w + (len(row_chunk) - 1) * col_gap
+                    rx = lead_centre - total // 2
+                    for person, badge in row_chunk:
+                        _avatar_card(slide, rx, ry, col_w, row_h, person,
+                                    _ASSURANCE_AMBER if badge else accent, scale, badge=badge)
+                        rx += col_w + col_gap
+                    ry += row_h + row_gap
+            flow.block(rank_h, draw_rank)
+
+        if disciplines:
+            def draw_elbow(y_top, y_bottom, scale):
+                # Reconciles the leadership section's lead_centre with the
+                # discipline rows' full-width centre -- see the identical
+                # comment in org_chart_render.py's cards style.
+                if lead_centre != centre:
+                    y_mid = (y_top + y_bottom) // 2
+                    _connector(slide, MSO_CONNECTOR.STRAIGHT, lead_centre, y_top, lead_centre, y_mid)
+                    _connector(slide, MSO_CONNECTOR.STRAIGHT, lead_centre, y_mid, centre, y_mid)
+                    _connector(slide, MSO_CONNECTOR.STRAIGHT, centre, y_mid, centre, y_bottom)
+                else:
+                    _connector(slide, MSO_CONNECTOR.STRAIGHT, centre, y_top, centre, y_bottom)
+            flow.connector(_CARDS_SECTION_GAP + panel_extra, draw_elbow)
+
+            def draw_stub(y_top, y_bottom, scale):
+                _connector(slide, MSO_CONNECTOR.STRAIGHT, centre, y_top, centre, y_bottom)
+            flow.connector(_CARDS_CONNECTOR, draw_stub)
+
+            for row_index, (chunk, row_h) in enumerate(row_infos):
+                def draw_row(y_top, y_bottom, scale, chunk=chunk):
+                    bus_y = y_top
+                    col_w = int(_CARDS_CARD_W * scale)
+                    col_gap = int(_CARDS_COL_GAP * scale)
+                    total = len(chunk) * col_w + (len(chunk) - 1) * col_gap
+                    x0 = centre - total // 2
+                    centres = [x0 + col_w // 2 + i * (col_w + col_gap) for i in range(len(chunk))]
+                    if len(centres) > 1:
+                        _connector(slide, MSO_CONNECTOR.STRAIGHT, centres[0], bus_y, centres[-1], bus_y)
+                    caption_h = int(_CARDS_CAPTION * scale)
+                    card_h = int(_CARDS_CARD_H * scale)
+                    row_gap = int(_CARDS_ROW_GAP * scale)
+                    for i, group in enumerate(chunk):
+                        cx = centres[i]
+                        _connector(slide, MSO_CONNECTOR.STRAIGHT, cx, bus_y, cx, bus_y + int(caption_h * 0.35))
+                        _stack(slide, Emu(int(x0 + i * (col_w + col_gap))), Emu(int(bus_y + caption_h * 0.35)),
+                              Emu(col_w), Emu(int(caption_h * 0.5)),
+                              [(group.name.upper(), max(7.0, 9.5 * scale), True, _MUTED)], align=PP_ALIGN.CENTER)
+                        card_y = bus_y + caption_h
+                        gx = x0 + i * (col_w + col_gap)
+                        for person in group.people:
+                            _avatar_card(slide, gx, card_y, col_w, card_h, person, accent, scale)
+                            card_y += card_h + row_gap
+                flow.block(row_h, draw_row)
+                if row_index < len(row_infos) - 1:
+                    flow.gap(_CARDS_ROW_TO_ROW)
+
+        return flow, row_width
+
+    per_row_candidates = _row_candidates(len(model.disciplines)) if model.disciplines else [1]
+    flow, scale, per_row = _psolve_scale(build_flow, per_row_candidates)
+    bottom = flow.render(CONTENT_TOP_EMU, scale)
 
     if model.disciplines:
-        available = int(_SLIDE_W - 2 * _STYLE_MARGIN)
-        per_row, col_w = _wrap_columns(len(model.disciplines), available,
-                                       int(Inches(2.15)), int(gap), int(card_w))
-        chunks = [model.disciplines[i:i + per_row]
-                  for i in range(0, len(model.disciplines), per_row)]
-        for chunk_index, chunk in enumerate(chunks):
-            bus_y = y + int(Inches(0.26))
-            if chunk_index == 0:
-                _connector(slide, MSO_CONNECTOR.STRAIGHT, centre, y, centre, bus_y)
-            total = len(chunk) * col_w + (len(chunk) - 1) * int(gap)
-            x = int(_SLIDE_W / 2 - total / 2)
-            centres = []
-            row_bottom = bus_y
-            for group in chunk:
-                centres.append(int(x + col_w / 2))
-                _stack(slide, x, bus_y + Inches(0.04), col_w, Inches(0.22),
-                       [(group.name.upper(), 9, True, _MUTED)], align=PP_ALIGN.CENTER)
-                card_y = bus_y + int(Inches(0.28))
-                for person in group.people:
-                    card(x, card_y, col_w, person)
-                    card_y += int(card_h + Inches(0.12))
-                row_bottom = max(row_bottom, card_y)
-                x += col_w + int(gap)
-            if len(centres) > 1:
-                _connector(slide, MSO_CONNECTOR.STRAIGHT, min(centres), bus_y,
-                           max(centres), bus_y)
-            for column_centre in centres:
-                _connector(slide, MSO_CONNECTOR.STRAIGHT, column_centre, bus_y,
-                           column_centre, bus_y + Inches(0.04))
-            y = row_bottom + int(Inches(0.10))
+        panel_w = int(_PANEL_W_EMU * scale)
+        panel_x = int(_SLIDE_W - _STYLE_MARGIN) - panel_w
+        _draw_peer_review_panel(slide, model, scale, panel_x, CONTENT_TOP_EMU, _PANEL_W_EMU)
 
-    _grow(prs, y + Inches(0.3))
+    _grow(prs, bottom + int(Inches(0.35)))
+
+
+def _slide_cards(model, accent: RGBColor) -> bytes:
+    prs, slide = _new_deck()
+    _title_block(slide, model)
+    _render_cards_slide(prs, slide, model, accent)
     return _save(prs)
 
 
 # --- B. Discipline columns -------------------------------------------------
 
+_COLUMNS_PILL_H = int(Inches(0.55))
+_COLUMNS_CLIENT_W = int(Inches(3.4))
+_COLUMNS_LEAD_W1 = int(Inches(3.0))
+_COLUMNS_LEAD_W2 = int(Inches(2.5))
+_COLUMNS_CONNECTOR = int(Inches(0.20))
+_COLUMNS_LANE_W = int(Inches(2.75))
+_COLUMNS_LANE_GAP = int(Inches(0.24))
+_COLUMNS_ROW_H = int(Inches(0.62))
+_COLUMNS_CAPTION = int(Inches(0.32))
+_COLUMNS_ROW_GAP = int(Inches(0.12))
+_COLUMNS_LANE_PAD = int(Inches(0.10))
+_COLUMNS_SECTION_GAP = int(Inches(0.26))
+_COLUMNS_ROW_TO_ROW = int(Inches(0.22))
+_COLUMNS_STRIP_H = int(Inches(0.55))
+_COLUMNS_STRIP_W = int(Inches(7.5))
+
+
+def _pill(slide, x, y, w, h, facecolor, label, sub, label_colour, sub_colour, scale):
+    _round(slide, Emu(int(x)), Emu(int(y)), Emu(int(w)), Emu(int(h)), facecolor, radius=0.35)
+    lines = [(label, max(9.0, 12.5 * scale), True, label_colour)]
+    if sub:
+        lines.append((sub, max(6.5, 9.5 * scale), True, sub_colour))
+    _stack(slide, Emu(int(x)), Emu(int(y)), Emu(int(w)), Emu(int(h)), lines, align=PP_ALIGN.CENTER)
+
+
 def _slide_columns(model, accent: RGBColor) -> bytes:
+    from modules.org_chart_render import _row_candidates, DISCIPLINE_COLOURS
+
     prs, slide = _new_deck()
-    y = _title_block(slide, model)
-
+    _title_block(slide, model)
     centre = int(_SLIDE_W / 2)
-    pill_h = Inches(0.46)
-    client_w = Inches(3.6)
-    _round(slide, centre - client_w / 2, y, client_w, pill_h, _CLIENT_DARK, radius=0.2)
-    label, colour = _client_label(model)
-    _stack(slide, centre - client_w / 2, y, client_w, pill_h,
-           [(f"{label} — Client", 12, True, colour)], align=PP_ALIGN.CENTER)
-    y += int(pill_h)
 
-    for index, person in enumerate(model.leadership):
-        y += int(Inches(0.2))
-        _connector(slide, MSO_CONNECTOR.STRAIGHT, centre, y - Inches(0.2), centre, y)
-        width = Inches(3.2) if index == 0 else Inches(2.6)
-        fill = accent if index == 0 else _tint(accent, 0.18)
-        tbc = person.is_tbc
-        _round(slide, centre - width / 2, y, width, pill_h,
-               _TBC_FILL if tbc else fill,
-               line=_RED_TBC if tbc else None, dashed=tbc, radius=0.2)
-        sub = person.role
-        _stack(slide, centre - width / 2, y, width, pill_h,
-               [(person.name or "TBC", 12, True, _RED_TBC if tbc else _text_on(fill)),
-                (sub, 9, True, _RED_TBC if tbc else _text_on(fill))],
-               align=PP_ALIGN.CENTER)
-        y += int(pill_h)
-
-    if model.disciplines:
-        y += int(Inches(0.3))
-        gap = int(Inches(0.16))
-        available = int(_SLIDE_W - 2 * _STYLE_MARGIN)
-        per_row, lane_w = _wrap_columns(len(model.disciplines), available,
-                                        int(Inches(2.3)), gap, int(Inches(3.0)))
-        chunks = [model.disciplines[i:i + per_row]
-                  for i in range(0, len(model.disciplines), per_row)]
-        row_h = Inches(0.62)
+    def build_flow(per_row):
+        disciplines = model.disciplines
+        chunks = ([disciplines[i:i + per_row] for i in range(0, len(disciplines), per_row)]
+                 if disciplines else [])
+        row_infos = []
+        row_width = _COLUMNS_CLIENT_W
         for chunk in chunks:
-            total = len(chunk) * lane_w + (len(chunk) - 1) * gap
-            x = int(_SLIDE_W / 2 - total / 2)
             tallest = max(len(g.people) for g in chunk)
-            lane_h = int(Inches(0.36) + tallest * (row_h + Inches(0.1)) + Inches(0.1))
-            for group in chunk:
-                colour = _hex(_discipline_colour_for(model, group))
-                _round(slide, x, y, lane_w, lane_h, _LANE_FILL, radius=0.06)
-                _bar(slide, x, y, lane_w, Inches(0.06), colour)
-                _stack(slide, x, y + Inches(0.06), lane_w, Inches(0.28),
-                       [(group.name.upper(), 10, True, colour)], align=PP_ALIGN.CENTER)
-                card_y = y + int(Inches(0.38))
-                for person in group.people:
-                    tbc = person.is_tbc
-                    _round(slide, x + Inches(0.1), card_y, lane_w - Inches(0.2), row_h,
-                           _TBC_FILL if tbc else _WHITE,
-                           line=_RED_TBC if tbc else _CARD_EDGE, dashed=tbc, radius=0.1)
-                    _stack(slide, x + Inches(0.1), card_y, lane_w - Inches(0.2), row_h,
-                           _person_lines(person, colour), align=PP_ALIGN.CENTER)
-                    card_y += int(row_h + Inches(0.1))
-                x += lane_w + gap
-            y += lane_h + int(Inches(0.16))
+            row_h = (_COLUMNS_CAPTION + tallest * _COLUMNS_ROW_H
+                    + max(0, tallest - 1) * _COLUMNS_ROW_GAP + 2 * _COLUMNS_LANE_PAD)
+            row_infos.append((chunk, row_h))
+            width = len(chunk) * _COLUMNS_LANE_W + (len(chunk) - 1) * _COLUMNS_LANE_GAP
+            row_width = max(row_width, width)
 
-    # The amber independent-review strip, ONLY when the plan holds such a slot.
-    if model.assurance:
-        y += int(Inches(0.2))
-        strip_w, strip_h = Inches(6.4), Inches(0.44)
-        _round(slide, centre - strip_w / 2, y, strip_w, strip_h, _ASSURANCE_FILL,
-               line=RGBColor(0xFB, 0xBF, 0x24), radius=0.2)
-        text = " · ".join(f"{p.name or 'TBC'} — {p.role}" for p in model.assurance)
-        _stack(slide, centre - strip_w / 2, y, strip_w, strip_h,
-               [(f"★ Independent review: {text}", 10, True, _ASSURANCE_AMBER)],
-               align=PP_ALIGN.CENTER)
-        y += int(strip_h)
+        flow = _PFlow()
 
-    # A right-hand-panel equivalent, unconditional (see the module docstring):
-    # every discipline against its nominated peer reviewer, red TBC until one
-    # is entered -- separate from the amber strip above, which only exists
-    # for a dedicated reviewer role.
-    if model.disciplines:
-        y += int(Inches(0.2))
-        panel_w = Inches(6.4)
-        panel_bottom = _peer_review_panel(slide, int(centre - panel_w / 2), int(y), int(panel_w), model)
-        y = panel_bottom
+        def draw_client(y_top, y_bottom, scale):
+            w = int(_COLUMNS_CLIENT_W * scale)
+            h = y_bottom - y_top
+            x = centre - w // 2
+            label, colour = _client_label(model)
+            _pill(slide, x, y_top, w, h, _CLIENT_DARK, f"{label} — Client", "", colour, colour, scale)
+        flow.block(_COLUMNS_PILL_H, draw_client)
 
-    _grow(prs, y + Inches(0.3))
+        for index, person in enumerate(model.leadership):
+            def draw_conn(y_top, y_bottom, scale):
+                _connector(slide, MSO_CONNECTOR.STRAIGHT, centre, y_top, centre, y_bottom)
+            flow.connector(_COLUMNS_CONNECTOR, draw_conn)
+
+            def draw_lead(y_top, y_bottom, scale, person=person, index=index):
+                width_ref = _COLUMNS_LEAD_W1 if index == 0 else _COLUMNS_LEAD_W2
+                w = int(width_ref * scale)
+                h = y_bottom - y_top
+                x = centre - w // 2
+                tbc = person.is_tbc
+                fill = accent if index == 0 else _tint(accent, 0.18)
+                fc = _TBC_FILL if tbc else fill
+                label_colour = _RED_TBC if tbc else _WHITE
+                sub_colour = _RED_TBC if tbc else RGBColor(0xD7, 0xDE, 0xEA)
+                _pill(slide, x, y_top, w, h, fc, person.name or "TBC", person.role,
+                     label_colour, sub_colour, scale)
+            flow.block(_COLUMNS_PILL_H, draw_lead)
+
+        if disciplines:
+            flow.gap(_COLUMNS_SECTION_GAP)
+            for row_index, (chunk, row_h) in enumerate(row_infos):
+                def draw_row(y_top, y_bottom, scale, chunk=chunk):
+                    lane_w = int(_COLUMNS_LANE_W * scale)
+                    lane_gap = int(_COLUMNS_LANE_GAP * scale)
+                    total = len(chunk) * lane_w + (len(chunk) - 1) * lane_gap
+                    x0 = centre - total // 2
+                    lane_h = y_bottom - y_top
+                    for i, group in enumerate(chunk):
+                        colour = _hex(DISCIPLINE_COLOURS[
+                            (group.people[0].group_index if group.people else disciplines.index(group))
+                            % len(DISCIPLINE_COLOURS)])
+                        lx = x0 + i * (lane_w + lane_gap)
+                        _round(slide, Emu(int(lx)), Emu(int(y_top)), Emu(lane_w), Emu(lane_h),
+                              _LANE_FILL, radius=0.06)
+                        bar_h = int(lane_h * 0.06)
+                        _bar(slide, lx, y_top, lane_w, bar_h, colour)
+                        caption_h = int(_COLUMNS_CAPTION * scale)
+                        _stack(slide, Emu(int(lx)), Emu(int(y_top + bar_h)), Emu(lane_w),
+                              Emu(caption_h - bar_h),
+                              [(group.name.upper(), max(7.5, 10.5 * scale), True, colour)],
+                              align=PP_ALIGN.CENTER)
+                        pad = int(_COLUMNS_LANE_PAD * scale)
+                        row_h_in = int(_COLUMNS_ROW_H * scale)
+                        row_gap_in = int(_COLUMNS_ROW_GAP * scale)
+                        card_y = y_top + caption_h
+                        for person in group.people:
+                            tbc = person.is_tbc
+                            _round(slide, Emu(int(lx + pad)), Emu(int(card_y)),
+                                  Emu(int(lane_w - 2 * pad)), Emu(row_h_in),
+                                  _TBC_FILL if tbc else _WHITE, line=_RED_TBC if tbc else _CARD_EDGE,
+                                  dashed=tbc, radius=0.12)
+                            _stack(slide, Emu(int(lx + pad)), Emu(int(card_y)),
+                                  Emu(int(lane_w - 2 * pad)), Emu(row_h_in),
+                                  _person_lines(person, colour, scale), align=PP_ALIGN.CENTER)
+                            card_y += row_h_in + row_gap_in
+                flow.block(row_h, draw_row)
+                if row_index < len(row_infos) - 1:
+                    flow.gap(_COLUMNS_ROW_TO_ROW)
+
+        if model.assurance:
+            flow.gap(_COLUMNS_SECTION_GAP)
+
+            def draw_strip(y_top, y_bottom, scale):
+                w = int(_COLUMNS_STRIP_W * scale)
+                h = y_bottom - y_top
+                x = centre - w // 2
+                _round(slide, Emu(int(x)), Emu(int(y_top)), Emu(w), Emu(h), _ASSURANCE_FILL,
+                      line=RGBColor(0xFB, 0xBF, 0x24), radius=0.3)
+                text = " · ".join(f"{p.name or 'TBC'} — {p.role}" for p in model.assurance)
+                _stack(slide, Emu(int(x)), Emu(int(y_top)), Emu(w), Emu(h),
+                      [(f"★ Independent review: {text}", max(7.5, 10.5 * scale), True, _ASSURANCE_AMBER)],
+                      align=PP_ALIGN.CENTER)
+            flow.block(_COLUMNS_STRIP_H, draw_strip)
+
+        if disciplines:
+            flow.gap(_COLUMNS_SECTION_GAP)
+            panel_h = _PANEL_HEADER_EMU + len(disciplines) * _PANEL_ROW_EMU
+
+            def draw_panel(y_top, y_bottom, scale):
+                w = int(_PANEL_W_EMU * scale)
+                x = centre - w // 2
+                _draw_peer_review_panel(slide, model, scale, x, y_top, _PANEL_W_EMU)
+            flow.block(panel_h, draw_panel)
+
+        return flow, row_width
+
+    per_row_candidates = _row_candidates(len(model.disciplines)) if model.disciplines else [1]
+    flow, scale, per_row = _psolve_scale(build_flow, per_row_candidates)
+    bottom = flow.render(CONTENT_TOP_EMU, scale)
+    _grow(prs, bottom + int(Inches(0.35)))
     return _save(prs)
 
 
@@ -542,193 +787,284 @@ def _discipline_colour_for(model, group) -> str:
 
 
 # --- C. Governance bands ---------------------------------------------------
+#
+# Full slide-content-width by design -- see org_chart_render.py's identical
+# rationale: no "row of N boxes" whose count trades against width, so only
+# band/chip HEIGHT and font size scale. Each chip's width and which row it
+# wraps onto are fixed at reference sizing, from the page width and the
+# chips' own text lengths, so a scaled-up band never runs chips past margin.
+
+_BANDS_LABEL_W = int(Inches(1.6))
+_BANDS_CHIP_H = int(Inches(0.62))
+_BANDS_CHIP_GAP = int(Inches(0.16))
+_BANDS_PAD = int(Inches(0.14))
+_BANDS_SECTION_GAP = int(Inches(0.20))
+
 
 def _slide_bands(model, accent: RGBColor) -> bytes:
+    from modules.org_chart_render import DISCIPLINE_COLOURS
+
     prs, slide = _new_deck()
-    y = _title_block(slide, model)
+    _title_block(slide, model)
 
-    label_w = Inches(1.5)
-    band_x = int(_STYLE_MARGIN + label_w)
-    band_w = int(_SLIDE_W - _STYLE_MARGIN - band_x)
-    chip_h = Inches(0.62)
-    chip_gap = int(Inches(0.12))
-    pad = int(Inches(0.12))
+    band_left = int(_STYLE_MARGIN) + _BANDS_LABEL_W
+    band_right = int(_SLIDE_W - _STYLE_MARGIN)
+    avail = band_right - band_left
 
-    def band(title, chips, fill, chip_edge=_CARD_EDGE):
-        nonlocal y
-        if not chips:
-            return
-        widths = [min(int(Inches(2.7)),
-                      max(int(Inches(1.5)), int(Inches(0.35) + Inches(0.085) * max(
-                          len(name), len(role)))))
-                  for name, role, *_rest in chips]
+    def chip_rows(chips):
+        widths = [min(int(Inches(2.6)), max(int(Inches(1.4)),
+                                            int(Inches(0.35) + Inches(0.09) * max(len(name), len(role)))))
+                 for name, role, *_rest in chips]
         rows, used = [[]], 0
-        for index, width in enumerate(widths):
-            if rows[-1] and used + width + chip_gap > band_w - 2 * pad:
+        for index, w in enumerate(widths):
+            if rows[-1] and used + w + _BANDS_CHIP_GAP > avail - 2 * _BANDS_PAD:
                 rows.append([])
                 used = 0
             rows[-1].append(index)
-            used += width + chip_gap
-        band_h = int(2 * pad + len(rows) * chip_h + (len(rows) - 1) * chip_gap)
-        _round(slide, band_x, y, band_w, band_h, fill, radius=0.06)
-        _stack(slide, _STYLE_MARGIN, y, label_w - Inches(0.12), band_h,
-               [(title.upper(), 9, True, _MUTED)], align=PP_ALIGN.RIGHT)
-        chip_y = y + pad
-        for row in rows:
-            x = band_x + pad
-            for index in row:
-                name, role, tbc, role_colour = chips[index]
-                width = widths[index]
-                _round(slide, x, chip_y, width, chip_h,
-                       _TBC_FILL if tbc else _WHITE,
-                       line=_RED_TBC if tbc else chip_edge, dashed=tbc, radius=0.1)
-                lines = [(name, 10.5, True, _RED_TBC if tbc else _INK),
-                         (role, 8.5, True, _RED_TBC if tbc else role_colour)]
-                _stack(slide, x, chip_y, width, chip_h, [l for l in lines if l[0]])
-                x += width + chip_gap
-            chip_y += int(chip_h + chip_gap)
-        y += band_h + int(Inches(0.16))
+            used += w + _BANDS_CHIP_GAP
+        return rows, widths
 
-    band("Client", [(_client_label(model)[0], model.client_role, False, _MUTED)],
-         _CLIENT_DARK, chip_edge=_CLIENT_DARK)
-    band("Leadership",
-         [(p.name or "TBC", p.role, p.is_tbc, accent) for p in model.leadership],
-         _tint(accent, 0.94))
+    flow = _PFlow()
+
+    def make_band(title, chips, fill, chip_edge=_CARD_EDGE):
+        if not chips:
+            return
+        rows, widths = chip_rows(chips)
+        band_h = 2 * _BANDS_PAD + len(rows) * _BANDS_CHIP_H + max(0, len(rows) - 1) * _BANDS_CHIP_GAP
+
+        def draw(y_top, y_bottom, scale, chips=chips, fill=fill, chip_edge=chip_edge,
+                 rows=rows, widths=widths, title=title):
+            h = y_bottom - y_top
+            _round(slide, Emu(band_left), Emu(int(y_top)), Emu(avail), Emu(h), fill, radius=0.06)
+            _stack(slide, _STYLE_MARGIN, Emu(int(y_top)), Emu(_BANDS_LABEL_W - int(Inches(0.1))), Emu(h),
+                  [(title.upper(), max(7.0, 9.0 * scale), True, _MUTED)], align=PP_ALIGN.RIGHT)
+            chip_gap = int(_BANDS_CHIP_GAP * scale)
+            chip_h = int(_BANDS_CHIP_H * scale)
+            pad = int(_BANDS_PAD * scale)
+            chip_y = y_top + pad
+            for row in rows:
+                x = band_left + pad
+                for index in row:
+                    name, role, tbc, role_colour = chips[index]
+                    w = widths[index]
+                    _round(slide, Emu(int(x)), Emu(int(chip_y)), Emu(int(w)), Emu(chip_h),
+                          _TBC_FILL if tbc else _WHITE, line=_RED_TBC if tbc else chip_edge,
+                          dashed=tbc, radius=0.14)
+                    lines = [(name, max(9.0, 11.5 * scale), True, _RED_TBC if tbc else _INK),
+                             (role, max(6.5, 9.0 * scale), True, _RED_TBC if tbc else role_colour)]
+                    _stack(slide, Emu(int(x)), Emu(int(chip_y)), Emu(int(w)), Emu(chip_h),
+                          [line for line in lines if line[0]])
+                    x += w + chip_gap
+                chip_y += chip_h + chip_gap
+
+        flow.block(band_h, draw)
+        flow.gap(_BANDS_SECTION_GAP)
+
+    make_band("Client", [(_client_label(model)[0], model.client_role, False, _MUTED)],
+              _CLIENT_DARK, chip_edge=_CLIENT_DARK)
+    make_band("Leadership",
+             [(p.name or "TBC", p.role, p.is_tbc, accent) for p in model.leadership],
+             _tint(accent, 0.94))
     delivery = []
     for group in model.disciplines:
         colour = _hex(_discipline_colour_for(model, group))
         for person in group.people:
             role = (person.role if person.role.startswith(group.name)
-                    else f"{person.role} · {group.name}")
+                   else f"{person.role} · {group.name}")
             delivery.append((person.name or "TBC", role, person.is_tbc,
-                             colour if person.is_lead else _GREY_TEXT))
-    from modules.org_chart_render import DISCIPLINE_COLOURS
-
-    band("Delivery team", delivery, _tint(_hex(DISCIPLINE_COLOURS[1]), 0.95))
-    # The Assurance band now ALWAYS carries the Peer Review element -- one
-    # row per discipline, red TBC until a reviewer is entered -- alongside
-    # any dedicated reviewer role the plan holds, so the band appears
-    # whenever there is at least one discipline rather than only once a
-    # reviewer slot exists.
+                            colour if person.is_lead else _GREY_TEXT))
+    make_band("Delivery team", delivery, _tint(_hex(DISCIPLINE_COLOURS[1]), 0.95))
     assurance_chips = [(p.name or "TBC", p.role, p.is_tbc, _ASSURANCE_AMBER) for p in model.assurance]
     assurance_chips += [
         (group.peer_reviewer or "TBC", f"Peer review — {group.name}",
          not bool((group.peer_reviewer or "").strip()), _ASSURANCE_AMBER)
         for group in model.disciplines
     ]
-    band("Assurance", assurance_chips, _tint(_ASSURANCE_AMBER, 0.93))
+    make_band("Assurance", assurance_chips, _tint(_ASSURANCE_AMBER, 0.93))
 
-    _stack(slide, _STYLE_MARGIN, y, Emu(int(_SLIDE_W - 2 * _STYLE_MARGIN)), Inches(0.3),
-           [(("Solid reporting lines run top-down; the assurance band reviews independently "
-              "of the delivery team.") if (model.has_assurance or model.disciplines) else
-             "Solid reporting lines run top-down.", 9, True, _MUTED)])
-    _grow(prs, y + Inches(0.5))
+    def draw_footnote(y_top, y_bottom, scale):
+        _stack(slide, _STYLE_MARGIN, Emu(int(y_top)), Emu(int(_SLIDE_W - 2 * _STYLE_MARGIN)),
+              Emu(int(Inches(0.3))),
+              [((("Solid reporting lines run top-down; the assurance band reviews independently "
+                 "of the delivery team.") if (model.has_assurance or model.disciplines) else
+                "Solid reporting lines run top-down."), max(7.0, 9.0 * scale), True, _MUTED)])
+    flow.block(int(Inches(0.22)), draw_footnote)
+
+    natural_h = flow.natural_height()
+    scale = max(MIN_SCALE, min(MAX_SCALE, (AVAIL_H_EMU / natural_h) if natural_h > 0 else MAX_SCALE))
+    bottom = flow.render(CONTENT_TOP_EMU, scale)
+    _grow(prs, bottom + int(Inches(0.35)))
     return _save(prs)
 
 
 # --- D. Classic tree -------------------------------------------------------
 
+_TREE_BOX_W = int(Inches(2.6))
+_TREE_BOX_H = int(Inches(0.62))
+_TREE_COL_GAP = int(Inches(0.26))
+_TREE_ROW_GAP = int(Inches(0.14))
+_TREE_CONNECTOR = int(Inches(0.22))
+_TREE_SECTION_GAP = int(Inches(0.22))
+_TREE_ROW_TO_ROW = int(Inches(0.20))
+
+
+def _tree_box(slide, x, y, w, h, person_lines, accent=None, tbc=False):
+    _round(slide, Emu(int(x)), Emu(int(y)), Emu(int(w)), Emu(int(h)), _WHITE,
+          line=_RED_TBC if tbc else (accent or _INK), dashed=tbc, radius=0.08)
+    _stack(slide, Emu(int(x)), Emu(int(y)), Emu(int(w)), Emu(int(h)), person_lines, align=PP_ALIGN.CENTER)
+
+
 def _slide_tree(model, accent: RGBColor) -> bytes:
+    from modules.org_chart_render import _row_candidates, _balanced_wrap
+
     prs, slide = _new_deck()
-    y = _title_block(slide, model)
-
+    _title_block(slide, model)
     centre = int(_SLIDE_W / 2)
-    box_w, box_h = Inches(2.6), Inches(0.72)
-    gap = int(Inches(0.3))
+    # Same split as _render_cards_slide: the director level sits beside the
+    # panel and gives up width for it; the discipline rows always sit below
+    # the panel and keep the full-width centre.
+    _panel_reserve_emu = int(_PANEL_W_EMU * MAX_SCALE) if model.disciplines else 0
+    lead_centre = (int(_STYLE_MARGIN) + (AVAIL_W_EMU - _panel_reserve_emu) // 2
+                  if model.disciplines else centre)
 
-    def box(x, top, w, lines, outline=_INK, tbc=False, width_pt=1.0):
-        _round(slide, x, top, w, box_h, _WHITE,
-               line=_RED_TBC if tbc else outline, dashed=tbc, radius=0.08)
-        _stack(slide, x, top, w, box_h, lines, align=PP_ALIGN.CENTER)
+    lead_people = list(model.leadership)
+    top_person = lead_people[0] if lead_people else None
+    rank = lead_people[1:] + model.assurance
+    rank_per_row = _balanced_wrap(len(rank), 4) if rank else 0
+    rank_rows = -(-len(rank) // rank_per_row) if rank else 0
+    rank_h = (rank_rows * _TREE_BOX_H + max(0, rank_rows - 1) * _TREE_ROW_GAP) if rank else 0
 
-    label, colour = _client_label(model)
-    box(centre - box_w / 2, y, box_w,
-        [(label, 12, True, _INK if model.client_name else _RED_TBC),
-         (model.client_role, 9, True, _GREY_TEXT)])
-    y += int(box_h)
-
-    # Tracks the rightmost edge reached by any box at the director level (the
-    # top-role box plus however many co-lead/assurance boxes end up in the
-    # rank row below it), so the Peer Review box placed beside it (see below)
-    # never has to guess how wide that level got and overlap it.
-    director_right = int(centre + box_w / 2)
-
-    leadership = list(model.leadership)
-    top_person = leadership.pop(0) if leadership else None
+    director_h = _TREE_BOX_H + (_TREE_CONNECTOR if top_person is not None else 0)
+    leadership_h = _TREE_BOX_H
     if top_person is not None:
-        y += int(Inches(0.26))
-        _connector(slide, MSO_CONNECTOR.STRAIGHT, centre, y - Inches(0.26), centre, y)
-        box(centre - box_w / 2, y, box_w, _person_lines(top_person, _INK),
-            outline=accent, tbc=top_person.is_tbc)
-        y += int(box_h)
-
-    rank = leadership + model.assurance
+        leadership_h += _TREE_CONNECTOR + _TREE_BOX_H
     if rank:
-        y += int(Inches(0.28))
-        _connector(slide, MSO_CONNECTOR.STRAIGHT, centre, y - Inches(0.28), centre, y)
-        # Wrapped rather than one fixed-width row -- several co-leads plus a
-        # reviewer could otherwise run the end boxes off the slide edge.
-        available = int(_SLIDE_W - 2 * _STYLE_MARGIN)
-        per_row, rank_w = _wrap_columns(len(rank), available, int(Inches(2.2)), gap, int(box_w))
-        rank_chunks = [rank[i:i + per_row] for i in range(0, len(rank), per_row)]
-        for chunk in rank_chunks:
-            total = len(chunk) * rank_w + (len(chunk) - 1) * gap
-            x = int(centre - total / 2)
-            for person in chunk:
-                box(x, y, rank_w, _person_lines(person, _INK), tbc=person.is_tbc)
-                x += int(rank_w) + gap
-            director_right = max(director_right, x - gap)
-            y += int(box_h + Inches(0.14))
-        y -= int(Inches(0.14))  # undo the last row's trailing gap
+        leadership_h += _TREE_CONNECTOR + rank_h
+    panel_h = (_PANEL_HEADER_EMU + len(model.disciplines) * _PANEL_ROW_EMU) if model.disciplines else 0
+    panel_extra = max(0, director_h + panel_h - leadership_h)
 
-    # Peer Review box, to the right of the director level -- unconditional
-    # whenever the plan has at least one discipline. Placed clear of
-    # whatever the director level actually drew (director_right, tracked
-    # above) rather than assuming a fixed width for it -- several co-leads
-    # can run wider than a single director box, and a fixed offset collided
-    # with them. Anchored to the director row rather than the flowing
-    # cursor, so it sits in the same place regardless of how tall the rank
-    # row ended up -- but the discipline columns below still have to clear
-    # its bottom edge.
+    panel_anchor = {}
+
+    def build_flow(per_row):
+        disciplines = model.disciplines
+        chunks = ([disciplines[i:i + per_row] for i in range(0, len(disciplines), per_row)]
+                 if disciplines else [])
+        row_infos = []
+        disc_width = 0
+        for chunk in chunks:
+            tallest = max(len(g.people) for g in chunk)
+            row_h = _TREE_CONNECTOR + tallest * _TREE_BOX_H + max(0, tallest - 1) * _TREE_ROW_GAP
+            row_infos.append((chunk, row_h))
+            width = len(chunk) * _TREE_BOX_W + (len(chunk) - 1) * _TREE_COL_GAP
+            disc_width = max(disc_width, width)
+        rank_width = (rank_per_row * _TREE_BOX_W + max(0, rank_per_row - 1) * _TREE_COL_GAP) if rank else 0
+        leadership_width = max(_TREE_BOX_W, rank_width)
+        lead_avail = (AVAIL_W_EMU - _panel_reserve_emu) if disciplines else AVAIL_W_EMU
+        lead_ratio = (leadership_width / lead_avail) if lead_avail > 0 else 1.0
+        disc_ratio = (disc_width / AVAIL_W_EMU) if disc_width > 0 else 0.0
+        row_width = int(max(lead_ratio, disc_ratio) * AVAIL_W_EMU)
+
+        flow = _PFlow()
+
+        def draw_client(y_top, y_bottom, scale):
+            w = int(_TREE_BOX_W * scale)
+            h = y_bottom - y_top
+            x = lead_centre - w // 2
+            _tree_box(slide, x, y_top, w, h, [
+                (model.client_name or "[CLIENT NAME]", max(9.0, 12.0 * scale), True,
+                 _INK if model.client_name else _RED_TBC),
+                (model.client_role, max(6.5, 9.5 * scale), True, _GREY_TEXT),
+            ])
+            if top_person is None:
+                panel_anchor["y"] = y_bottom
+        flow.block(_TREE_BOX_H, draw_client)
+
+        if top_person is not None:
+            def draw_conn1(y_top, y_bottom, scale):
+                _connector(slide, MSO_CONNECTOR.STRAIGHT, lead_centre, y_top, lead_centre, y_bottom)
+            flow.connector(_TREE_CONNECTOR, draw_conn1)
+
+            def draw_top(y_top, y_bottom, scale):
+                w = int(_TREE_BOX_W * scale)
+                h = y_bottom - y_top
+                x = lead_centre - w // 2
+                _tree_box(slide, x, y_top, w, h, _person_lines(top_person, _INK, scale),
+                         accent=accent, tbc=top_person.is_tbc)
+                panel_anchor["y"] = y_top
+            flow.block(_TREE_BOX_H, draw_top)
+
+        if rank:
+            def draw_conn2(y_top, y_bottom, scale):
+                _connector(slide, MSO_CONNECTOR.STRAIGHT, lead_centre, y_top, lead_centre, y_bottom)
+            flow.connector(_TREE_CONNECTOR, draw_conn2)
+
+            def draw_rank(y_top, y_bottom, scale):
+                row_h = int(_TREE_BOX_H * scale)
+                row_gap = int(_TREE_ROW_GAP * scale)
+                col_gap = int(_TREE_COL_GAP * scale)
+                col_w = int(_TREE_BOX_W * scale)
+                row_chunks = [rank[i:i + rank_per_row] for i in range(0, len(rank), rank_per_row)]
+                ry = y_top
+                for row_chunk in row_chunks:
+                    total = len(row_chunk) * col_w + (len(row_chunk) - 1) * col_gap
+                    rx = lead_centre - total // 2
+                    for person in row_chunk:
+                        _tree_box(slide, rx, ry, col_w, row_h, _person_lines(person, _INK, scale),
+                                 tbc=person.is_tbc)
+                        rx += col_w + col_gap
+                    ry += row_h + row_gap
+            flow.block(rank_h, draw_rank)
+
+        if disciplines:
+            def draw_elbow(y_top, y_bottom, scale):
+                # Reconciles the director level's lead_centre with the
+                # discipline rows' full-width centre -- see the identical
+                # comment in _render_cards_slide.
+                if lead_centre != centre:
+                    y_mid = (y_top + y_bottom) // 2
+                    _connector(slide, MSO_CONNECTOR.STRAIGHT, lead_centre, y_top, lead_centre, y_mid)
+                    _connector(slide, MSO_CONNECTOR.STRAIGHT, lead_centre, y_mid, centre, y_mid)
+                    _connector(slide, MSO_CONNECTOR.STRAIGHT, centre, y_mid, centre, y_bottom)
+            flow.connector(_TREE_SECTION_GAP + panel_extra, draw_elbow)
+            for row_index, (chunk, row_h) in enumerate(row_infos):
+                def draw_row(y_top, y_bottom, scale, chunk=chunk):
+                    col_w = int(_TREE_BOX_W * scale)
+                    col_gap = int(_TREE_COL_GAP * scale)
+                    total = len(chunk) * col_w + (len(chunk) - 1) * col_gap
+                    x0 = centre - total // 2
+                    centres = [x0 + col_w // 2 + i * (col_w + col_gap) for i in range(len(chunk))]
+                    bus_y = y_top + int(_TREE_CONNECTOR * scale * 0.4)
+                    _connector(slide, MSO_CONNECTOR.STRAIGHT, centre, y_top, centre, bus_y)
+                    if len(centres) > 1:
+                        _connector(slide, MSO_CONNECTOR.STRAIGHT, centres[0], bus_y, centres[-1], bus_y)
+                    box_h = int(_TREE_BOX_H * scale)
+                    row_gap = int(_TREE_ROW_GAP * scale)
+                    box_top = bus_y + int(_TREE_CONNECTOR * scale * 0.6)
+                    for i, group in enumerate(chunk):
+                        cx = centres[i]
+                        _connector(slide, MSO_CONNECTOR.STRAIGHT, cx, bus_y, cx, box_top)
+                        by = box_top
+                        for person in group.people:
+                            _tree_box(slide, cx - col_w // 2, by, col_w, box_h,
+                                     _person_lines(person, _INK, scale), tbc=person.is_tbc)
+                            by += box_h + row_gap
+                flow.block(row_h, draw_row)
+                if row_index < len(row_infos) - 1:
+                    flow.gap(_TREE_ROW_TO_ROW)
+
+        return flow, row_width
+
+    per_row_candidates = _row_candidates(len(model.disciplines)) if model.disciplines else [1]
+    flow, scale, per_row = _psolve_scale(build_flow, per_row_candidates)
+    bottom = flow.render(CONTENT_TOP_EMU, scale)
+
     if model.disciplines:
-        min_panel_w = int(Inches(2.0))
-        panel_x = min(int(_SLIDE_W - _STYLE_MARGIN - min_panel_w), director_right + int(Inches(0.25)))
-        panel_w = max(min_panel_w, int(_SLIDE_W - _STYLE_MARGIN - panel_x))
-        director_row_top = int(Inches(0.95)) + int(box_h) + int(Inches(0.26))
-        panel_bottom = _peer_review_panel(slide, panel_x, director_row_top, panel_w, model)
-        y = max(y, panel_bottom)
+        panel_w = int(_PANEL_W_EMU * scale)
+        panel_top = panel_anchor.get("y", CONTENT_TOP_EMU + int(director_h * scale))
+        panel_x = int(_SLIDE_W - _STYLE_MARGIN) - panel_w
+        _draw_peer_review_panel(slide, model, scale, panel_x, panel_top, _PANEL_W_EMU)
 
-    if model.disciplines:
-        available = int(_SLIDE_W - 2 * _STYLE_MARGIN)
-        per_row, col_w = _wrap_columns(len(model.disciplines), available,
-                                       int(Inches(2.2)), gap, int(box_w))
-        chunks = [model.disciplines[i:i + per_row]
-                  for i in range(0, len(model.disciplines), per_row)]
-        for chunk_index, chunk in enumerate(chunks):
-            bus_y = y + int(Inches(0.28))
-            if chunk_index == 0:
-                _connector(slide, MSO_CONNECTOR.STRAIGHT, centre, y, centre, bus_y)
-            total = len(chunk) * col_w + (len(chunk) - 1) * gap
-            x = int(_SLIDE_W / 2 - total / 2)
-            centres = []
-            row_bottom = bus_y
-            for group in chunk:
-                centres.append(int(x + col_w / 2))
-                box_y = bus_y + int(Inches(0.26))
-                for person in group.people:
-                    box(x, box_y, col_w, _person_lines(person, _INK), tbc=person.is_tbc)
-                    box_y += int(box_h + Inches(0.14))
-                row_bottom = max(row_bottom, box_y)
-                x += col_w + gap
-            if len(centres) > 1:
-                _connector(slide, MSO_CONNECTOR.STRAIGHT, min(centres), bus_y,
-                           max(centres), bus_y)
-            for column_centre in centres:
-                _connector(slide, MSO_CONNECTOR.STRAIGHT, column_centre, bus_y,
-                           column_centre, bus_y + Inches(0.26))
-            y = row_bottom + int(Inches(0.10))
-
-    _grow(prs, y + Inches(0.3))
+    _grow(prs, bottom + int(Inches(0.35)))
     return _save(prs)
 
 

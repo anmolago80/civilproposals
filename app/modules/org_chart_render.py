@@ -299,7 +299,12 @@ def render_png(model: OrgModel, style: str = DEFAULT_STYLE,
         }[style]
         figure = renderer(model, theme_accent or DISCIPLINE_COLOURS[0])
         buffer = io.BytesIO()
-        figure.savefig(buffer, format="png", dpi=170, bbox_inches="tight",
+        # No bbox_inches="tight": that crops the saved PNG back down to the
+        # drawn content's bounding box, silently undoing the fixed A4-landscape
+        # page this module now deliberately renders -- the whole point of the
+        # scale-to-fill rework is that the OUTPUT PAGE is a constant size and
+        # the content is what scales, not the other way round.
+        figure.savefig(buffer, format="png", dpi=170,
                        facecolor=PAGE_BG, edgecolor="none")
         plt.close(figure)
         buffer.seek(0)
@@ -309,15 +314,70 @@ def render_png(model: OrgModel, style: str = DEFAULT_STYLE,
 
 
 # ---------------------------------------------------------------------------
-# Shared drawing helpers
+# Shared drawing helpers -- fixed A4-landscape page, scaled-to-fill layout
 # ---------------------------------------------------------------------------
+#
+# FIX BRIEF: "org chart must FILL the A4 landscape page." The chart used to
+# live on an auto-cropped canvas of fixed-size cards -- a four-person chart
+# got a short, thin figure; an eight-person one got a tall one -- so however
+# many people were on the plan, the CARDS never changed size and the PAGE
+# just grew or shrank around them. That is backwards for a document meant to
+# occupy a fixed A4 landscape sheet: pasted or printed, a small team read as
+# a small diagram lost on a big page.
+#
+# The figure is now fixed at A4 landscape size. Every style instead computes
+# a SCALE FACTOR from the current team's row/column counts -- how much the
+# reference (scale=1.0) card sizes, gaps and fonts need to grow or shrink so
+# the content exactly fills the page within margins -- and derives every
+# box, gap, line weight and font size from that one factor. `_Flow` (below)
+# is the shared engine every style's vertical sequence renders through: it
+# takes the natural (reference-scale) height of each block and gap in the
+# sequence, and once a scale is chosen, spreads whatever page height is left
+# over EVENLY across every gap -- never letting slack collect into one dead
+# band, and never assuming a fixed pixel/EMU offset that only suited one
+# particular team size.
 
-# Inches of figure per 1.0 of vertical data space. Fixed so card heights, text
-# sizes and gaps stay identical whatever the team size -- the figure grows,
-# the drawing does not rescale. Same approach as program_render._finalise.
-_V_SCALE = 9.0
-_TOP = 1.06
-_WIDTH = 12.0
+# Same precise A4 dimensions modules/program_pptx.py and
+# modules/methodology_pptx.py already use for their own slides (297mm x
+# 210mm), so the on-screen/DOCX chart and the companion PowerPoint
+# (org_chart_pptx.py) are the same physical page as every other generated
+# artefact in this pack, not merely close to it.
+PAGE_W_IN = 11.6929
+PAGE_H_IN = 8.2677
+_MARGIN_IN = 0.35
+_TITLE_BAND_IN = 0.62
+
+# Drawable-area geometry, in axes-fraction (0..1 maps onto the fixed
+# PAGE_W_IN x PAGE_H_IN figure) -- every style's content lives inside this
+# box, never past it.
+CONTENT_LEFT = _MARGIN_IN / PAGE_W_IN
+CONTENT_RIGHT = 1.0 - _MARGIN_IN / PAGE_W_IN
+PAGE_TOP = 1.0 - _MARGIN_IN / PAGE_H_IN
+CONTENT_BOTTOM = _MARGIN_IN / PAGE_H_IN
+CONTENT_TOP = PAGE_TOP - _TITLE_BAND_IN / PAGE_H_IN
+
+AVAIL_W_IN = (CONTENT_RIGHT - CONTENT_LEFT) * PAGE_W_IN
+AVAIL_H_IN = (CONTENT_TOP - CONTENT_BOTTOM) * PAGE_H_IN
+
+# The scale factor is clamped to this range: MIN keeps a very large team
+# (more rows than any sane wrap can fully compensate for) legible rather
+# than illegibly tiny; MAX keeps a very small team (e.g. one discipline)
+# from blowing cards up to a cartoonish size just because the page is empty.
+# 1.35 is chosen so a typical 4-discipline chart -- which the fix brief calls
+# out by name -- lands name text in the requested ~16-20pt band rather than
+# ballooning past it.
+MIN_SCALE = 0.55
+MAX_SCALE = 1.35
+
+
+def _x_in(inches: float) -> float:
+    """Inches -> axes x-fraction, against the FIXED page width."""
+    return inches / PAGE_W_IN
+
+
+def _y_in(inches: float) -> float:
+    """Inches -> axes y-fraction, against the FIXED page height."""
+    return inches / PAGE_H_IN
 
 
 def _hex_to_rgb(value: str):
@@ -333,23 +393,124 @@ def _discipline_colour(index: int) -> str:
     return DISCIPLINE_COLOURS[index % len(DISCIPLINE_COLOURS)]
 
 
-def _new_figure(height: float):
+def _new_figure():
+    """A fixed A4-landscape figure whose axes fill the ENTIRE physical page --
+    add_axes([0, 0, 1, 1]) rather than plt.subplots()'s default inset, so
+    axes-fraction (0, 0)..(1, 1) maps exactly onto the fixed PAGE_W_IN x
+    PAGE_H_IN page with no hidden matplotlib margin eating into it. Paired
+    with render_png() no longer passing bbox_inches="tight" -- otherwise the
+    saved PNG is cropped back down to the drawn content regardless of what
+    figsize says, which is exactly how the chart used to escape its page."""
     import matplotlib.pyplot as plt
 
-    figure, axes = plt.subplots(figsize=(_WIDTH, height))
+    figure = plt.figure(figsize=(PAGE_W_IN, PAGE_H_IN))
+    axes = figure.add_axes((0.0, 0.0, 1.0, 1.0))
     axes.set_axis_off()
     axes.set_xlim(0, 1)
     axes.set_ylim(0, 1)
     return figure, axes
 
 
-def _finalise(figure, axes, lowest: float):
-    """Crop the canvas to the content and size the figure to match, so a
-    four-person chart isn't padded out with half a page of white."""
-    lowest = min(lowest, _TOP - 0.12)
-    axes.set_ylim(lowest, _TOP)
-    figure.set_size_inches(_WIDTH, max(1.8, (_TOP - lowest) * _V_SCALE))
-    return figure
+class _Flow:
+    """A vertical sequence of blocks (drawable content, fixed reference size)
+    and gaps (spacing that STRETCHES to absorb leftover page height), each
+    given a reference height in INCHES at scale=1.0.
+
+    render() replays the sequence top-down: every height is multiplied by
+    the chosen scale, and any page height left over after that is spread
+    EVENLY across every gap in the sequence -- so a short chart's extra room
+    becomes breathing space at every seam, not one dead band. A connector
+    (a line between two boxes) is a gap too, via connector() below, so it
+    lengthens along with the space it crosses rather than leaving a floating
+    stub with blank page beneath it -- an early version kept connectors as
+    non-stretching blocks and it reliably produced exactly one oversized gap
+    (the single remaining stretch point) instead of even spacing throughout.
+    Every draw(y_top, y_bottom, scale) callback -- block or gap alike --
+    receives its own already-scaled-and-positioned axes-fraction span, plus
+    the scale itself for anything that needs it directly (font sizes, line
+    weights)."""
+
+    def __init__(self):
+        self._items: list[dict] = []
+
+    def block(self, height_in: float, draw) -> None:
+        self._items.append({"kind": "block", "h": max(0.0, height_in), "draw": draw})
+
+    def gap(self, height_in: float, draw=None) -> None:
+        self._items.append({"kind": "gap", "h": max(0.0, height_in), "draw": draw})
+
+    def connector(self, height_in: float, draw) -> None:
+        """A stretchable gap that also draws (typically a line spanning its
+        own, possibly-lengthened, span) -- see the class docstring."""
+        self.gap(height_in, draw=draw)
+
+    def natural_height_in(self) -> float:
+        return sum(it["h"] for it in self._items)
+
+    def render(self, top_frac: float, scale: float, avail_h_in: float = AVAIL_H_IN) -> float:
+        """Draws every block and returns the final bottom y (axes-fraction)."""
+        n_gaps = sum(1 for it in self._items if it["kind"] == "gap")
+        used_in = self.natural_height_in() * scale
+        leftover_in = max(0.0, avail_h_in - used_in)
+        extra_per_gap_in = (leftover_in / n_gaps) if n_gaps else 0.0
+        y = top_frac
+        for it in self._items:
+            h_in = it["h"] * scale + (extra_per_gap_in if it["kind"] == "gap" else 0.0)
+            y_bottom = y - _y_in(h_in)
+            if it["draw"] is not None:
+                it["draw"](y, y_bottom, scale)
+            y = y_bottom
+        return y
+
+
+def _solve_scale(build_flow, per_row_candidates,
+                 avail_w_in: float = AVAIL_W_IN, avail_h_in: float = AVAIL_H_IN):
+    """Try every candidate discipline-columns-per-row wrap, measure the
+    resulting flow WITHOUT drawing anything, and keep whichever wrap yields
+    the largest resulting scale -- i.e. the best-fitting page. This is the
+    "beyond [min font sizes], wrap to a second row of discipline columns
+    instead of shrinking further" rule: a wrap that lets everything render
+    bigger wins over a single row that would have to shrink past legibility.
+    Ties (including the common case of only one candidate, when there's
+    nothing to wrap) favour fewer rows -- less visual clutter.
+
+    `build_flow(per_row)` -> (flow: _Flow, row_width_in: float) for one wrap
+    choice; row_width_in is that choice's natural (scale=1.0) width, used
+    for the width-fit half of scale = min(width_fit, height_fit).
+
+    Returns (flow, scale, per_row) for the winning candidate."""
+    best = None
+    for per_row in per_row_candidates:
+        flow, row_width_in = build_flow(per_row)
+        natural_h = flow.natural_height_in()
+        height_fit = (avail_h_in / natural_h) if natural_h > 0 else MAX_SCALE
+        width_fit = (avail_w_in / row_width_in) if row_width_in > 0 else MAX_SCALE
+        scale = max(MIN_SCALE, min(MAX_SCALE, min(height_fit, width_fit)))
+        # Candidates are tried fewest-rows-first (see _row_candidates), so a
+        # later, more-wrapped candidate only takes over on a MEANINGFUL scale
+        # gain (>6%) -- without this margin, a three-column row that just
+        # barely misses the clamp (scale 1.345) loses to a 2+1 wrap that just
+        # barely reaches it (1.35 exactly), trading a clean single row for a
+        # lopsided one over a difference nobody would notice.
+        if best is None or scale > best[1] * 1.06:
+            best = (flow, scale, per_row)
+    return best
+
+
+def _row_candidates(count: int) -> list[int]:
+    """Per-row candidates worth trying for `count` columns: every row count
+    from 1 (a single row) up to `count` (one column per row), each turned
+    into a per-row value via ceil-division so rows stay balanced (the same
+    balancing _wrap_columns used to do). Small counts have few candidates
+    to try, so this stays cheap even though _solve_scale tries all of them."""
+    if count <= 0:
+        return [1]
+    seen = []
+    for rows in range(1, count + 1):
+        per_row = -(-count // rows)  # ceil
+        if per_row not in seen:
+            seen.append(per_row)
+    return seen
 
 
 def _text_width_frac(figure, artist) -> float:
@@ -384,20 +545,16 @@ def _fit(figure, artist, max_frac: float, min_size: float = 5.0) -> None:
         artist.set_text(text.rstrip() + "…")
 
 
-def _wrap_columns(count: int, min_w: float, gap: float, max_w: float):
-    """How to lay `count` columns across the page without squeezing any of
-    them below a legible width.
-
-    Past a handful of disciplines a single row makes every card too narrow to
-    hold a name -- an eight-discipline chart came out reading "Lead Pe…" in
-    every column. Wrap to further rows instead, balanced so the last row
-    isn't a lonely single card. Returns (columns_per_row, column_width)."""
-    count = max(1, count)
-    per_row = max(1, int((1.0 + gap) // (min_w + gap)))
+def _balanced_wrap(count: int, max_per_row: int) -> int:
+    """Simple balanced row-wrap for small multi-item rows (a leadership rank
+    row, a badge row) that aren't part of the discipline-column scale search
+    in _solve_scale -- ceil-balanced across rows so the last row isn't a
+    lonely single item. Returns columns-per-row."""
+    if count <= 0:
+        return 1
+    per_row = min(count, max_per_row)
     rows = -(-count // per_row)          # ceil
-    per_row = -(-count // rows)          # ceil, balanced across rows
-    width = min(max_w, (1.0 - (per_row - 1) * gap) / per_row)
-    return per_row, width
+    return -(-count // rows)             # ceil, balanced across rows
 
 
 def _card(axes, x, y, w, h, facecolor=CARD_WHITE, edgecolor=CARD_EDGE,
@@ -426,33 +583,56 @@ def _line(axes, x0, y0, x1, y1, colour=LINE, width=0.9, zorder=1):
 
 
 def _title(axes, model: OrgModel, subtitle: str = ""):
-    axes.text(0.0, 1.0, "Project organisation", fontsize=16, fontweight="bold",
+    """Page furniture, not content -- drawn at a constant size regardless of
+    team size, anchored to the fixed margin/title band rather than the old
+    bare (0, 1)/(1, 1) corners, since the axes now really do span the whole
+    physical page (see _new_figure) and (0, 1) would sit flush on the paper
+    edge."""
+    x, y = CONTENT_LEFT, PAGE_TOP
+    axes.text(x, y, "Project organisation", fontsize=16, fontweight="bold",
               color=INK, ha="left", va="top")
     if subtitle:
-        axes.text(0.0, 0.965, subtitle, fontsize=6.6, color=SUBTLE, ha="left", va="top")
+        axes.text(x, y - _y_in(0.22), subtitle, fontsize=6.6, color=SUBTLE, ha="left", va="top")
     if model.heading:
-        axes.text(1.0, 1.0, model.heading, fontsize=8.4, fontweight="bold",
+        axes.text(CONTENT_RIGHT, y, model.heading, fontsize=8.4, fontweight="bold",
                   color="#6B7280", ha="right", va="top")
 
 
 def _empty_figure(model: OrgModel):
-    figure, axes = _new_figure(2.4)
+    figure, axes = _new_figure()
     _title(axes, model)
-    axes.text(0.5, 0.88, EMPTY_NOTE, fontsize=8, color="#C00000", style="italic",
-              ha="center", va="center", wrap=True)
-    return _finalise(figure, axes, 0.82)
+    axes.text(0.5, (CONTENT_TOP + CONTENT_BOTTOM) / 2, EMPTY_NOTE, fontsize=11,
+              color="#C00000", style="italic", ha="center", va="center", wrap=True)
+    return figure
 
 
-def _person_lines(person: Person, role_colour: str | None = None) -> list[tuple[str, float, bool, str]]:
+# Reference (scale=1.0) font sizes for a person's two stacked lines. Boosted
+# well past the chart's old fixed 7.6pt/6.6pt -- which never changed no
+# matter how few people were on the plan -- so that a typical small team,
+# scaled up by _solve_scale, actually lands in the fix brief's requested
+# ~16-20pt name / ~12-14pt role band rather than merely being less tiny.
+# Floors stop a very large, heavily-wrapped team from shrinking past
+# legibility; _fit() (per-card, per-name) is still the final safety net for
+# any one unusually long label.
+_NAME_PT_REF = 14.5
+_ROLE_PT_REF = 10.5
+_NAME_PT_MIN = 8.0
+_ROLE_PT_MIN = 6.5
+
+
+def _person_lines(person: Person, role_colour: str | None = None,
+                  scale: float = 1.0) -> list[tuple[str, float, bool, str]]:
     """(text, size, bold, colour) for a person's stacked lines -- ALWAYS
     exactly two: name (or "TBC"), then role/title. Qualifications are
     deliberately never drawn here (see the module docstring) -- a chart is
     read at a glance, and a full CV sentence on a card overflowed the card
     and collided with whatever sits above it."""
+    name_pt = max(_NAME_PT_MIN, _NAME_PT_REF * scale)
+    role_pt = max(_ROLE_PT_MIN, _ROLE_PT_REF * scale)
     if person.is_tbc:
-        lines = [("TBC", 7.6, True, TBC_RED), (person.role or "", 6.6, True, TBC_RED)]
+        lines = [("TBC", name_pt, True, TBC_RED), (person.role or "", role_pt, True, TBC_RED)]
     else:
-        lines = [(person.name, 7.6, True, INK)]
+        lines = [(person.name, name_pt, True, INK)]
         if person.role:
             # A lead's role carries the accent, a support member's is grey:
             # the chart should say at a glance who runs a discipline without
@@ -462,58 +642,138 @@ def _person_lines(person: Person, role_colour: str | None = None) -> list[tuple[
                 colour = TBC_RED
             else:
                 colour = (role_colour or INK) if person.is_lead else MUTED
-            lines.append((person.role, 6.6, True, colour))
+            lines.append((person.role, role_pt, True, colour))
     return [line for line in lines if line[0]]
+
+
+
+def _rgb_hex(rgb) -> str:
+    return "#%02X%02X%02X" % tuple(int(round(c * 255)) for c in rgb)
+
+
+# ---------------------------------------------------------------------------
+# Peer Review panel -- shared by the cards, columns and tree styles (bands
+# folds the same information into its "Assurance" band instead, see below).
+# Unconditional whenever the plan has at least one discipline (see the
+# module docstring): one row per discipline against its nominated reviewer,
+# red TBC until one is entered.
+# ---------------------------------------------------------------------------
+
+_PANEL_HEADER_IN = 0.30
+_PANEL_ROW_IN = 0.28
+_PANEL_W_IN = 3.1
+
+
+def _draw_peer_review_panel(axes, model: OrgModel, scale: float, labels: list,
+                            x_frac: float, top_frac: float, w_in_ref: float) -> float:
+    """Draws the panel anchored at its top-left corner (x_frac, top_frac) and
+    returns its bottom y (axes-fraction), so a caller that needs to clear it
+    knows exactly how far down it reaches."""
+    n = len(model.disciplines)
+    if not n:
+        return top_frac
+    w = _x_in(w_in_ref * scale)
+    header_h = _y_in(_PANEL_HEADER_IN * scale)
+    row_h = _y_in(_PANEL_ROW_IN * scale)
+    total_h = header_h + row_h * n
+    _card(axes, x_frac, top_frac - total_h, w, total_h,
+          facecolor=ASSURANCE_FILL, edgecolor=ASSURANCE_AMBER,
+          radius=min(w, total_h) * 0.05, linewidth=max(0.7, 1.0 * scale))
+    axes.text(x_frac + w / 2, top_frac - header_h / 2, "PEER REVIEW",
+              fontsize=max(6.0, 7.4 * scale), fontweight="bold", color=ASSURANCE_AMBER,
+              ha="center", va="center", zorder=4)
+    pad = w * 0.06
+    row_y = top_frac - header_h
+    for group in model.disciplines:
+        reviewer = (group.peer_reviewer or "").strip()
+        tbc = not reviewer
+        labels.append((axes.text(x_frac + pad, row_y - row_h / 2, group.name,
+                                 fontsize=max(5.5, 7.0 * scale), fontweight="bold", color=INK,
+                                 ha="left", va="center", zorder=4), w * 0.55))
+        labels.append((axes.text(x_frac + w - pad, row_y - row_h / 2, reviewer or "TBC",
+                                 fontsize=max(5.5, 7.0 * scale), fontweight="bold",
+                                 color=TBC_RED if tbc else ASSURANCE_AMBER,
+                                 ha="right", va="center", zorder=4), w * 0.42))
+        row_y -= row_h
+    return top_frac - total_h
 
 
 # ---------------------------------------------------------------------------
 # A. Executive cards
 # ---------------------------------------------------------------------------
+#
+# Vertical sequence: client box -> connector -> top leadership card ->
+# connector -> a wrapped "rank" row of any remaining co-leads/reviewers ->
+# a gap that also reserves room for the Peer Review panel beside it ->
+# discipline columns, wrapped into further rows past a handful of
+# disciplines. Built as one _Flow so the whole sequence shares a single
+# scale factor and a single pool of distributable vertical slack.
 
-_CARD_W = 0.19
-_CARD_GAP = 0.022
+_CARDS_CLIENT_W_IN = 3.0
+_CARDS_CLIENT_H_IN = 0.55
+_CARDS_CARD_W_IN = 2.55
+_CARDS_CARD_H_IN = 0.66
+_CARDS_COL_GAP_IN = 0.26
+_CARDS_ROW_GAP_IN = 0.14
+_CARDS_CONNECTOR_IN = 0.22
+_CARDS_CAPTION_IN = 0.26
+_CARDS_SECTION_GAP_IN = 0.24
+_CARDS_ROW_TO_ROW_IN = 0.22
 
 
-def _avatar_card(figure, axes, x, y, w, h, person: Person, accent: str,
+def _avatar_card(figure, axes, x, y, w, h, person: Person, accent: str, scale: float,
                  badge: str = ""):
     """A white card with a top accent rule, a circular initials avatar, and
     the person's stacked lines. A TBC card is dashed and red throughout --
-    the same convention every other unknown in this tool uses."""
+    the same convention every other unknown in this tool uses. Every size on
+    the card is either a fraction of its own (already-scaled) w/h, or takes
+    `scale` directly for the few things that aren't -- so the card grows and
+    shrinks as one coherent unit rather than each piece separately."""
     tbc = person.is_tbc
+    lw = max(0.7, min(1.3, 0.9 * scale))
     _card(axes, x, y, w, h,
           facecolor=TBC_FILL if tbc else CARD_WHITE,
           edgecolor=TBC_RED if tbc else CARD_EDGE,
-          linewidth=0.9, linestyle=(0, (2.4, 1.8)) if tbc else "solid")
+          linewidth=lw, linestyle=(0, (2.4, 1.8)) if tbc else "solid")
     # Only a lead's card carries the top rule. A support member's card sitting
     # under it with the same bar made the two read as peers.
     if not tbc and person.is_lead:
-        _accent_bar(axes, x, y + h - 0.006, w, accent)
+        bar_h = h * 0.09
+        _accent_bar(axes, x, y + h - bar_h, w, accent, height=bar_h)
+    badge_artist = None
     if badge and not tbc:
-        _card(axes, x + w * 0.52, y + h - 0.004, w * 0.48, 0.017,
-              facecolor=ASSURANCE_FILL, edgecolor=ASSURANCE_AMBER, radius=0.004,
-              linewidth=0.7, zorder=4)
-        axes.text(x + w * 0.76, y + h + 0.0045, badge.upper(), fontsize=5.2,
-                  fontweight="bold", color=ASSURANCE_AMBER, ha="center", va="center",
-                  zorder=5)
+        badge_w, badge_h = w * 0.46, h * 0.30
+        bx = x + w - badge_w - w * 0.02
+        by = y + h - badge_h * 0.55
+        _card(axes, bx, by, badge_w, badge_h, facecolor=ASSURANCE_FILL,
+              edgecolor=ASSURANCE_AMBER, radius=badge_h / 3, linewidth=0.7, zorder=4)
+        badge_artist = axes.text(bx + badge_w / 2, by + badge_h / 2, badge.upper(),
+                                 fontsize=max(5.0, 5.8 * scale), fontweight="bold",
+                                 color=ASSURANCE_AMBER, ha="center", va="center", zorder=5)
 
-    avatar_r = min(h * 0.24, 0.019)
-    avatar_cx = x + 0.026
-    avatar_cy = y + h / 2
-    from matplotlib.patches import Circle
+    # An Ellipse, not a Circle: the axes aren't equal-aspect (the page itself
+    # isn't square), so a patch with an equal x/y data radius would draw as a
+    # slight oval. Correcting the x radius by the page's own aspect ratio is
+    # what actually makes the avatar look round in the rendered PNG.
+    from matplotlib.patches import Ellipse
 
-    axes.add_patch(Circle((avatar_cx, avatar_cy), avatar_r,
-                          facecolor=TBC_FILL if tbc else _tint(accent, 0.88),
-                          edgecolor="none", zorder=3,
-                          transform=axes.transData))
-    axes.text(avatar_cx, avatar_cy, person.initials, fontsize=6.4, fontweight="bold",
+    r_y = h * 0.30
+    r_x = r_y * (PAGE_H_IN / PAGE_W_IN)
+    cx, cy = x + w * 0.15, y + h / 2
+    axes.add_patch(Ellipse((cx, cy), r_x * 2, r_y * 2,
+                           facecolor=TBC_FILL if tbc else _tint(accent, 0.88),
+                           edgecolor="none", zorder=3))
+    axes.text(cx, cy, person.initials, fontsize=max(6.5, 7.6 * scale), fontweight="bold",
               color=TBC_RED if tbc else accent, ha="center", va="center", zorder=4)
 
-    lines = _person_lines(person, role_colour=accent)
-    text_x = x + 0.049
-    max_frac = w - 0.058
-    step = 0.0155
-    first_y = y + h / 2 + (len(lines) - 1) * step / 2 - 0.001
+    lines = _person_lines(person, role_colour=accent, scale=scale)
+    text_x = x + w * 0.28
+    max_frac = w - w * 0.32
+    step = h * 0.30
+    first_y = y + h / 2 + (len(lines) - 1) * step / 2
     labels = []
+    if badge_artist is not None:
+        labels.append((badge_artist, badge_w - _x_in(0.04)))
     for index, (text, size, bold, colour) in enumerate(lines):
         artist = axes.text(text_x, first_y - index * step, text, fontsize=size,
                            fontweight="bold" if bold else "normal", color=colour,
@@ -526,128 +786,187 @@ def _render_cards(model: OrgModel, accent: str):
     if model.is_empty:
         return _empty_figure(model)
 
-    figure, axes = _new_figure(6.0)
+    figure, axes = _new_figure()
     _title(axes, model)
     labels: list[tuple[object, float]] = []
+    centre = (CONTENT_LEFT + CONTENT_RIGHT) / 2
+    # The Peer Review panel floats beside the leadership section (client/
+    # top-person/rank) but the discipline rows always sit BELOW the panel,
+    # never beside it (panel_extra_in below pushes them down whenever the
+    # panel is taller than the leadership section) -- so only the leadership
+    # rows need to make room for it horizontally. Centring leadership on the
+    # panel-reduced width (lead_centre), while the discipline rows keep the
+    # full-width centre, means the panel's width is reserved once, not
+    # mirrored on both sides of the page centre for content that never sits
+    # next to it.
+    _panel_reserve_in = _PANEL_W_IN * MAX_SCALE if model.disciplines else 0.0
+    lead_centre = (CONTENT_LEFT + _x_in(AVAIL_W_IN - _panel_reserve_in) / 2
+                  if model.disciplines else centre)
 
-    centre = 0.5
-    y = 0.90
-
-    # Client box -- near-black, the client's side of the table.
-    client_w, client_h = 0.20, 0.042
-    _card(axes, centre - client_w / 2, y - client_h, client_w, client_h,
-          facecolor=CLIENT_DARK, edgecolor=CLIENT_DARK)
-    labels.append((axes.text(centre, y - client_h * 0.38,
-                             model.client_name or "[CLIENT NAME]", fontsize=8,
-                             fontweight="bold",
-                             color="#FFFFFF" if model.client_name else "#FCA5A5",
-                             ha="center", va="center", zorder=4), client_w - 0.02))
-    axes.text(centre, y - client_h * 0.75, model.client_role, fontsize=5.8,
-              fontweight="bold", color="#9CA3AF", ha="center", va="center", zorder=4)
-    y -= client_h
-
-    card_h = 0.062
-    # Leadership: the first role centred under the client, the rest spread on
-    # a second rank alongside any assurance card.
     lead_people = list(model.leadership)
-    top_person = lead_people.pop(0) if lead_people else None
+    top_person = lead_people[0] if lead_people else None
+    rank = [(p, "") for p in lead_people[1:]] + [(p, "QA / Review") for p in model.assurance]
+    rank_per_row = _balanced_wrap(len(rank), 4) if rank else 0
+    rank_rows = -(-len(rank) // rank_per_row) if rank else 0
+    rank_h_in = (rank_rows * _CARDS_CARD_H_IN + max(0, rank_rows - 1) * _CARDS_ROW_GAP_IN) if rank else 0.0
+
+    # How tall the leadership section (everything above the disciplines) is
+    # at reference scale -- used only to make sure the Peer Review panel,
+    # which floats beside it rather than flowing through it, always has
+    # somewhere to fit without overlapping the leadership cards above it.
+    leadership_h_in = _CARDS_CLIENT_H_IN
     if top_person is not None:
-        _line(axes, centre, y, centre, y - 0.022)
-        y -= 0.022
-        labels += _avatar_card(figure, axes, centre - _CARD_W / 2, y - card_h,
-                               _CARD_W, card_h, top_person, accent)
-        y -= card_h
-
-    rank = [(person, "") for person in lead_people]
-    rank += [(person, "QA / Review") for person in model.assurance]
+        leadership_h_in += _CARDS_CONNECTOR_IN + _CARDS_CARD_H_IN
     if rank:
-        _line(axes, centre, y, centre, y - 0.024)
-        y -= 0.024
-        # Wrapped like the discipline columns below rather than laid out in
-        # one fixed-width row -- a job with several co-leads plus a reviewer
-        # could otherwise run its end cards off the left/right edge of the
-        # canvas, which bbox_inches="tight" then either clips or silently
-        # grows the export around, neither of which reads as a chart.
-        per_row, rank_w = _wrap_columns(len(rank), 0.165, _CARD_GAP, _CARD_W)
-        rank_chunks = [rank[i:i + per_row] for i in range(0, len(rank), per_row)]
-        for chunk in rank_chunks:
-            total = len(chunk) * rank_w + (len(chunk) - 1) * _CARD_GAP
-            x = max(0.0, centre - total / 2)
-            for person, badge in chunk:
-                labels += _avatar_card(figure, axes, x, y - card_h, rank_w, card_h,
-                                       person, ASSURANCE_AMBER if badge else accent,
-                                       badge=badge)
-                x += rank_w + _CARD_GAP
-            y -= card_h + 0.010
-        y += 0.010  # undo the last row's trailing gap
+        leadership_h_in += _CARDS_CONNECTOR_IN + rank_h_in
+    panel_h_in = (_PANEL_HEADER_IN + len(model.disciplines) * _PANEL_ROW_IN) if model.disciplines else 0.0
+    panel_extra_in = max(0.0, panel_h_in - leadership_h_in)
 
-    # Peer Review panel, top-right -- unconditional whenever the plan has at
-    # least one discipline (see the module docstring): one row per
-    # discipline against its nominated reviewer, red TBC until one is
-    # entered. Anchored to the top of the canvas rather than the flowing
-    # cursor above, so it never depends on how tall the leadership rows
-    # happened to be -- but the discipline columns below still have to start
-    # BELOW it, not underneath it, so its bottom edge is folded into `y`.
+    def build_flow(per_row):
+        disciplines = model.disciplines
+        chunks = ([disciplines[i:i + per_row] for i in range(0, len(disciplines), per_row)]
+                 if disciplines else [])
+        row_infos = []
+        disc_width_in = 0.0
+        for chunk in chunks:
+            tallest = max(len(g.people) for g in chunk)
+            row_h_in = (_CARDS_CAPTION_IN + tallest * _CARDS_CARD_H_IN
+                       + max(0, tallest - 1) * _CARDS_ROW_GAP_IN)
+            row_infos.append((chunk, row_h_in))
+            width = len(chunk) * _CARDS_CARD_W_IN + (len(chunk) - 1) * _CARDS_COL_GAP_IN
+            disc_width_in = max(disc_width_in, width)
+        rank_width_in = ((rank_per_row * _CARDS_CARD_W_IN + max(0, rank_per_row - 1) * _CARDS_COL_GAP_IN)
+                         if rank else 0.0)
+        leadership_width_in = max(_CARDS_CLIENT_W_IN, _CARDS_CARD_W_IN, rank_width_in)
+        # The Peer Review panel sits beside the (separately-centred)
+        # leadership section but always below the discipline rows -- so each
+        # needs its own fit check against the width it actually has (the
+        # leadership section's width excludes the panel's reserved slice,
+        # the discipline rows' doesn't). Both are expressed as a fraction of
+        # their own available width, and the larger (more binding) fraction
+        # is converted back into an equivalent row_width_in against the FULL
+        # available width, so the existing width_fit = AVAIL_W_IN /
+        # row_width_in in _solve_scale still picks up whichever one binds.
+        lead_avail_in = (AVAIL_W_IN - _panel_reserve_in) if disciplines else AVAIL_W_IN
+        lead_ratio = (leadership_width_in / lead_avail_in) if lead_avail_in > 0 else 1.0
+        disc_ratio = (disc_width_in / AVAIL_W_IN) if disc_width_in > 0 else 0.0
+        row_width_in = max(lead_ratio, disc_ratio) * AVAIL_W_IN
+
+        flow = _Flow()
+
+        def draw_client(y_top, y_bottom, scale):
+            w = _x_in(_CARDS_CLIENT_W_IN * scale)
+            h = y_top - y_bottom
+            x = lead_centre - w / 2
+            _card(axes, x, y_bottom, w, h, facecolor=CLIENT_DARK, edgecolor=CLIENT_DARK)
+            labels.append((axes.text(lead_centre, y_bottom + h * 0.62,
+                                     model.client_name or "[CLIENT NAME]",
+                                     fontsize=max(8.5, 11.0 * scale), fontweight="bold",
+                                     color="#FFFFFF" if model.client_name else "#FCA5A5",
+                                     ha="center", va="center", zorder=4), w - _x_in(0.14)))
+            axes.text(lead_centre, y_bottom + h * 0.26, model.client_role,
+                      fontsize=max(6.0, 8.0 * scale), fontweight="bold", color="#9CA3AF",
+                      ha="center", va="center", zorder=4)
+        flow.block(_CARDS_CLIENT_H_IN, draw_client)
+
+        if top_person is not None:
+            def draw_conn1(y_top, y_bottom, scale):
+                _line(axes, lead_centre, y_top, lead_centre, y_bottom, width=max(0.7, 0.9 * scale))
+            flow.connector(_CARDS_CONNECTOR_IN, draw_conn1)
+
+            def draw_top(y_top, y_bottom, scale):
+                w = _x_in(_CARDS_CARD_W_IN * scale)
+                h = y_top - y_bottom
+                x = lead_centre - w / 2
+                labels.extend(_avatar_card(figure, axes, x, y_bottom, w, h, top_person, accent, scale))
+            flow.block(_CARDS_CARD_H_IN, draw_top)
+
+        if rank:
+            def draw_conn2(y_top, y_bottom, scale):
+                _line(axes, lead_centre, y_top, lead_centre, y_bottom, width=max(0.7, 0.9 * scale))
+            flow.connector(_CARDS_CONNECTOR_IN, draw_conn2)
+
+            def draw_rank(y_top, y_bottom, scale):
+                row_h = _y_in(_CARDS_CARD_H_IN * scale)
+                row_gap = _y_in(_CARDS_ROW_GAP_IN * scale)
+                col_gap = _x_in(_CARDS_COL_GAP_IN * scale)
+                col_w = _x_in(_CARDS_CARD_W_IN * scale)
+                row_chunks = [rank[i:i + rank_per_row] for i in range(0, len(rank), rank_per_row)]
+                ry = y_top
+                for row_chunk in row_chunks:
+                    total = len(row_chunk) * col_w + (len(row_chunk) - 1) * col_gap
+                    rx = lead_centre - total / 2
+                    for person, badge in row_chunk:
+                        labels.extend(_avatar_card(figure, axes, rx, ry - row_h, col_w, row_h,
+                                                   person, ASSURANCE_AMBER if badge else accent,
+                                                   scale, badge=badge))
+                        rx += col_w + col_gap
+                    ry -= row_h + row_gap
+            flow.block(rank_h_in, draw_rank)
+
+        if disciplines:
+            def draw_elbow(y_top, y_bottom, scale):
+                # The leadership trunk runs down lead_centre (shifted left to
+                # leave the panel clear); the discipline rows fan out from
+                # the full-page centre instead, since they always sit below
+                # the panel and have no reason to give up that width. This
+                # jog reconciles the two centrelines within the (usually
+                # generously stretched) gap between them, rather than
+                # leaving a visibly kinked single line or silently
+                # mismatched brackets.
+                if abs(lead_centre - centre) > 1e-6:
+                    y_mid = (y_top + y_bottom) / 2
+                    _line(axes, lead_centre, y_top, lead_centre, y_mid, width=max(0.7, 0.9 * scale))
+                    _line(axes, lead_centre, y_mid, centre, y_mid, width=max(0.7, 0.9 * scale))
+                    _line(axes, centre, y_mid, centre, y_bottom, width=max(0.7, 0.9 * scale))
+                else:
+                    _line(axes, centre, y_top, centre, y_bottom, width=max(0.7, 0.9 * scale))
+            flow.connector(_CARDS_SECTION_GAP_IN + panel_extra_in, draw_elbow)
+
+            def draw_stub(y_top, y_bottom, scale):
+                _line(axes, centre, y_top, centre, y_bottom, width=max(0.7, 0.9 * scale))
+            flow.connector(_CARDS_CONNECTOR_IN, draw_stub)
+
+            for row_index, (chunk, row_h_in) in enumerate(row_infos):
+                def draw_row(y_top, y_bottom, scale, chunk=chunk):
+                    bus_y = y_top
+                    col_w = _x_in(_CARDS_CARD_W_IN * scale)
+                    col_gap = _x_in(_CARDS_COL_GAP_IN * scale)
+                    total = len(chunk) * col_w + (len(chunk) - 1) * col_gap
+                    x0 = centre - total / 2
+                    centres = [x0 + col_w / 2 + i * (col_w + col_gap) for i in range(len(chunk))]
+                    if len(centres) > 1:
+                        _line(axes, centres[0], bus_y, centres[-1], bus_y, width=max(0.7, 0.9 * scale))
+                    caption_h = _y_in(_CARDS_CAPTION_IN * scale)
+                    card_h = _y_in(_CARDS_CARD_H_IN * scale)
+                    row_gap = _y_in(_CARDS_ROW_GAP_IN * scale)
+                    for i, group in enumerate(chunk):
+                        cx = centres[i]
+                        _line(axes, cx, bus_y, cx, bus_y - caption_h * 0.35, width=max(0.7, 0.9 * scale))
+                        axes.text(cx, bus_y - caption_h * 0.68, group.name.upper(),
+                                  fontsize=max(6.0, 7.6 * scale), fontweight="bold", color=MUTED,
+                                  ha="center", va="center")
+                        card_y = bus_y - caption_h
+                        gx = x0 + i * (col_w + col_gap)
+                        for person in group.people:
+                            labels.extend(_avatar_card(figure, axes, gx, card_y - card_h, col_w,
+                                                       card_h, person, accent, scale))
+                            card_y -= card_h + row_gap
+                flow.block(row_h_in, draw_row)
+                if row_index < len(row_infos) - 1:
+                    flow.gap(_CARDS_ROW_TO_ROW_IN)
+
+        return flow, row_width_in
+
+    per_row_candidates = _row_candidates(len(model.disciplines)) if model.disciplines else [1]
+    flow, scale, per_row = _solve_scale(build_flow, per_row_candidates)
+    flow.render(CONTENT_TOP, scale)
+
     if model.disciplines:
-        panel_w = 0.30
-        panel_x = 1.0 - panel_w
-        panel_row_h = 0.024
-        panel_h = 0.036 + panel_row_h * len(model.disciplines)
-        panel_top = 0.90
-        _card(axes, panel_x, panel_top - panel_h, panel_w, panel_h,
-              facecolor=ASSURANCE_FILL, edgecolor=ASSURANCE_AMBER, radius=0.010, linewidth=1.0)
-        axes.text(panel_x + panel_w / 2, panel_top - 0.017, "PEER REVIEW", fontsize=6.2,
-                  fontweight="bold", color=ASSURANCE_AMBER, ha="center", va="center", zorder=4)
-        row_y = panel_top - 0.036
-        for group in model.disciplines:
-            reviewer = (group.peer_reviewer or "").strip()
-            tbc = not reviewer
-            labels.append((axes.text(panel_x + 0.016, row_y - panel_row_h / 2, group.name,
-                                     fontsize=5.8, fontweight="bold", color=INK,
-                                     ha="left", va="center", zorder=4), panel_w * 0.52))
-            labels.append((axes.text(panel_x + panel_w - 0.016, row_y - panel_row_h / 2,
-                                     reviewer or "TBC", fontsize=5.8, fontweight="bold",
-                                     color=TBC_RED if tbc else ASSURANCE_AMBER,
-                                     ha="right", va="center", zorder=4), panel_w * 0.42))
-            row_y -= panel_row_h
-        y = min(y, panel_top - panel_h)
+        panel_w = _x_in(_PANEL_W_IN * scale)
+        panel_x = CONTENT_RIGHT - panel_w
+        _draw_peer_review_panel(axes, model, scale, labels, panel_x, CONTENT_TOP, _PANEL_W_IN)
 
-    # Discipline columns, each with an uppercase caption and its lead plus
-    # however many support members the plan carries.
-    if model.disciplines:
-        per_row, col_w = _wrap_columns(len(model.disciplines), 0.165, _CARD_GAP, _CARD_W)
-        chunks = [model.disciplines[i:i + per_row]
-                  for i in range(0, len(model.disciplines), per_row)]
-        for chunk_index, chunk in enumerate(chunks):
-            bus_y = y - 0.026
-            if chunk_index == 0:
-                _line(axes, centre, y, centre, bus_y)
-            total = len(chunk) * col_w + (len(chunk) - 1) * _CARD_GAP
-            x = max(0.0, 0.5 - total / 2)
-            centres = []
-            row_bottom = bus_y
-            for group in chunk:
-                centres.append(x + col_w / 2)
-                # The Executive-cards style is single-accent by design (the
-                # fixed discipline palette belongs to the column style): the
-                # uppercase caption already names each discipline, so
-                # colouring them differently here only adds noise.
-                axes.text(x + col_w / 2, bus_y - 0.018, group.name.upper(), fontsize=6.0,
-                          fontweight="bold", color=MUTED, ha="center", va="center")
-                card_y = bus_y - 0.030
-                for person in group.people:
-                    labels += _avatar_card(figure, axes, x, card_y - card_h, col_w,
-                                           card_h, person, accent)
-                    card_y -= card_h + 0.010
-                row_bottom = min(row_bottom, card_y)
-                x += col_w + _CARD_GAP
-            if len(centres) > 1:
-                _line(axes, centres[0], bus_y, centres[-1], bus_y)
-            for column_centre in centres:
-                _line(axes, column_centre, bus_y, column_centre, bus_y - 0.012)
-            y = row_bottom - 0.014
-
-    figure = _finalise(figure, axes, y - 0.02)
     for artist, max_frac in labels:
         _fit(figure, artist, max_frac)
     return figure
@@ -657,19 +976,33 @@ def _render_cards(model: OrgModel, accent: str):
 # B. Discipline columns
 # ---------------------------------------------------------------------------
 
-def _pill(axes, x, y, w, h, facecolor, label, sub="", label_colour="#FFFFFF",
-          sub_colour="#D7DEEA", label_size=8.0):
-    _card(axes, x, y, w, h, facecolor=facecolor, edgecolor=facecolor, radius=0.008)
+_COLUMNS_PILL_H_IN = 0.55
+_COLUMNS_CLIENT_W_IN = 3.4
+_COLUMNS_LEAD_W1_IN = 3.0
+_COLUMNS_LEAD_W2_IN = 2.5
+_COLUMNS_CONNECTOR_IN = 0.20
+_COLUMNS_LANE_W_IN = 2.75
+_COLUMNS_LANE_GAP_IN = 0.24
+_COLUMNS_ROW_H_IN = 0.62
+_COLUMNS_CAPTION_IN = 0.32
+_COLUMNS_ROW_GAP_IN = 0.12
+_COLUMNS_LANE_PAD_IN = 0.10
+_COLUMNS_SECTION_GAP_IN = 0.26
+_COLUMNS_ROW_TO_ROW_IN = 0.22
+_COLUMNS_STRIP_H_IN = 0.55
+_COLUMNS_STRIP_W_IN = 7.5
+
+
+def _pill(axes, x, y, w, h, facecolor, label, sub, label_colour, sub_colour, scale):
+    _card(axes, x, y, w, h, facecolor=facecolor, edgecolor=facecolor, radius=min(w, h) * 0.16)
     if sub:
-        artist = axes.text(x + w / 2, y + h * 0.62, label, fontsize=label_size,
-                           fontweight="bold", color=label_colour, ha="center",
-                           va="center", zorder=4)
-        axes.text(x + w / 2, y + h * 0.28, sub, fontsize=6.2, fontweight="bold",
+        artist = axes.text(x + w / 2, y + h * 0.62, label, fontsize=max(8.5, 11.5 * scale),
+                           fontweight="bold", color=label_colour, ha="center", va="center", zorder=4)
+        axes.text(x + w / 2, y + h * 0.26, sub, fontsize=max(6.0, 8.5 * scale), fontweight="bold",
                   color=sub_colour, ha="center", va="center", zorder=4)
     else:
-        artist = axes.text(x + w / 2, y + h / 2, label, fontsize=label_size,
-                           fontweight="bold", color=label_colour, ha="center",
-                           va="center", zorder=4)
+        artist = axes.text(x + w / 2, y + h / 2, label, fontsize=max(8.5, 11.5 * scale),
+                           fontweight="bold", color=label_colour, ha="center", va="center", zorder=4)
     return artist
 
 
@@ -677,250 +1010,268 @@ def _render_columns(model: OrgModel, accent: str):
     if model.is_empty:
         return _empty_figure(model)
 
-    figure, axes = _new_figure(6.0)
+    figure, axes = _new_figure()
     _title(axes, model)
     labels: list[tuple[object, float]] = []
+    centre = (CONTENT_LEFT + CONTENT_RIGHT) / 2
 
-    centre = 0.5
-    y = 0.90
-    pill_h = 0.040
-
-    client_w = 0.26
-    labels.append((_pill(axes, centre - client_w / 2, y - pill_h, client_w, pill_h,
-                         CLIENT_DARK,
-                         f"{model.client_name or '[CLIENT NAME]'} — Client",
-                         label_colour="#FFFFFF" if model.client_name else "#FCA5A5"),
-                   client_w - 0.02))
-    y -= pill_h
-
-    for index, person in enumerate(model.leadership):
-        _line(axes, centre, y, centre, y - 0.020)
-        y -= 0.020
-        # The first leadership pill is slightly wider than the rest --
-        # the reference look's tapering chain.
-        width = 0.24 if index == 0 else 0.19
-        label = person.name or "TBC"
-        sub = person.role
-        colour = accent if index == 0 else _rgb_hex(_tint(accent, 0.18))
-        labels.append((_pill(axes, centre - width / 2, y - pill_h, width, pill_h,
-                             colour if not person.is_tbc else TBC_FILL, label, sub,
-                             label_colour="#FFFFFF" if not person.is_tbc else TBC_RED,
-                             sub_colour="#D7DEEA" if not person.is_tbc else TBC_RED),
-                       width - 0.02))
-        y -= pill_h
-
-    if model.disciplines:
-        y -= 0.028
-        gap = 0.016
-        per_row, lane_w = _wrap_columns(len(model.disciplines), 0.175, gap, 0.24)
-        chunks = [model.disciplines[i:i + per_row]
-                  for i in range(0, len(model.disciplines), per_row)]
-        row_h = 0.046
-        x = 0.0
+    def build_flow(per_row):
+        disciplines = model.disciplines
+        chunks = ([disciplines[i:i + per_row] for i in range(0, len(disciplines), per_row)]
+                 if disciplines else [])
+        row_infos = []
+        row_width_in = _COLUMNS_CLIENT_W_IN
         for chunk in chunks:
-            total = len(chunk) * lane_w + (len(chunk) - 1) * gap
-            x = max(0.0, 0.5 - total / 2)
-            # Every lane in a row is the same height, so the row reads as a
-            # row rather than a ragged skyline.
             tallest = max(len(g.people) for g in chunk)
-            lane_h = 0.030 + tallest * (row_h + 0.008) + 0.008
-            for group in chunk:
-                colour = _discipline_colour(group.people[0].group_index if group.people
-                                            else model.disciplines.index(group))
-                _card(axes, x, y - lane_h, lane_w, lane_h, facecolor="#F7F9FC",
-                      edgecolor="#EDF1F6", radius=0.010, zorder=1)
-                _accent_bar(axes, x, y - 0.006, lane_w, colour)
-                labels.append((axes.text(x + lane_w / 2, y - 0.020, group.name.upper(),
-                                         fontsize=6.6, fontweight="bold", color=colour,
-                                         ha="center", va="center", zorder=4),
-                               lane_w - 0.02))
-                card_y = y - 0.030
-                for person in group.people:
-                    tbc = person.is_tbc
-                    _card(axes, x + 0.008, card_y - row_h, lane_w - 0.016, row_h,
-                          facecolor=TBC_FILL if tbc else CARD_WHITE,
-                          edgecolor=TBC_RED if tbc else CARD_EDGE,
-                          linestyle=(0, (2.4, 1.8)) if tbc else "solid", radius=0.008)
-                    lines = _person_lines(person, role_colour=colour)
-                    step = 0.0135
-                    first = card_y - row_h / 2 + (len(lines) - 1) * step / 2
-                    for line_index, (text, size, bold, line_colour) in enumerate(lines):
-                        labels.append((axes.text(x + lane_w / 2, first - line_index * step,
-                                                 text, fontsize=size,
-                                                 fontweight="bold" if bold else "normal",
-                                                 color=line_colour, ha="center", va="center",
-                                                 zorder=4), lane_w - 0.028))
-                    card_y -= row_h + 0.008
-                x += lane_w + gap
-            y -= lane_h + 0.016
+            row_h_in = (_COLUMNS_CAPTION_IN + tallest * _COLUMNS_ROW_H_IN
+                       + max(0, tallest - 1) * _COLUMNS_ROW_GAP_IN + 2 * _COLUMNS_LANE_PAD_IN)
+            row_infos.append((chunk, row_h_in))
+            width = len(chunk) * _COLUMNS_LANE_W_IN + (len(chunk) - 1) * _COLUMNS_LANE_GAP_IN
+            row_width_in = max(row_width_in, width)
 
-    # The amber independent-review strip, ONLY when the plan holds such a slot.
-    if model.assurance:
-        y -= 0.026
-        strip_h = 0.036
-        strip_w = 0.44
-        _card(axes, centre - strip_w / 2, y - strip_h, strip_w, strip_h,
-              facecolor=ASSURANCE_FILL, edgecolor="#FBBF24", radius=0.010)
-        text = " · ".join(f"{p.name or 'TBC'} — {p.role}" for p in model.assurance)
-        labels.append((axes.text(centre, y - strip_h / 2, f"★ Independent review: {text}",
-                                 fontsize=6.6, fontweight="bold", color=ASSURANCE_AMBER,
-                                 ha="center", va="center", zorder=4), strip_w - 0.02))
-        y -= strip_h
+        flow = _Flow()
 
-    # A right-hand-panel equivalent of the amber strip above, but
-    # unconditional (see the module docstring): one small chip per
-    # discipline against its nominated peer reviewer, red TBC until one is
-    # entered. Chips wrap across rows rather than squeezing, the same
-    # convention as every other multi-item row in this style.
-    if model.disciplines:
-        y -= 0.026
-        gap = 0.012
-        chip_w = 0.235
-        per_row = max(1, int((1.0 + gap) // (chip_w + gap)))
-        rows = -(-len(model.disciplines) // per_row)
-        per_row = -(-len(model.disciplines) // rows)
-        chip_h = 0.034
-        panel_h = 0.030 + rows * chip_h + (rows - 1) * 0.008
-        panel_w = min(1.0, per_row * chip_w + (per_row - 1) * gap) + 0.03
-        _card(axes, centre - panel_w / 2, y - panel_h, panel_w, panel_h,
-              facecolor=ASSURANCE_FILL, edgecolor="#FBBF24", radius=0.010)
-        axes.text(centre, y - 0.016, "PEER REVIEW", fontsize=6.2, fontweight="bold",
-                  color=ASSURANCE_AMBER, ha="center", va="center", zorder=4)
-        row_y = y - 0.030
-        for row_index in range(rows):
-            row_groups = model.disciplines[row_index * per_row:(row_index + 1) * per_row]
-            total = len(row_groups) * chip_w + (len(row_groups) - 1) * gap
-            x = centre - total / 2
-            for group in row_groups:
-                reviewer = (group.peer_reviewer or "").strip()
-                tbc = not reviewer
-                _card(axes, x, row_y - chip_h, chip_w, chip_h,
-                      facecolor=TBC_FILL if tbc else CARD_WHITE,
-                      edgecolor=TBC_RED if tbc else "#FBBF24",
-                      linestyle=(0, (2.2, 1.6)) if tbc else "solid", radius=0.008)
-                labels.append((axes.text(x + chip_w / 2, row_y - chip_h * 0.34, group.name,
-                                         fontsize=5.8, fontweight="bold", color=INK,
-                                         ha="center", va="center", zorder=4), chip_w - 0.016))
-                labels.append((axes.text(x + chip_w / 2, row_y - chip_h * 0.70,
-                                         reviewer or "TBC", fontsize=5.8, fontweight="bold",
-                                         color=TBC_RED if tbc else ASSURANCE_AMBER,
-                                         ha="center", va="center", zorder=4), chip_w - 0.016))
-                x += chip_w + gap
-            row_y -= chip_h + 0.008
-        y -= panel_h
+        def draw_client(y_top, y_bottom, scale):
+            w = _x_in(_COLUMNS_CLIENT_W_IN * scale)
+            h = y_top - y_bottom
+            x = centre - w / 2
+            label = f"{model.client_name or '[CLIENT NAME]'} — Client"
+            colour = "#FFFFFF" if model.client_name else "#FCA5A5"
+            labels.append((_pill(axes, x, y_bottom, w, h, CLIENT_DARK, label, "", colour, colour,
+                                 scale), w - _x_in(0.15)))
+        flow.block(_COLUMNS_PILL_H_IN, draw_client)
 
-    figure = _finalise(figure, axes, y - 0.02)
+        for index, person in enumerate(model.leadership):
+            def draw_conn(y_top, y_bottom, scale):
+                _line(axes, centre, y_top, centre, y_bottom, width=max(0.7, 0.9 * scale))
+            flow.connector(_COLUMNS_CONNECTOR_IN, draw_conn)
+
+            def draw_lead(y_top, y_bottom, scale, person=person, index=index):
+                width_in = _COLUMNS_LEAD_W1_IN if index == 0 else _COLUMNS_LEAD_W2_IN
+                w = _x_in(width_in * scale)
+                h = y_top - y_bottom
+                x = centre - w / 2
+                tbc = person.is_tbc
+                fill = accent if index == 0 else _rgb_hex(_tint(accent, 0.18))
+                fc = TBC_FILL if tbc else fill
+                label_colour = TBC_RED if tbc else "#FFFFFF"
+                sub_colour = TBC_RED if tbc else "#D7DEEA"
+                labels.append((_pill(axes, x, y_bottom, w, h, fc, person.name or "TBC", person.role,
+                                     label_colour, sub_colour, scale), w - _x_in(0.15)))
+            flow.block(_COLUMNS_PILL_H_IN, draw_lead)
+
+        if disciplines:
+            flow.gap(_COLUMNS_SECTION_GAP_IN)
+            for row_index, (chunk, row_h_in) in enumerate(row_infos):
+                def draw_row(y_top, y_bottom, scale, chunk=chunk):
+                    lane_w = _x_in(_COLUMNS_LANE_W_IN * scale)
+                    lane_gap = _x_in(_COLUMNS_LANE_GAP_IN * scale)
+                    total = len(chunk) * lane_w + (len(chunk) - 1) * lane_gap
+                    x0 = centre - total / 2
+                    lane_h = y_top - y_bottom
+                    for i, group in enumerate(chunk):
+                        colour_hex = _discipline_colour(
+                            group.people[0].group_index if group.people else disciplines.index(group))
+                        lx = x0 + i * (lane_w + lane_gap)
+                        _card(axes, lx, y_bottom, lane_w, lane_h, facecolor="#F7F9FC",
+                              edgecolor="#EDF1F6", radius=lane_w * 0.03, zorder=1)
+                        bar_h = _y_in(0.07 * scale)
+                        _accent_bar(axes, lx, y_top - bar_h, lane_w, colour_hex, height=bar_h)
+                        caption_h = _y_in(_COLUMNS_CAPTION_IN * scale)
+                        labels.append((axes.text(lx + lane_w / 2, y_top - caption_h * 0.6,
+                                                 group.name.upper(), fontsize=max(7.0, 9.2 * scale),
+                                                 fontweight="bold", color=colour_hex, ha="center",
+                                                 va="center", zorder=4), lane_w - _x_in(0.14)))
+                        pad = _x_in(_COLUMNS_LANE_PAD_IN * scale)
+                        row_h = _y_in(_COLUMNS_ROW_H_IN * scale)
+                        row_gap = _y_in(_COLUMNS_ROW_GAP_IN * scale)
+                        card_y = y_top - caption_h
+                        for person in group.people:
+                            tbc = person.is_tbc
+                            _card(axes, lx + pad, card_y - row_h, lane_w - 2 * pad, row_h,
+                                  facecolor=TBC_FILL if tbc else CARD_WHITE,
+                                  edgecolor=TBC_RED if tbc else CARD_EDGE,
+                                  linestyle=(0, (2.4, 1.8)) if tbc else "solid", radius=row_h * 0.12)
+                            lines = _person_lines(person, role_colour=colour_hex, scale=scale)
+                            step = row_h * 0.42
+                            first = card_y - row_h / 2 + (len(lines) - 1) * step / 2
+                            for li, (text, size, bold, lc) in enumerate(lines):
+                                labels.append((axes.text(lx + lane_w / 2, first - li * step, text,
+                                                         fontsize=size,
+                                                         fontweight="bold" if bold else "normal",
+                                                         color=lc, ha="center", va="center", zorder=4),
+                                              lane_w - _x_in(0.2)))
+                            card_y -= row_h + row_gap
+                flow.block(row_h_in, draw_row)
+                if row_index < len(row_infos) - 1:
+                    flow.gap(_COLUMNS_ROW_TO_ROW_IN)
+
+        if model.assurance:
+            flow.gap(_COLUMNS_SECTION_GAP_IN)
+
+            def draw_strip(y_top, y_bottom, scale):
+                w = _x_in(_COLUMNS_STRIP_W_IN * scale)
+                h = y_top - y_bottom
+                x = centre - w / 2
+                _card(axes, x, y_bottom, w, h, facecolor=ASSURANCE_FILL,
+                      edgecolor="#FBBF24", radius=h * 0.2)
+                text = " · ".join(f"{p.name or 'TBC'} — {p.role}" for p in model.assurance)
+                labels.append((axes.text(centre, y_bottom + h / 2, f"★ Independent review: {text}",
+                                         fontsize=max(7.0, 9.2 * scale), fontweight="bold",
+                                         color=ASSURANCE_AMBER, ha="center", va="center", zorder=4),
+                              w - _x_in(0.2)))
+            flow.block(_COLUMNS_STRIP_H_IN, draw_strip)
+
+        if disciplines:
+            flow.gap(_COLUMNS_SECTION_GAP_IN)
+            panel_h_in = _PANEL_HEADER_IN + len(disciplines) * _PANEL_ROW_IN
+
+            def draw_panel(y_top, y_bottom, scale):
+                w = _x_in(_PANEL_W_IN * scale)
+                x = centre - w / 2
+                _draw_peer_review_panel(axes, model, scale, labels, x, y_top, _PANEL_W_IN)
+            flow.block(panel_h_in, draw_panel)
+
+        return flow, row_width_in
+
+    per_row_candidates = _row_candidates(len(model.disciplines)) if model.disciplines else [1]
+    flow, scale, per_row = _solve_scale(build_flow, per_row_candidates)
+    flow.render(CONTENT_TOP, scale)
+
     for artist, max_frac in labels:
         _fit(figure, artist, max_frac)
     return figure
 
 
-def _rgb_hex(rgb) -> str:
-    return "#%02X%02X%02X" % tuple(int(round(c * 255)) for c in rgb)
-
-
 # ---------------------------------------------------------------------------
 # C. Governance bands
 # ---------------------------------------------------------------------------
+#
+# Bands are full content-width by design -- unlike the column-based styles,
+# there's no "row of N boxes" whose count trades off against width, so this
+# style isn't part of the _solve_scale per-row search. Only band/chip HEIGHT
+# and font sizes scale; each chip's WIDTH and which row it wraps onto are
+# decided once, at reference sizing, purely from the fixed page width and
+# the chips' own text lengths -- keeping width fixed is what guarantees a
+# scaled-up band never runs its chips past the page margin.
+
+_BANDS_LABEL_W_IN = 1.6
+_BANDS_CHIP_H_IN = 0.62
+_BANDS_CHIP_GAP_IN = 0.16
+_BANDS_PAD_IN = 0.14
+_BANDS_SECTION_GAP_IN = 0.20
+
 
 def _render_bands(model: OrgModel, accent: str):
     if model.is_empty:
         return _empty_figure(model)
 
-    figure, axes = _new_figure(6.0)
+    figure, axes = _new_figure()
     _title(axes, model)
     labels: list[tuple[object, float]] = []
 
-    label_x, band_x, band_right = 0.145, 0.16, 1.0
-    y = 0.90
-    chip_h = 0.050
-    chip_gap = 0.010
+    band_left = CONTENT_LEFT + _x_in(_BANDS_LABEL_W_IN)
+    band_right = CONTENT_RIGHT
+    avail_in = (band_right - band_left) * PAGE_W_IN
 
-    def band(title: str, chips: list[tuple[str, str, bool, str]], fill,
-             chip_edge=CARD_EDGE):
-        """chips: (name, role, is_tbc, role_colour)."""
-        nonlocal y
-        if not chips:
-            return
-        pad = 0.010
-        # Chips flow left to right and wrap, so a 12-person delivery band grows
-        # downwards rather than off the right-hand edge.
-        widths = [min(0.20, max(0.11, 0.030 + 0.0088 * max(len(name), len(role))))
-                  for name, role, *_rest in chips]
-        rows: list[list[int]] = [[]]
-        used = 0.0
-        for index, width in enumerate(widths):
-            if rows[-1] and used + width + chip_gap > (band_right - band_x - 2 * pad):
+    def chip_rows(chips):
+        """Which row each chip wraps onto, and each chip's WIDTH in inches --
+        both fixed regardless of scale (see the note above)."""
+        widths_in = [min(2.6, max(1.35, 0.30 + 0.078 * max(len(name), len(role))))
+                    for name, role, *_rest in chips]
+        rows, used = [[]], 0.0
+        for index, w in enumerate(widths_in):
+            if rows[-1] and used + w + _BANDS_CHIP_GAP_IN > avail_in - 2 * _BANDS_PAD_IN:
                 rows.append([])
                 used = 0.0
             rows[-1].append(index)
-            used += width + chip_gap
-        band_h = pad * 2 + len(rows) * chip_h + (len(rows) - 1) * chip_gap
-        _card(axes, band_x, y - band_h, band_right - band_x, band_h,
-              facecolor=fill, edgecolor="none", radius=0.008, linewidth=0, zorder=1)
-        axes.text(label_x, y - band_h / 2, title.upper(), fontsize=6.4, fontweight="bold",
-                  color=MUTED, ha="right", va="center")
-        chip_y = y - pad
-        for row in rows:
-            x = band_x + pad
-            for index in row:
-                name, role, tbc, role_colour = chips[index]
-                width = widths[index]
-                _card(axes, x, chip_y - chip_h, width, chip_h,
-                      facecolor=TBC_FILL if tbc else CARD_WHITE,
-                      edgecolor=TBC_RED if tbc else chip_edge,
-                      linestyle=(0, (2.4, 1.8)) if tbc else "solid", radius=0.008, zorder=2)
-                lines = [(name, 7.2, True, TBC_RED if tbc else INK),
-                         (role, 6.4, True, TBC_RED if tbc else role_colour)]
-                lines = [line for line in lines if line[0]]
-                step = 0.0135
-                first = chip_y - chip_h / 2 + (len(lines) - 1) * step / 2
-                for line_index, (text, size, bold, colour) in enumerate(lines):
-                    labels.append((axes.text(x + 0.008, first - line_index * step, text,
-                                             fontsize=size,
-                                             fontweight="bold" if bold else "normal",
-                                             color=colour, ha="left", va="center", zorder=3),
-                                   width - 0.014))
-                x += width + chip_gap
-            chip_y -= chip_h + chip_gap
-        y -= band_h + 0.014
+            used += w + _BANDS_CHIP_GAP_IN
+        return rows, widths_in
 
-    band("Client",
-         [(model.client_name or "[CLIENT NAME]", model.client_role, False, MUTED)],
-         CLIENT_DARK, chip_edge=CLIENT_DARK)
-    band("Leadership",
-         [(p.name or "TBC", p.role, p.is_tbc, accent) for p in model.leadership],
-         _tint(accent, 0.94))
+    flow = _Flow()
+
+    def make_band(title, chips, fill, chip_edge=CARD_EDGE):
+        if not chips:
+            return
+        rows, widths_in = chip_rows(chips)
+        band_h_in = (2 * _BANDS_PAD_IN + len(rows) * _BANDS_CHIP_H_IN
+                    + max(0, len(rows) - 1) * _BANDS_CHIP_GAP_IN)
+
+        def draw(y_top, y_bottom, scale, title=title, chips=chips, fill=fill, chip_edge=chip_edge,
+                 rows=rows, widths_in=widths_in):
+            h = y_top - y_bottom
+            _card(axes, band_left, y_bottom, band_right - band_left, h, facecolor=fill,
+                  edgecolor="none", radius=_y_in(0.08 * scale), linewidth=0, zorder=1)
+            axes.text(band_left - _x_in(0.06), y_bottom + h / 2, title.upper(),
+                      fontsize=max(6.5, 8.0 * scale), fontweight="bold", color=MUTED,
+                      ha="right", va="center")
+            chip_gap = _x_in(_BANDS_CHIP_GAP_IN * scale)
+            chip_h = _y_in(_BANDS_CHIP_H_IN * scale)
+            chip_y = y_top - _y_in(_BANDS_PAD_IN * scale)
+            for row in rows:
+                x = band_left + _x_in(_BANDS_PAD_IN)
+                for index in row:
+                    name, role, tbc, role_colour = chips[index]
+                    w = _x_in(widths_in[index])
+                    _card(axes, x, chip_y - chip_h, w, chip_h,
+                          facecolor=TBC_FILL if tbc else CARD_WHITE,
+                          edgecolor=TBC_RED if tbc else chip_edge,
+                          linestyle=(0, (2.4, 1.8)) if tbc else "solid", radius=chip_h * 0.12, zorder=2)
+                    lines = [(name, max(8.0, 11.0 * scale), True, TBC_RED if tbc else INK),
+                             (role, max(6.0, 8.2 * scale), True, TBC_RED if tbc else role_colour)]
+                    lines = [line for line in lines if line[0]]
+                    step = chip_h * 0.34
+                    first = chip_y - chip_h / 2 + (len(lines) - 1) * step / 2
+                    for li, (text, size, bold, colour) in enumerate(lines):
+                        labels.append((axes.text(x + _x_in(0.08), first - li * step, text,
+                                                 fontsize=size, fontweight="bold" if bold else "normal",
+                                                 color=colour, ha="left", va="center", zorder=3),
+                                      w - _x_in(0.16)))
+                    x += w + chip_gap
+                chip_y -= chip_h + chip_gap
+
+        flow.block(band_h_in, draw)
+        flow.gap(_BANDS_SECTION_GAP_IN)
+
+    make_band("Client", [(model.client_name or "[CLIENT NAME]", model.client_role, False, MUTED)],
+              CLIENT_DARK, chip_edge=CLIENT_DARK)
+    make_band("Leadership",
+             [(p.name or "TBC", p.role, p.is_tbc, accent) for p in model.leadership],
+             _tint(accent, 0.94))
     delivery = []
     for group in model.disciplines:
         colour = _discipline_colour(group.people[0].group_index if group.people else 0)
         for person in group.people:
             role = (person.role if person.role.startswith(group.name)
-                    else f"{person.role} · {group.name}")
+                   else f"{person.role} · {group.name}")
             delivery.append((person.name or "TBC", role, person.is_tbc,
-                             colour if person.is_lead else MUTED))
-    band("Delivery team", delivery, _tint(DISCIPLINE_COLOURS[1], 0.95))
+                            colour if person.is_lead else MUTED))
+    make_band("Delivery team", delivery, _tint(DISCIPLINE_COLOURS[1], 0.95))
     # The Assurance band now ALWAYS carries the Peer Review element -- one
     # row per discipline, red TBC until a reviewer is entered -- alongside
-    # any dedicated reviewer role the plan holds. Unlike the old "only when
-    # a reviewer slot exists" rule, this means the band appears whenever
-    # there is at least one discipline, because every discipline needs a
-    # peer reviewer eventually, not only once one has been named.
+    # any dedicated reviewer role the plan holds, so the band appears
+    # whenever there is at least one discipline rather than only once a
+    # reviewer slot exists.
     assurance_chips = [(p.name or "TBC", p.role, p.is_tbc, ASSURANCE_AMBER) for p in model.assurance]
     assurance_chips += [
         (group.peer_reviewer or "TBC", f"Peer review — {group.name}",
          not bool((group.peer_reviewer or "").strip()), ASSURANCE_AMBER)
         for group in model.disciplines
     ]
-    band("Assurance", assurance_chips, _tint(ASSURANCE_AMBER, 0.93))
+    make_band("Assurance", assurance_chips, _tint(ASSURANCE_AMBER, 0.93))
 
-    axes.text(0.0, y - 0.006,
-              "Solid reporting lines run top-down; the assurance band reviews independently "
-              "of the delivery team." if (model.has_assurance or model.disciplines) else
-              "Solid reporting lines run top-down.",
-              fontsize=6.2, fontweight="bold", color=SUBTLE, ha="left", va="top")
+    def draw_footnote(y_top, y_bottom, scale):
+        text = (("Solid reporting lines run top-down; the assurance band reviews independently "
+                "of the delivery team.") if (model.has_assurance or model.disciplines) else
+               "Solid reporting lines run top-down.")
+        axes.text(band_left, y_top, text, fontsize=max(6.5, 8.0 * scale), fontweight="bold",
+                  color=SUBTLE, ha="left", va="top")
+    flow.block(0.22, draw_footnote)
 
-    figure = _finalise(figure, axes, y - 0.030)
+    natural_h = flow.natural_height_in()
+    scale = max(MIN_SCALE, min(MAX_SCALE, AVAIL_H_IN / natural_h if natural_h > 0 else MAX_SCALE))
+    flow.render(CONTENT_TOP, scale)
+
     for artist, max_frac in labels:
         _fit(figure, artist, max_frac)
     return figure
@@ -930,18 +1281,28 @@ def _render_bands(model: OrgModel, accent: str):
 # D. Classic tree
 # ---------------------------------------------------------------------------
 
-def _tree_box(axes, x, y, w, h, person_lines, accent=None, tbc=False):
+_TREE_BOX_W_IN = 2.6
+_TREE_BOX_H_IN = 0.62
+_TREE_COL_GAP_IN = 0.26
+_TREE_ROW_GAP_IN = 0.14
+_TREE_CONNECTOR_IN = 0.22
+_TREE_SECTION_GAP_IN = 0.22
+_TREE_ROW_TO_ROW_IN = 0.20
+
+
+def _tree_box(axes, x, y, w, h, person_lines, scale, accent=None, tbc=False):
+    linewidth = max(0.8, min(1.6, 1.4 * scale)) if (accent or tbc) else max(0.7, min(1.3, 1.0 * scale))
     _card(axes, x, y, w, h, facecolor=CARD_WHITE,
-          edgecolor=TBC_RED if tbc else (accent or INK),
-          linewidth=1.4 if accent or tbc else 1.0,
-          linestyle=(0, (2.6, 2.0)) if tbc else "solid", radius=0.006)
-    step = 0.0145
+          edgecolor=TBC_RED if tbc else (accent or INK), linewidth=linewidth,
+          linestyle=(0, (2.6, 2.0)) if tbc else "solid", radius=h * 0.05)
+    step = h * 0.30
     first = y + h / 2 + (len(person_lines) - 1) * step / 2
     out = []
     for index, (text, size, bold, colour) in enumerate(person_lines):
-        out.append((axes.text(x + w / 2, first - index * step, text, fontsize=size,
-                              fontweight="bold" if bold else "normal", color=colour,
-                              ha="center", va="center", zorder=4), w - 0.014))
+        artist = axes.text(x + w / 2, first - index * step, text, fontsize=size,
+                           fontweight="bold" if bold else "normal", color=colour,
+                           ha="center", va="center", zorder=4)
+        out.append((artist, w - _x_in(0.10)))
     return out
 
 
@@ -949,123 +1310,175 @@ def _render_tree(model: OrgModel, accent: str):
     if model.is_empty:
         return _empty_figure(model)
 
-    figure, axes = _new_figure(6.0)
+    figure, axes = _new_figure()
     _title(axes, model)
     labels: list[tuple[object, float]] = []
-
-    centre = 0.5
-    y = 0.90
-    box_w, box_h = 0.20, 0.056
-
-    labels += _tree_box(axes, centre - box_w / 2, y - box_h, box_w, box_h, [
-        (model.client_name or "[CLIENT NAME]", 8.0, True,
-         INK if model.client_name else TBC_RED),
-        (model.client_role, 6.4, True, MUTED),
-    ])
-    y -= box_h
-
-    # Tracks the rightmost edge reached by any box at the director level (the
-    # top-role box plus however many co-lead/assurance boxes end up in the
-    # rank row below it), so the Peer Review box placed beside it (see below)
-    # never has to guess how wide that level got and overlap it.
-    director_right = centre + box_w / 2
+    panel_anchor: dict = {}
+    centre = (CONTENT_LEFT + CONTENT_RIGHT) / 2
+    # Same split as the cards style: the director level sits beside the
+    # panel and gives up width for it; the discipline rows always sit below
+    # the panel (panel_extra_in below pushes them down whenever the panel is
+    # taller than the director level) and keep the full-width centre.
+    _panel_reserve_in = _PANEL_W_IN * MAX_SCALE if model.disciplines else 0.0
+    lead_centre = (CONTENT_LEFT + _x_in(AVAIL_W_IN - _panel_reserve_in) / 2
+                  if model.disciplines else centre)
 
     lead_people = list(model.leadership)
-    top_person = lead_people.pop(0) if lead_people else None
+    top_person = lead_people[0] if lead_people else None
+    rank = lead_people[1:] + model.assurance
+    rank_per_row = _balanced_wrap(len(rank), 4) if rank else 0
+    rank_rows = -(-len(rank) // rank_per_row) if rank else 0
+    rank_h_in = (rank_rows * _TREE_BOX_H_IN + max(0, rank_rows - 1) * _TREE_ROW_GAP_IN) if rank else 0.0
+
+    # The director level -- client box, then (if present) the top leadership
+    # box -- is where the Peer Review panel is anchored, level with the top
+    # box rather than the flowing cursor below it (see org_chart_pptx's
+    # identical convention). Tracked here so both the panel's own top
+    # position AND the flow's reserved room for it agree with each other.
+    director_h_in = _TREE_BOX_H_IN + (_TREE_CONNECTOR_IN if top_person is not None else 0.0)
+    leadership_h_in = _TREE_BOX_H_IN
     if top_person is not None:
-        _line(axes, centre, y, centre, y - 0.024, colour=INK, width=1.0)
-        y -= 0.024
-        labels += _tree_box(axes, centre - box_w / 2, y - box_h, box_w, box_h,
-                            _person_lines(top_person, role_colour=INK),
-                            accent=accent, tbc=top_person.is_tbc)
-        y -= box_h
-
-    rank = lead_people + model.assurance
+        leadership_h_in += _TREE_CONNECTOR_IN + _TREE_BOX_H_IN
     if rank:
-        _line(axes, centre, y, centre, y - 0.026, colour=INK, width=1.0)
-        y -= 0.026
-        gap = 0.024
-        # Wrapped rather than one fixed-width row -- several co-leads plus a
-        # reviewer could otherwise run the end boxes off the canvas edge.
-        per_row, rank_w = _wrap_columns(len(rank), 0.165, gap, box_w)
-        rank_chunks = [rank[i:i + per_row] for i in range(0, len(rank), per_row)]
-        for chunk in rank_chunks:
-            total = len(chunk) * rank_w + (len(chunk) - 1) * gap
-            x = max(0.0, centre - total / 2)
-            for person in chunk:
-                labels += _tree_box(axes, x, y - box_h, rank_w, box_h,
-                                    _person_lines(person, role_colour=INK),
-                                    tbc=person.is_tbc)
-                x += rank_w + gap
-            director_right = max(director_right, x - gap)
-            y -= box_h + 0.012
-        y += 0.012  # undo the last row's trailing gap
+        leadership_h_in += _TREE_CONNECTOR_IN + rank_h_in
+    panel_h_in = (_PANEL_HEADER_IN + len(model.disciplines) * _PANEL_ROW_IN) if model.disciplines else 0.0
+    panel_extra_in = max(0.0, director_h_in + panel_h_in - leadership_h_in)
 
-    # Peer Review box, to the right of the director level -- unconditional
-    # whenever the plan has at least one discipline (see the module
-    # docstring): one row per discipline against its nominated reviewer, red
-    # TBC until one is entered. Placed clear of whatever the director level
-    # actually drew (director_right, tracked above) rather than assuming a
-    # fixed width for it -- several co-leads can run wider than a single
-    # director box, and a fixed offset collided with them. Anchored to the
-    # director row rather than the flowing cursor, so it sits in the same
-    # place regardless of how tall the rank row ended up -- but the
-    # discipline columns below still have to clear its bottom edge.
+    def build_flow(per_row):
+        disciplines = model.disciplines
+        chunks = ([disciplines[i:i + per_row] for i in range(0, len(disciplines), per_row)]
+                 if disciplines else [])
+        row_infos = []
+        disc_width_in = 0.0
+        for chunk in chunks:
+            tallest = max(len(g.people) for g in chunk)
+            row_h_in = (_TREE_CONNECTOR_IN + tallest * _TREE_BOX_H_IN
+                       + max(0, tallest - 1) * _TREE_ROW_GAP_IN)
+            row_infos.append((chunk, row_h_in))
+            width = len(chunk) * _TREE_BOX_W_IN + (len(chunk) - 1) * _TREE_COL_GAP_IN
+            disc_width_in = max(disc_width_in, width)
+        rank_width_in = ((rank_per_row * _TREE_BOX_W_IN + max(0, rank_per_row - 1) * _TREE_COL_GAP_IN)
+                         if rank else 0.0)
+        leadership_width_in = max(_TREE_BOX_W_IN, rank_width_in)
+        # Same split fit as the cards style -- see the comment above
+        # lead_centre: the director level's own available width excludes the
+        # panel's reserved slice, the discipline rows' doesn't, so each gets
+        # its own fraction and the larger (more binding) one wins.
+        lead_avail_in = (AVAIL_W_IN - _panel_reserve_in) if disciplines else AVAIL_W_IN
+        lead_ratio = (leadership_width_in / lead_avail_in) if lead_avail_in > 0 else 1.0
+        disc_ratio = (disc_width_in / AVAIL_W_IN) if disc_width_in > 0 else 0.0
+        row_width_in = max(lead_ratio, disc_ratio) * AVAIL_W_IN
+
+        flow = _Flow()
+
+        def draw_client(y_top, y_bottom, scale):
+            w = _x_in(_TREE_BOX_W_IN * scale)
+            h = y_top - y_bottom
+            x = lead_centre - w / 2
+            labels.extend(_tree_box(axes, x, y_bottom, w, h, [
+                (model.client_name or "[CLIENT NAME]", max(8.5, 11.0 * scale), True,
+                 INK if model.client_name else TBC_RED),
+                (model.client_role, max(6.0, 8.5 * scale), True, MUTED),
+            ], scale))
+            if top_person is None:
+                panel_anchor["y"] = y_bottom
+        flow.block(_TREE_BOX_H_IN, draw_client)
+
+        if top_person is not None:
+            def draw_conn1(y_top, y_bottom, scale):
+                _line(axes, lead_centre, y_top, lead_centre, y_bottom, colour=INK, width=max(0.7, 1.0 * scale))
+            flow.connector(_TREE_CONNECTOR_IN, draw_conn1)
+
+            def draw_top(y_top, y_bottom, scale):
+                w = _x_in(_TREE_BOX_W_IN * scale)
+                h = y_top - y_bottom
+                x = lead_centre - w / 2
+                labels.extend(_tree_box(axes, x, y_bottom, w, h,
+                                        _person_lines(top_person, role_colour=INK, scale=scale),
+                                        scale, accent=accent, tbc=top_person.is_tbc))
+                # Where the panel beside this row actually anchors -- recorded
+                # here (the ACTUAL drawn position) rather than recomputed from
+                # reference heights, since the connector above this box can
+                # itself stretch to absorb leftover page height, and a purely
+                # analytical estimate would drift out of alignment with it.
+                panel_anchor["y"] = y_top
+            flow.block(_TREE_BOX_H_IN, draw_top)
+
+        if rank:
+            def draw_conn2(y_top, y_bottom, scale):
+                _line(axes, lead_centre, y_top, lead_centre, y_bottom, colour=INK, width=max(0.7, 1.0 * scale))
+            flow.connector(_TREE_CONNECTOR_IN, draw_conn2)
+
+            def draw_rank(y_top, y_bottom, scale):
+                row_h = _y_in(_TREE_BOX_H_IN * scale)
+                row_gap = _y_in(_TREE_ROW_GAP_IN * scale)
+                col_gap = _x_in(_TREE_COL_GAP_IN * scale)
+                col_w = _x_in(_TREE_BOX_W_IN * scale)
+                row_chunks = [rank[i:i + rank_per_row] for i in range(0, len(rank), rank_per_row)]
+                ry = y_top
+                for row_chunk in row_chunks:
+                    total = len(row_chunk) * col_w + (len(row_chunk) - 1) * col_gap
+                    rx = lead_centre - total / 2
+                    for person in row_chunk:
+                        labels.extend(_tree_box(axes, rx, ry - row_h, col_w, row_h,
+                                                _person_lines(person, role_colour=INK, scale=scale),
+                                                scale, tbc=person.is_tbc))
+                        rx += col_w + col_gap
+                    ry -= row_h + row_gap
+            flow.block(rank_h_in, draw_rank)
+
+        if disciplines:
+            def draw_elbow(y_top, y_bottom, scale):
+                # Reconciles the director level's lead_centre with the
+                # discipline rows' full-width centre -- see the identical
+                # comment in _render_cards.
+                if abs(lead_centre - centre) > 1e-6:
+                    y_mid = (y_top + y_bottom) / 2
+                    _line(axes, lead_centre, y_top, lead_centre, y_mid, colour=INK, width=max(0.7, 1.0 * scale))
+                    _line(axes, lead_centre, y_mid, centre, y_mid, colour=INK, width=max(0.7, 1.0 * scale))
+                    _line(axes, centre, y_mid, centre, y_bottom, colour=INK, width=max(0.7, 1.0 * scale))
+            flow.connector(_TREE_SECTION_GAP_IN + panel_extra_in, draw_elbow)
+
+            for row_index, (chunk, row_h_in) in enumerate(row_infos):
+                def draw_row(y_top, y_bottom, scale, chunk=chunk):
+                    col_w = _x_in(_TREE_BOX_W_IN * scale)
+                    col_gap = _x_in(_TREE_COL_GAP_IN * scale)
+                    total = len(chunk) * col_w + (len(chunk) - 1) * col_gap
+                    x0 = centre - total / 2
+                    centres = [x0 + col_w / 2 + i * (col_w + col_gap) for i in range(len(chunk))]
+                    bus_y = y_top - _y_in(_TREE_CONNECTOR_IN * scale * 0.4)
+                    _line(axes, centre, y_top, centre, bus_y, colour=INK, width=max(0.7, 1.0 * scale))
+                    if len(centres) > 1:
+                        _line(axes, centres[0], bus_y, centres[-1], bus_y, colour=INK,
+                              width=max(0.8, 1.2 * scale))
+                    box_h = _y_in(_TREE_BOX_H_IN * scale)
+                    row_gap = _y_in(_TREE_ROW_GAP_IN * scale)
+                    box_top = bus_y - _y_in(_TREE_CONNECTOR_IN * scale * 0.6)
+                    for i, group in enumerate(chunk):
+                        cx = centres[i]
+                        _line(axes, cx, bus_y, cx, box_top, colour=INK, width=max(0.7, 1.0 * scale))
+                        by = box_top
+                        for person in group.people:
+                            labels.extend(_tree_box(axes, cx - col_w / 2, by - box_h, col_w, box_h,
+                                                    _person_lines(person, role_colour=INK, scale=scale),
+                                                    scale, tbc=person.is_tbc))
+                            by -= box_h + row_gap
+                flow.block(row_h_in, draw_row)
+                if row_index < len(row_infos) - 1:
+                    flow.gap(_TREE_ROW_TO_ROW_IN)
+
+        return flow, row_width_in
+
+    per_row_candidates = _row_candidates(len(model.disciplines)) if model.disciplines else [1]
+    flow, scale, per_row = _solve_scale(build_flow, per_row_candidates)
+    flow.render(CONTENT_TOP, scale)
+
     if model.disciplines:
-        panel_x = min(0.98, director_right + 0.03)
-        panel_w = max(0.16, min(0.28, 1.0 - panel_x - 0.02))
-        panel_row_h = 0.022
-        panel_h = 0.032 + panel_row_h * len(model.disciplines)
-        panel_top = 0.90 - box_h - 0.024
-        _card(axes, panel_x, panel_top - panel_h, panel_w, panel_h, facecolor=CARD_WHITE,
-              edgecolor=ASSURANCE_AMBER, radius=0.006, linewidth=1.2)
-        axes.text(panel_x + panel_w / 2, panel_top - 0.015, "PEER REVIEW", fontsize=6.0,
-                  fontweight="bold", color=ASSURANCE_AMBER, ha="center", va="center", zorder=4)
-        row_y = panel_top - 0.032
-        for group in model.disciplines:
-            reviewer = (group.peer_reviewer or "").strip()
-            tbc = not reviewer
-            labels.append((axes.text(panel_x + 0.012, row_y - panel_row_h / 2, group.name,
-                                     fontsize=5.4, fontweight="bold", color=INK, ha="left",
-                                     va="center", zorder=4), panel_w * 0.5))
-            labels.append((axes.text(panel_x + panel_w - 0.012, row_y - panel_row_h / 2,
-                                     reviewer or "TBC", fontsize=5.4, fontweight="bold",
-                                     color=TBC_RED if tbc else ASSURANCE_AMBER, ha="right",
-                                     va="center", zorder=4), panel_w * 0.42))
-            row_y -= panel_row_h
-        y = min(y, panel_top - panel_h)
+        panel_w = _x_in(_PANEL_W_IN * scale)
+        panel_top = panel_anchor.get("y", CONTENT_TOP - _y_in(director_h_in * scale))
+        panel_x = CONTENT_RIGHT - panel_w
+        _draw_peer_review_panel(axes, model, scale, labels, panel_x, panel_top, _PANEL_W_IN)
 
-    if model.disciplines:
-        gap = 0.020
-        per_row, col_w = _wrap_columns(len(model.disciplines), 0.165, gap, box_w)
-        chunks = [model.disciplines[i:i + per_row]
-                  for i in range(0, len(model.disciplines), per_row)]
-        for chunk_index, chunk in enumerate(chunks):
-            bus_y = y - 0.026
-            if chunk_index == 0:
-                _line(axes, centre, y, centre, bus_y, colour=INK, width=1.0)
-            total = len(chunk) * col_w + (len(chunk) - 1) * gap
-            x = max(0.0, 0.5 - total / 2)
-            centres = []
-            lowest = bus_y
-            for group in chunk:
-                centres.append(x + col_w / 2)
-                box_y = bus_y - 0.024
-                for person in group.people:
-                    labels += _tree_box(axes, x, box_y - box_h, col_w, box_h,
-                                        _person_lines(person, role_colour=INK),
-                                        tbc=person.is_tbc)
-                    box_y -= box_h + 0.012
-                lowest = min(lowest, box_y)
-                x += col_w + gap
-            if len(centres) > 1:
-                _line(axes, min(centres), bus_y, max(centres), bus_y, colour=INK, width=1.2)
-            for column_centre in centres:
-                _line(axes, column_centre, bus_y, column_centre, bus_y - 0.024,
-                      colour=INK, width=1.0)
-            y = lowest - 0.010
-
-    figure = _finalise(figure, axes, y - 0.02)
     for artist, max_frac in labels:
         _fit(figure, artist, max_frac)
     return figure
