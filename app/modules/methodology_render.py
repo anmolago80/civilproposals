@@ -50,6 +50,8 @@ program pickers already make.
 
 from __future__ import annotations
 
+from modules import export_i18n
+
 STYLES = ("matrix", "chevrons", "programme", "spine")
 DEFAULT_STYLE = "matrix"
 
@@ -106,11 +108,12 @@ def stage_carries_hold_point(column: dict) -> bool:
 # shape methodology_pptx.py's four style builders consume.
 # ---------------------------------------------------------------------------
 
-# English defaults -- the sole reader that still needs these as plain
-# constants is render_png() (the live PNG preview), which has no language
-# support yet (Round 3, Part 4b's own territory). build_columns()'s PPTX
-# caller (methodology_pptx.py) passes a real `language` and gets the
-# translated versions via export_i18n instead -- see _legacy_columns() below.
+# English defaults -- used whenever `language` is None, which is what any
+# caller not yet updated to pass a real language gets (the opt-in default
+# every function in this module now follows, since Round 3, Part 4b). A
+# real `language` (from either methodology_pptx.py's PPTX path or
+# render_png()'s PNG-preview path) resolves every string through
+# export_i18n instead -- see _legacy_columns() below.
 _STAGE_HEADERS = [
     "Project Initiation",
     "15% design stage",
@@ -380,7 +383,8 @@ def _is_red_line(line: str) -> bool:
     return is_placeholder(line.strip().lstrip("–").strip())
 
 
-def _bullet_lines(fig, ax, items, max_items, max_frac: float, size: float) -> list[str]:
+def _bullet_lines(fig, ax, items, max_items, max_frac: float, size: float,
+                  language: str | None = None) -> list[str]:
     kept, dropped = _cap_items(items, max_items)
     lines = []
     for item in kept:
@@ -390,7 +394,9 @@ def _bullet_lines(fig, ax, items, max_items, max_frac: float, size: float) -> li
         lines.append(f"– {wrapped[0]}")
         lines.extend(f"   {w}" for w in wrapped[1:])
     if dropped:
-        lines.append(f"+{dropped} more — see full methodology")
+        more_line = (export_i18n.export_t("pptx_deliverables_more_line", language, dropped=dropped)
+                    if language is not None else f"+{dropped} more — see full methodology")
+        lines.append(more_line)
     return lines
 
 
@@ -432,10 +438,14 @@ def _chip_row(ax, x, right, y, labels, fill, text_colour, size=6.5, row_h=0.028)
 
 def render_png(analysis, style: str = DEFAULT_STYLE, stages: list | None = None,
                week_labels: list | None = None, client_name: str = "",
-               project_name: str = "") -> bytes | None:
+               project_name: str = "", language: str | None = None) -> bytes | None:
     """The methodology, in the requested style, as a PNG for the live
     preview. Returns None on any failure -- a missing preview must never
-    take the Draft Responses tab down."""
+    take the Draft Responses tab down.
+
+    `language` defaults to None, which preserves the exact original
+    English-only behaviour for any caller not yet updated to pass a real
+    language -- see the module-level note on the language opt-in pattern."""
     style = style if style in STYLES else DEFAULT_STYLE
     try:
         import io as _io
@@ -444,14 +454,14 @@ def render_png(analysis, style: str = DEFAULT_STYLE, stages: list | None = None,
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
-        columns = build_columns(analysis, stages, week_labels)
+        columns = build_columns(analysis, stages, week_labels, language)
         renderer = {
             "matrix": _render_matrix,
             "chevrons": _render_chevrons,
             "programme": _render_programme,
             "spine": _render_spine,
         }[style]
-        fig = renderer(columns, project_name, client_name)
+        fig = renderer(columns, project_name, client_name, language=language)
         buffer = _io.BytesIO()
         fig.savefig(buffer, format="png", dpi=170, bbox_inches="tight",
                     facecolor="white", edgecolor="none")
@@ -466,7 +476,7 @@ def render_png(analysis, style: str = DEFAULT_STYLE, stages: list | None = None,
 # 1. Boardroom matrix -- classic grid, navy headers, LEFT row labels.
 # ---------------------------------------------------------------------------
 
-def _render_matrix(columns, project_name, client_name):
+def _render_matrix(columns, project_name, client_name, language: str | None = None):
     n = max(len(columns), 1)
     fig_w = 12.0
     fig, ax = _new_figure(fig_w, 6.0)
@@ -478,7 +488,9 @@ def _render_matrix(columns, project_name, client_name):
     col_w = (1 - margin - content_x - (n - 1) * col_gap) / n
 
     y = _TOP
-    ax.text(margin, y, "Our proposed methodology", fontsize=13, fontweight="bold", color=INK,
+    title = (export_i18n.export_t("pptx_methodology_title", language) if language is not None
+             else "Our proposed methodology")
+    ax.text(margin, y, title, fontsize=13, fontweight="bold", color=INK,
             va="top", ha="left")
     if (project_name or "").strip():
         ax.text(margin, y - 0.045, project_name.strip(), fontsize=8, color=MUTED, va="top", ha="left")
@@ -504,12 +516,20 @@ def _render_matrix(columns, project_name, client_name):
     y -= header_h + 0.01
 
     body_size = 5.4
-    rows = [
-        ("KEY TASKS", "tasks", 6, "#EAF0FB"),
-        ("ENGAGEMENT", "engagement", 4, "#F5F8FE"),
-        ("OUTCOME", "outcome", None, "#EFF6F4"),
-        ("DELIVERABLES", "deliverables", 6, "#EFF6F4"),
-    ]
+    if language is not None:
+        rows = [
+            (export_i18n.export_t("pptx_row_key_tasks", language), "tasks", 6, "#EAF0FB"),
+            (export_i18n.export_t("pptx_row_engagement", language), "engagement", 4, "#F5F8FE"),
+            (export_i18n.export_t("pptx_row_outcome", language), "outcome", None, "#EFF6F4"),
+            (export_i18n.export_t("pptx_row_deliverables", language), "deliverables", 6, "#EFF6F4"),
+        ]
+    else:
+        rows = [
+            ("KEY TASKS", "tasks", 6, "#EAF0FB"),
+            ("ENGAGEMENT", "engagement", 4, "#F5F8FE"),
+            ("OUTCOME", "outcome", None, "#EFF6F4"),
+            ("DELIVERABLES", "deliverables", 6, "#EFF6F4"),
+        ]
     body_frac = col_w * 0.92
     for label, key, cap, tint in rows:
         # Content-sized: measure every column's needed line count FIRST, at a
@@ -523,7 +543,7 @@ def _render_matrix(columns, project_name, client_name):
                 lines = [f"– {w}" if j == 0 else f"   {w}"
                         for j, w in enumerate(_wrap(fig, ax, text, body_frac, body_size))]
             else:
-                lines = _bullet_lines(fig, ax, value, cap, body_frac, body_size)
+                lines = _bullet_lines(fig, ax, value, cap, body_frac, body_size, language)
             col_lines.append(lines or [""])
         row_h = max(0.035, max(len(lines) for lines in col_lines) * 0.024 + 0.012)
 
@@ -551,7 +571,7 @@ def _render_matrix(columns, project_name, client_name):
 # 2. Stage chevrons -- arrowed banner per stage, card with chip deliverables.
 # ---------------------------------------------------------------------------
 
-def _render_chevrons(columns, project_name, client_name):
+def _render_chevrons(columns, project_name, client_name, language: str | None = None):
     n = max(len(columns), 1)
     fig_w = 12.0
     fig, ax = _new_figure(fig_w, 6.0)
@@ -561,7 +581,9 @@ def _render_chevrons(columns, project_name, client_name):
     col_w = (1 - 2 * margin - (n - 1) * gap) / n
 
     y = _TOP
-    ax.text(margin, y, "Our proposed methodology" + (f" — {project_name.strip()}" if (project_name or "").strip() else ""),
+    title = (export_i18n.export_t("pptx_methodology_title", language) if language is not None
+             else "Our proposed methodology")
+    ax.text(margin, y, title + (f" — {project_name.strip()}" if (project_name or "").strip() else ""),
             fontsize=12, fontweight="bold", color=INK, va="top", ha="left")
     y -= 0.075
 
@@ -595,7 +617,16 @@ def _render_chevrons(columns, project_name, client_name):
     card_top = y
     body_size = 5.2
     section_frac = col_w * 0.9
-    sections = [("KEY TASKS", "tasks", 4), ("ENGAGEMENT", "engagement", 3), ("OUTCOME", None, None)]
+    if language is not None:
+        sections = [
+            (export_i18n.export_t("pptx_row_key_tasks", language), "tasks", 4),
+            (export_i18n.export_t("pptx_row_engagement", language), "engagement", 3),
+            (export_i18n.export_t("pptx_row_outcome", language), None, None),
+        ]
+        deliverables_label = export_i18n.export_t("pptx_row_deliverables", language)
+    else:
+        sections = [("KEY TASKS", "tasks", 4), ("ENGAGEMENT", "engagement", 3), ("OUTCOME", None, None)]
+        deliverables_label = "DELIVERABLES"
     for i, col in enumerate(columns):
         cx = margin + i * (col_w + gap)
         colour = stage_colour(i)
@@ -606,14 +637,14 @@ def _render_chevrons(columns, project_name, client_name):
             if key is None:
                 lines = _wrap(fig, ax, col["outcome"], section_frac, body_size)
             else:
-                lines = _bullet_lines(fig, ax, col[key], cap, section_frac, body_size)
+                lines = _bullet_lines(fig, ax, col[key], cap, section_frac, body_size, language)
             for ln in lines:
                 red = _is_red_line(ln)
                 ax.text(cx + 0.006, cy, ln, fontsize=5.2, color=RED_TBC if red else INK, va="top", ha="left")
                 cy -= 0.019
             cy -= 0.008
         # Deliverables as tinted chips.
-        ax.text(cx + 0.006, cy, "DELIVERABLES", fontsize=5.4, color=colour, fontweight="bold", va="top", ha="left")
+        ax.text(cx + 0.006, cy, deliverables_label, fontsize=5.4, color=colour, fontweight="bold", va="top", ha="left")
         cy -= 0.024
         kept, dropped = _cap_items(col["deliverables"], 5)
         placeholder = any(is_placeholder(d) for d in kept)
@@ -622,7 +653,9 @@ def _render_chevrons(columns, project_name, client_name):
                        text_colour=RED_TBC if placeholder else "white", size=5.0)
         if dropped:
             cy -= 0.006
-            ax.text(cx + 0.006, cy, f"+{dropped} more — see full methodology", fontsize=4.8,
+            more_line = (export_i18n.export_t("pptx_deliverables_more_line", language, dropped=dropped)
+                        if language is not None else f"+{dropped} more — see full methodology")
+            ax.text(cx + 0.006, cy, more_line, fontsize=4.8,
                     color=MUTED, style="italic", va="top", ha="left")
             cy -= 0.018
         # Card border.
@@ -646,7 +679,7 @@ def _tint_hex(hex_colour: str, amount: float) -> str:
 # 3. Programme-matched columns -- What we do / With you / You receive.
 # ---------------------------------------------------------------------------
 
-def _render_programme(columns, project_name, client_name):
+def _render_programme(columns, project_name, client_name, language: str | None = None):
     n = max(len(columns), 1)
     fig_w = 12.0
     fig, ax = _new_figure(fig_w, 6.0)
@@ -656,7 +689,9 @@ def _render_programme(columns, project_name, client_name):
     col_w = (1 - 2 * margin - (n - 1) * gap) / n
 
     y = _TOP
-    ax.text(margin, y, "Our proposed methodology" + (f" — {project_name.strip()}" if (project_name or "").strip() else ""),
+    title = (export_i18n.export_t("pptx_methodology_title", language) if language is not None
+             else "Our proposed methodology")
+    ax.text(margin, y, title + (f" — {project_name.strip()}" if (project_name or "").strip() else ""),
             fontsize=12, fontweight="bold", color=INK, va="top", ha="left")
     y -= 0.075
 
@@ -690,17 +725,25 @@ def _render_programme(columns, project_name, client_name):
         cy = y - header_h - 0.015
         body_size = 5.0
         section_frac = col_w * 0.9
-        sections = [("WHAT WE DO", "tasks", 4), ("WITH YOU", "engagement", 3)]
+        if language is not None:
+            sections = [
+                (export_i18n.export_t("pptx_row_what_we_do", language), "tasks", 4),
+                (export_i18n.export_t("pptx_row_with_you", language), "engagement", 3),
+            ]
+            you_receive_label = export_i18n.export_t("pptx_row_you_receive", language)
+        else:
+            sections = [("WHAT WE DO", "tasks", 4), ("WITH YOU", "engagement", 3)]
+            you_receive_label = "YOU RECEIVE"
         for label, key, cap in sections:
             ax.text(cx + 0.005, cy, label, fontsize=5.2, color=colour, fontweight="bold", va="top", ha="left")
             cy -= 0.02
-            for ln in _bullet_lines(fig, ax, col[key], cap, section_frac, body_size):
+            for ln in _bullet_lines(fig, ax, col[key], cap, section_frac, body_size, language):
                 red = _is_red_line(ln)
                 ax.text(cx + 0.005, cy, ln, fontsize=5.0, color=RED_TBC if red else INK, va="top", ha="left")
                 cy -= 0.018
             cy -= 0.006
 
-        ax.text(cx + 0.005, cy, "YOU RECEIVE", fontsize=5.2, color=colour, fontweight="bold", va="top", ha="left")
+        ax.text(cx + 0.005, cy, you_receive_label, fontsize=5.2, color=colour, fontweight="bold", va="top", ha="left")
         cy -= 0.022
         kept, dropped = _cap_items(col["deliverables"], 5)
         placeholder = any(is_placeholder(d) for d in kept)
@@ -709,7 +752,9 @@ def _render_programme(columns, project_name, client_name):
                        text_colour=RED_TBC if placeholder else "white", size=4.9)
         if dropped:
             cy -= 0.006
-            ax.text(cx + 0.005, cy, f"+{dropped} more — see full methodology", fontsize=4.6,
+            more_line = (export_i18n.export_t("pptx_deliverables_more_line", language, dropped=dropped)
+                        if language is not None else f"+{dropped} more — see full methodology")
+            ax.text(cx + 0.005, cy, more_line, fontsize=4.6,
                     color=MUTED, style="italic", va="top", ha="left")
             cy -= 0.016
 
@@ -728,7 +773,9 @@ def _render_programme(columns, project_name, client_name):
             gy = y - header_h - 0.055
             ax.add_patch(RegularPolygon((gx, gy), numVertices=4, radius=gap * 0.28,
                                         orientation=0.785398, facecolor="#F97316", edgecolor="white", linewidth=0.6))
-            ax.text(gx, gy - 0.045, "HOLD\nPOINT", fontsize=4.2, color="#F97316", fontweight="bold",
+            hold_point_text = (export_i18n.export_t("pptx_hold_point_diamond", language)
+                               if language is not None else "HOLD\nPOINT")
+            ax.text(gx, gy - 0.045, hold_point_text, fontsize=4.2, color="#F97316", fontweight="bold",
                     ha="center", va="top")
             lowest = min(lowest, gy - 0.09)
 
@@ -739,7 +786,7 @@ def _render_programme(columns, project_name, client_name):
 # 4. Timeline spine -- vertical node per stage, full-width band.
 # ---------------------------------------------------------------------------
 
-def _render_spine(columns, project_name, client_name):
+def _render_spine(columns, project_name, client_name, language: str | None = None):
     fig_w = 12.0
     fig, ax = _new_figure(fig_w, 7.5)
 
@@ -749,7 +796,9 @@ def _render_spine(columns, project_name, client_name):
     band_right = 1 - margin
 
     y = _TOP
-    ax.text(margin, y, "Our proposed methodology" + (f" — {project_name.strip()}" if (project_name or "").strip() else ""),
+    title = (export_i18n.export_t("pptx_methodology_title", language) if language is not None
+             else "Our proposed methodology")
+    ax.text(margin, y, title + (f" — {project_name.strip()}" if (project_name or "").strip() else ""),
             fontsize=12, fontweight="bold", color=INK, va="top", ha="left")
     y -= 0.06
 
@@ -769,7 +818,7 @@ def _render_spine(columns, project_name, client_name):
         if col.get("chevron") and not is_placeholder(col["chevron"]):
             label_lines.append(col["chevron"])
         outcome_lines = _wrap(fig, ax, col["outcome"], label_frac, 4.9)
-        task_lines = _bullet_lines(fig, ax, col["tasks"], 5, tasks_frac, 4.8)
+        task_lines = _bullet_lines(fig, ax, col["tasks"], 5, tasks_frac, 4.8, language)
         deliv_kept, deliv_dropped = _cap_items(col["deliverables"], 5)
 
         content_lines = max(len(label_lines) + len(outcome_lines), len(task_lines),
@@ -791,23 +840,29 @@ def _render_spine(columns, project_name, client_name):
                     color=RED_TBC if is_placeholder(col["outcome"]) else MUTED, va="top", ha="left")
             ty -= 0.018
 
+        what_we_do_label = (export_i18n.export_t("pptx_row_what_we_do", language) if language is not None
+                            else "WHAT WE DO")
         ty = y - 0.014
-        ax.text(tasks_x, ty, "WHAT WE DO", fontsize=4.9, color=colour, fontweight="bold", va="top", ha="left")
+        ax.text(tasks_x, ty, what_we_do_label, fontsize=4.9, color=colour, fontweight="bold", va="top", ha="left")
         ty -= 0.02
         for ln in task_lines:
             red = _is_red_line(ln)
             ax.text(tasks_x, ty, ln, fontsize=4.8, color=RED_TBC if red else INK, va="top", ha="left")
             ty -= 0.017
 
+        what_you_receive_label = (export_i18n.export_t("pptx_row_what_you_receive", language)
+                                  if language is not None else "WHAT YOU RECEIVE")
         ty = y - 0.014
-        ax.text(deliv_x, ty, "WHAT YOU RECEIVE", fontsize=4.9, color=colour, fontweight="bold", va="top", ha="left")
+        ax.text(deliv_x, ty, what_you_receive_label, fontsize=4.9, color=colour, fontweight="bold", va="top", ha="left")
         ty -= 0.022
         _deliv_placeholder = any(is_placeholder(d) for d in deliv_kept)
         _chip_row(ax, deliv_x, deliv_x + deliv_w, ty, deliv_kept,
                  fill="#FCE8E8" if _deliv_placeholder else _tint_hex(colour, 0.8),
                  text_colour=RED_TBC if _deliv_placeholder else INK, size=4.6, row_h=0.024)
         if deliv_dropped:
-            ax.text(deliv_x, ty - 0.05, f"+{deliv_dropped} more — see full methodology", fontsize=4.4,
+            more_line = (export_i18n.export_t("pptx_deliverables_more_line", language, dropped=deliv_dropped)
+                        if language is not None else f"+{deliv_dropped} more — see full methodology")
+            ax.text(deliv_x, ty - 0.05, more_line, fontsize=4.4,
                     color=MUTED, style="italic", va="top", ha="left")
 
         from matplotlib.patches import Rectangle as _R

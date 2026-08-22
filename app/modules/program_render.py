@@ -37,6 +37,8 @@ from __future__ import annotations
 import io
 from dataclasses import dataclass, field
 
+from modules import export_i18n
+
 # ---------------------------------------------------------------------------
 # Palette
 # ---------------------------------------------------------------------------
@@ -132,7 +134,8 @@ def build_model(program_schedule: dict | None,
                 start_date=None,
                 analysis=None,
                 project_name: str = "",
-                client_name: str = "") -> ProgramModel:
+                client_name: str = "",
+                language: str | None = None) -> ProgramModel:
     """Normalise everything the four renderers need. Pure derivation -- see
     the module note on what is never invented."""
     model = ProgramModel(project_name=project_name or "", client_name=client_name or "")
@@ -153,14 +156,16 @@ def build_model(program_schedule: dict | None,
         from datetime import timedelta
         current = None
         for index in range(len(model.week_labels)):
-            month = (start_date + timedelta(weeks=index)).strftime("%B").upper()
+            week_date = start_date + timedelta(weeks=index)
+            month = export_i18n.export_month_name(week_date.month, language).upper()
             if current and current[0] == month:
                 model.month_bands[-1] = (month, current[1], index + 1)
                 current = (month, current[1], index + 1)
             else:
                 model.month_bands.append((month, index + 1, index + 1))
                 current = (month, index + 1, index + 1)
-        model.start_date_text = f"{start_date.day} {start_date.strftime('%b %Y')}"
+        month_abbr = export_i18n.export_month_name(start_date.month, language, abbreviated=True)
+        model.start_date_text = f"{start_date.day} {month_abbr} {start_date.year}"
 
     # Stage assignment: the stage whose week range contains an item's start.
     stages = [s for s in (methodology_stages or []) if getattr(s, "name", "")]
@@ -190,10 +195,14 @@ def build_model(program_schedule: dict | None,
         activities = [str(a).lower() for a in (getattr(stage, "engagement_activities", None) or [])]
         holds = [a for a in activities if "hold point" in a and a.strip().upper() != "TBC"]
         if end and holds:
-            model.milestones.append(Milestone("Client hold point", int(end)))
+            hold_label = (export_i18n.export_t("program_milestone_client_hold_point", language)
+                         if language is not None else "Client hold point")
+            model.milestones.append(Milestone(hold_label, int(end)))
     submission_week = _submission_week(analysis, start_date, len(model.week_labels))
     if submission_week:
-        model.milestones.append(Milestone("Submission", submission_week))
+        submission_label = (export_i18n.export_t("program_milestone_submission", language)
+                            if language is not None else "Submission")
+        model.milestones.append(Milestone(submission_label, submission_week))
 
     return model
 
@@ -298,8 +307,12 @@ MAX_SCALE = 1.25
 
 
 def render_png(model: ProgramModel, style: str = DEFAULT_STYLE,
-               theme_accent: str | None = None) -> bytes | None:
+               theme_accent: str | None = None, language: str | None = None) -> bytes | None:
     """The program as a PNG, in the requested style.
+
+    `language` defaults to None, which preserves the exact original
+    English-only behaviour for any caller not yet updated to pass a real
+    language -- see the module-level note on the language opt-in pattern.
 
     Returns None on any failure -- the callers all fall back to something
     that still communicates the program, never to nothing.
@@ -320,7 +333,7 @@ def render_png(model: ProgramModel, style: str = DEFAULT_STYLE,
             "table": _render_table,
             "timeline": _render_timeline,
         }[style]
-        fig = renderer(model, theme_accent or BAR_BLUE)
+        fig = renderer(model, theme_accent or BAR_BLUE, language=language)
         buffer = io.BytesIO()
         # No bbox_inches="tight": that silently re-crops the saved PNG back
         # to the drawn content regardless of the figure's declared size --
@@ -629,9 +642,12 @@ def _draw_milestones(ax, model: ProgramModel, left: float, right: float,
                 color=MILESTONE_ORANGE, ha=align, va="top")
 
 
-def _draw_title(ax, model: ProgramModel, total_h_in: float, subtitle: str = ""):
+def _draw_title(ax, model: ProgramModel, total_h_in: float, subtitle: str = "",
+                language: str | None = None):
     top_y = total_h_in - _MARGIN_IN
-    ax.text(CONTENT_LEFT_IN, top_y, "Delivery program", fontsize=15, fontweight="bold",
+    title = (export_i18n.export_t("pptx_program_title", language) if language is not None
+             else "Delivery program")
+    ax.text(CONTENT_LEFT_IN, top_y, title, fontsize=15, fontweight="bold",
             color="#111827", ha="left", va="top")
     if subtitle:
         ax.text(CONTENT_LEFT_IN, top_y - 0.24, subtitle, fontsize=6.6, color=MUTED, ha="left", va="top")
@@ -641,13 +657,20 @@ def _draw_title(ax, model: ProgramModel, total_h_in: float, subtitle: str = ""):
                 color="#6B7280", ha="right", va="top")
 
 
-def _activity_legend(model: ProgramModel, accent: str) -> list[tuple[str, str]]:
+def _activity_legend(model: ProgramModel, accent: str,
+                     language: str | None = None) -> list[tuple[str, str]]:
     """A legend key for a mark that isn't on the chart is noise -- and the
     milestone key is the same orange as the third stage colour, so an unused
     one actively misleads."""
-    entries = [(accent, "Scheduled activity")]
+    if language is not None:
+        scheduled_label = export_i18n.export_t("pptx_program_legend_scheduled", language)
+        milestone_label = export_i18n.export_t("pptx_program_legend_milestone", language)
+    else:
+        scheduled_label = "Scheduled activity"
+        milestone_label = "Milestone / hold point"
+    entries = [(accent, scheduled_label)]
     if model.milestones:
-        entries.append((MILESTONE_ORANGE, "Milestone / hold point"))
+        entries.append((MILESTONE_ORANGE, milestone_label))
     return entries
 
 
@@ -660,7 +683,13 @@ def _draw_legend(ax, entries: list[tuple[str, str]], y: float, x: float, scale: 
     swatch = 0.13 * scale
     pt = max(_LEGEND_PT_MIN, _LEGEND_PT_REF * scale)
     for colour, label in entries:
-        if label.lower().startswith("milestone"):
+        # Detect the milestone entry by its colour, not its (possibly
+        # translated) label text -- a string-prefix check on the label
+        # silently stopped matching once _activity_legend() started
+        # routing "Milestone / hold point" through export_i18n for a
+        # Spanish project, which would have drawn a square swatch instead
+        # of the diamond that actually appears on the chart.
+        if colour == MILESTONE_ORANGE:
             ax.plot([cursor + swatch * 0.5], [y], marker="D", markersize=max(4.0, 5.0 * scale),
                     color=MILESTONE_ORANGE)
         else:
@@ -682,13 +711,15 @@ def _draw_legend(ax, entries: list[tuple[str, str]], y: float, x: float, scale: 
         cursor += swatch * 1.7 + width_in + 0.14 * max(scale, 0.6)
 
 
-def _empty_figure(model: ProgramModel):
+def _empty_figure(model: ProgramModel, language: str | None = None):
     figure, axes = _new_page(PAGE_H_IN)
-    _draw_title(axes, model, PAGE_H_IN)
+    _draw_title(axes, model, PAGE_H_IN, language=language)
     # Sits just under the title rather than mid-canvas: a placeholder that
     # floats in a half-page of white reads as a broken image, which is the
     # opposite of the point -- it has to read as a note to the writer.
-    axes.text(PAGE_W_IN / 2, PAGE_H_IN * 0.60, EMPTY_NOTE, fontsize=11, color="#C00000",
+    note = (export_i18n.export_t("program_preview_empty_note", language) if language is not None
+           else EMPTY_NOTE)
+    axes.text(PAGE_W_IN / 2, PAGE_H_IN * 0.60, note, fontsize=11, color="#C00000",
              style="italic", ha="center", va="center", wrap=True)
     return figure
 
@@ -718,9 +749,9 @@ _GANTT_MILESTONE_H_REF = 0.42
 _GANTT_LEGEND_H_REF = 0.34
 
 
-def _render_gantt(model: ProgramModel, accent: str):
+def _render_gantt(model: ProgramModel, accent: str, language: str | None = None):
     if model.is_empty:
-        return _empty_figure(model)
+        return _empty_figure(model, language=language)
     from matplotlib.patches import Rectangle
 
     n = len(model.items)
@@ -732,7 +763,7 @@ def _render_gantt(model: ProgramModel, accent: str):
     scale, total_h_in, avail_h_in = _fit_height(natural_h)
 
     figure, axes = _new_page(total_h_in)
-    _draw_title(axes, model, total_h_in)
+    _draw_title(axes, model, total_h_in, language=language)
 
     label_col_w = _GANTT_LABEL_COL_REF_IN * scale
     left_in = CONTENT_LEFT_IN + label_col_w
@@ -761,15 +792,19 @@ def _render_gantt(model: ProgramModel, accent: str):
                 axes.add_patch(Rectangle((CONTENT_LEFT_IN, y_bottom), right_in - CONTENT_LEFT_IN,
                                          y_top - y_bottom, facecolor=ROW_BAND, linewidth=0, zorder=0))
             pt = max(_ROW_LABEL_PT_MIN, _ROW_LABEL_PT_REF * scale)
-            axes.text(CONTENT_LEFT_IN, centre_y, item.label, fontsize=pt, fontweight="bold",
+            row_label = (item.label or (export_i18n.export_t("export_untitled_scope_item", language)
+                        if language is not None else item.label))
+            axes.text(CONTENT_LEFT_IN, centre_y, row_label, fontsize=pt, fontweight="bold",
                      color=INK, ha="left", va="center")
             labels.append((axes.texts[-1], _fw(label_col_w - 0.16 * scale)))
             x0 = left_in + (item.start_week - 1) * week_w_in
             x1 = left_in + item.end_week * week_w_in
             bar_h = (y_top - y_bottom) * 0.45
             bar_pt = max(_BAR_LABEL_PT_MIN, _BAR_LABEL_PT_REF * scale)
+            bar_text = (export_i18n.export_t("pptx_duration_weeks_short", language, weeks=item.weeks)
+                       if language is not None else f"{item.weeks} wk")
             _rounded_bar(axes, x0 + 0.02 * scale, x1 - 0.02 * scale, centre_y, bar_h, accent,
-                        f"{item.weeks} wk", fontsize=bar_pt)
+                        bar_text, fontsize=bar_pt)
             labels.append((axes.texts[-1], _fw(max(0.05, x1 - x0 - 0.06 * scale))))
             bounds["grid_bottom"] = y_bottom
         flow.block(_GANTT_ROW_H_REF, draw_row)
@@ -792,7 +827,7 @@ def _render_gantt(model: ProgramModel, accent: str):
     if has_ms:
         _draw_milestones(axes, model, left_in, right_in, bounds["grid_top"], bounds["grid_bottom"],
                          bounds["ms_y"] - 0.05 * scale, scale)
-    _draw_legend(axes, _activity_legend(model, accent), bounds["legend_y"] - 0.06 * scale,
+    _draw_legend(axes, _activity_legend(model, accent, language), bounds["legend_y"] - 0.06 * scale,
                 CONTENT_LEFT_IN, scale)
 
     for artist, max_frac in labels:
@@ -816,9 +851,9 @@ _SWIM_MILESTONE_H_REF = 0.42
 _SWIM_LEGEND_H_REF = 0.34
 
 
-def _render_swimlanes(model: ProgramModel, accent: str):
+def _render_swimlanes(model: ProgramModel, accent: str, language: str | None = None):
     if model.is_empty:
-        return _empty_figure(model)
+        return _empty_figure(model, language=language)
     from matplotlib.patches import Rectangle
 
     grouped: list[tuple[int | None, list[ProgramItem]]] = []
@@ -838,7 +873,7 @@ def _render_swimlanes(model: ProgramModel, accent: str):
     scale, total_h_in, avail_h_in = _fit_height(natural_h)
 
     figure, axes = _new_page(total_h_in)
-    _draw_title(axes, model, total_h_in)
+    _draw_title(axes, model, total_h_in, language=language)
 
     label_col_w = _SWIM_LABEL_COL_REF_IN * scale
     left_in = CONTENT_LEFT_IN + label_col_w
@@ -872,7 +907,9 @@ def _render_swimlanes(model: ProgramModel, accent: str):
             tint = tuple(c + (1 - c) * 0.95 for c in rgb)
             axes.add_patch(Rectangle((CONTENT_LEFT_IN, y_top - member_h), right_in - CONTENT_LEFT_IN,
                                      member_h, facecolor=tint, linewidth=0, zorder=0))
-            name = (model.stages[stage_index] if stage_index is not None else "Unassigned").upper()
+            unassigned_label = (export_i18n.export_t("pptx_unassigned_stage_label", language)
+                               if language is not None else "Unassigned")
+            name = (model.stages[stage_index] if stage_index is not None else unassigned_label).upper()
             pt = max(_LANE_PT_MIN, _LANE_PT_REF * scale)
             axes.text(CONTENT_LEFT_IN + 0.05 * scale, (y_top + y_bottom) / 2, name, fontsize=pt,
                      fontweight="bold", color=colour, ha="left", va="center")
@@ -883,15 +920,19 @@ def _render_swimlanes(model: ProgramModel, accent: str):
             def draw_row(y_top, y_bottom, scale, item=item, colour=colour):
                 centre_y = (y_top + y_bottom) / 2
                 pt = max(_ROW_LABEL_PT_MIN, _ROW_LABEL_PT_REF * 0.92 * scale)
-                axes.text(CONTENT_LEFT_IN + 0.10 * scale, centre_y, item.label, fontsize=pt,
+                row_label = (item.label or (export_i18n.export_t("export_untitled_scope_item", language)
+                            if language is not None else item.label))
+                axes.text(CONTENT_LEFT_IN + 0.10 * scale, centre_y, row_label, fontsize=pt,
                          fontweight="bold", color=INK, ha="left", va="center")
                 labels.append((axes.texts[-1], _fw(label_col_w - 0.24 * scale)))
                 x0 = left_in + (item.start_week - 1) * week_w_in
                 x1 = left_in + item.end_week * week_w_in
                 bar_h = (y_top - y_bottom) * 0.48
                 bar_pt = max(_BAR_LABEL_PT_MIN, _BAR_LABEL_PT_REF * scale)
+                bar_text = (export_i18n.export_t("pptx_duration_weeks_short", language, weeks=item.weeks)
+                           if language is not None else f"{item.weeks} wk")
                 _rounded_bar(axes, x0 + 0.02 * scale, x1 - 0.02 * scale, centre_y, bar_h, colour,
-                            f"{item.weeks} wk", fontsize=bar_pt)
+                            bar_text, fontsize=bar_pt)
                 labels.append((axes.texts[-1], _fw(max(0.05, x1 - x0 - 0.06 * scale))))
                 bounds["grid_bottom"] = y_bottom
             flow.block(_SWIM_ROW_H_REF, draw_row)
@@ -920,7 +961,9 @@ def _render_swimlanes(model: ProgramModel, accent: str):
     legend = [(STAGE_COLOURS[i % len(STAGE_COLOURS)], name)
               for i, name in enumerate(model.stages)]
     if has_ms:
-        legend.append((MILESTONE_ORANGE, "Milestone"))
+        milestone_legend_label = (export_i18n.export_t("pptx_milestone_legend", language)
+                                  if language is not None else "Milestone")
+        legend.append((MILESTONE_ORANGE, milestone_legend_label))
     _draw_legend(axes, legend, bounds["legend_y"] - 0.06 * scale, CONTENT_LEFT_IN, scale)
 
     for artist, max_frac in labels:
@@ -940,9 +983,9 @@ _TABLE_LEGEND_H_REF = 0.32
 _TABLE_COLUMNS_FRAC = (0.0, 0.40, 0.52, 0.63, 0.73)   # fractions of AVAIL_W_IN
 
 
-def _render_table(model: ProgramModel, accent: str):
+def _render_table(model: ProgramModel, accent: str, language: str | None = None):
     if model.is_empty:
-        return _empty_figure(model)
+        return _empty_figure(model, language=language)
 
     n = len(model.items)
     # Fit the header/legend chrome the normal way -- at the table's natural
@@ -966,16 +1009,31 @@ def _render_table(model: ProgramModel, accent: str):
     row_h = min(_TABLE_ROW_H_MAX_IN, remaining_for_rows / n) if n else 0.0
 
     figure, axes = _new_page(total_h_in)
-    _draw_title(axes, model, total_h_in)
+    _draw_title(axes, model, total_h_in, language=language)
     content_top_in = total_h_in - _MARGIN_IN - _TITLE_BAND_IN
 
     columns = [CONTENT_LEFT_IN + f * AVAIL_W_IN for f in _TABLE_COLUMNS_FRAC]
     right_in = CONTENT_RIGHT_IN
 
     def _week_text(week: int) -> str:
-        label = model.week_labels[week - 1] if week - 1 < len(model.week_labels) else f"Wk {week}"
+        if week - 1 < len(model.week_labels):
+            label = model.week_labels[week - 1]
+        else:
+            label = (export_i18n.export_t("pptx_week_number_short", language, week=week)
+                     if language is not None else f"Wk {week}")
         date_text = model.week_dates[week - 1] if week - 1 < len(model.week_dates) else ""
         return f"{label} · {date_text}" if date_text else label
+
+    if language is not None:
+        header_labels = [
+            export_i18n.export_t("export_table_header_scope_item", language).upper(),
+            export_i18n.export_t("export_table_header_commence", language).upper(),
+            export_i18n.export_t("export_table_header_complete", language).upper(),
+            export_i18n.export_t("export_table_header_duration", language).upper(),
+            export_i18n.export_t("program_table_header_timeline", language).upper(),
+        ]
+    else:
+        header_labels = ["SCOPE ITEM", "COMMENCE", "COMPLETE", "DURATION", "TIMELINE"]
 
     name_labels: list[tuple[object, float]] = []
     bounds: dict[str, float] = {}
@@ -983,7 +1041,7 @@ def _render_table(model: ProgramModel, accent: str):
 
     def draw_header(y_top, y_bottom, scale):
         head_pt = max(6.5, 9.0 * scale)
-        for label, x in zip(["SCOPE ITEM", "COMMENCE", "COMPLETE", "DURATION", "TIMELINE"], columns):
+        for label, x in zip(header_labels, columns):
             axes.text(x, y_top, label, fontsize=head_pt, fontweight="bold", color=MUTED,
                      ha="left", va="top")
         rule_y = y_bottom + (y_top - y_bottom) * 0.12
@@ -1002,14 +1060,22 @@ def _render_table(model: ProgramModel, accent: str):
             centre_y = (y_top + y_bottom) / 2
             name_pt = max(_ROW_LABEL_PT_MIN, _ROW_LABEL_PT_REF * scale)
             cell_pt = max(6.0, 9.0 * scale)
-            axes.text(columns[0], centre_y, item.label, fontsize=name_pt, fontweight="bold",
+            row_label = (item.label or (export_i18n.export_t("export_untitled_scope_item", language)
+                        if language is not None else item.label))
+            axes.text(columns[0], centre_y, row_label, fontsize=name_pt, fontweight="bold",
                      color=INK, ha="left", va="center")
             name_labels.append((axes.texts[-1], _fw(columns[1] - columns[0] - 0.08)))
             axes.text(columns[1], centre_y, _week_text(item.start_week), fontsize=cell_pt,
                      color="#3C4657", ha="left", va="center")
             axes.text(columns[2], centre_y, _week_text(item.end_week), fontsize=cell_pt,
                      color="#3C4657", ha="left", va="center")
-            axes.text(columns[3], centre_y, f"{item.weeks} week{'s' if item.weeks != 1 else ''}",
+            if language is not None:
+                weeks_key = ("pptx_duration_weeks_long_singular" if item.weeks == 1
+                            else "pptx_duration_weeks_long_plural")
+                duration_text = export_i18n.export_t(weeks_key, language, weeks=item.weeks)
+            else:
+                duration_text = f"{item.weeks} week{'s' if item.weeks != 1 else ''}"
+            axes.text(columns[3], centre_y, duration_text,
                      fontsize=cell_pt, color="#3C4657", ha="left", va="center")
             track_l, track_r = columns[4], right_in
             track_h = max(0.09, 0.11 * scale)
@@ -1038,11 +1104,17 @@ def _render_table(model: ProgramModel, accent: str):
     flow.render(content_top_in, scale, avail_h_in)
 
     legend_y = bounds["legend_y"] - 0.06 * scale
-    _draw_legend(axes, [(accent, "Scheduled duration")], legend_y, CONTENT_LEFT_IN, scale)
+    duration_legend_label = (export_i18n.export_t("program_table_legend_scheduled_duration", language)
+                             if language is not None else "Scheduled duration")
+    _draw_legend(axes, [(accent, duration_legend_label)], legend_y, CONTENT_LEFT_IN, scale)
     if model.start_date_text:
-        axes.text(CONTENT_LEFT_IN + 2.2 * scale, legend_y,
-                 f"Program anchored to an anticipated commencement of {model.start_date_text} "
-                 f"— dates shift with the actual award date.",
+        if language is not None:
+            anchored_note = export_i18n.export_t(
+                "export_program_anchored_note", language, start_date=model.start_date_text)
+        else:
+            anchored_note = (f"Program anchored to an anticipated commencement of "
+                             f"{model.start_date_text} — dates shift with the actual award date.")
+        axes.text(CONTENT_LEFT_IN + 2.2 * scale, legend_y, anchored_note,
                  fontsize=max(6.0, 8.0 * scale), fontweight="bold", color="#B6BCC7",
                  ha="left", va="center")
 
@@ -1061,9 +1133,9 @@ _TL_MILESTONE_H_REF = 0.42
 _TL_LEGEND_H_REF = 0.34
 
 
-def _render_timeline(model: ProgramModel, accent: str):
+def _render_timeline(model: ProgramModel, accent: str, language: str | None = None):
     if model.is_empty:
-        return _empty_figure(model)
+        return _empty_figure(model, language=language)
 
     n = len(model.items)
     has_ms = bool(model.milestones)
@@ -1076,13 +1148,15 @@ def _render_timeline(model: ProgramModel, accent: str):
     scale, total_h_in, avail_h_in = _fit_height(natural_h)
 
     figure, axes = _new_page(total_h_in)
-    _draw_title(axes, model, total_h_in)
+    _draw_title(axes, model, total_h_in, language=language)
 
     left_in = CONTENT_LEFT_IN
     right_in = CONTENT_RIGHT_IN
     content_top_in = total_h_in - _MARGIN_IN - _TITLE_BAND_IN
 
     _, week_w_in = _week_geometry(model, left_in, right_in)
+    untitled_label = (export_i18n.export_t("export_untitled_scope_item", language)
+                      if language is not None else "[UNTITLED SCOPE ITEM]")
     labels: list[tuple[object, float]] = []
     bounds: dict[str, float] = {}
     flow = _VFlow()
@@ -1116,7 +1190,7 @@ def _render_timeline(model: ProgramModel, accent: str):
             bar_h = (y_top - y_bottom) * 0.60
             pt = max(_BAR_LABEL_PT_MIN, _BAR_LABEL_PT_REF * scale + 0.5)
             _rounded_bar(axes, x0 + 0.02 * scale, x1 - 0.02 * scale, centre_y, bar_h, accent,
-                        item.label or "[UNTITLED SCOPE ITEM]", fontsize=pt, label_align="left",
+                        item.label or untitled_label, fontsize=pt, label_align="left",
                         shadow=True)
             # The label lives INSIDE its bar, so it has to fit that bar --
             # reserve the left inset the label starts at (height * 0.55) plus
@@ -1143,7 +1217,7 @@ def _render_timeline(model: ProgramModel, accent: str):
     if has_ms:
         _draw_milestones(axes, model, left_in, right_in, bounds["grid_top"], bounds["grid_bottom"],
                          bounds["ms_y"] - 0.05 * scale, scale)
-    _draw_legend(axes, _activity_legend(model, accent), bounds["legend_y"] - 0.06 * scale,
+    _draw_legend(axes, _activity_legend(model, accent, language), bounds["legend_y"] - 0.06 * scale,
                 CONTENT_LEFT_IN, scale)
 
     for artist, max_frac in labels:

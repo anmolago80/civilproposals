@@ -187,6 +187,13 @@ _EN: dict[str, str] = {
     "pptx_insert_project_name": "[Insert project name]",
     "pptx_program_legend_scheduled": "Scheduled activity",
     "pptx_program_legend_milestone": "Milestone / hold point",
+    # Round 3, Part 4b: milestone labels program_render.build_model() derives
+    # itself (a client hold point from the methodology stages, a submission
+    # milestone from the tender's deadline) -- shared by BOTH the PPTX export
+    # and the PNG preview, so these were English regardless of
+    # output_language until this round.
+    "program_milestone_client_hold_point": "Client hold point",
+    "program_milestone_submission": "Submission",
     "pptx_program_empty_note": (
         "[NO PROGRAM ENTERED -- build the delivery program in the Fee Estimate tab, then "
         "re-download this PowerPoint]"
@@ -226,6 +233,24 @@ _EN: dict[str, str] = {
     "pptx_confirm_title": "[CONFIRM TITLE]",
     "pptx_role_lead_label": "{role} Lead",
     "pptx_client_role_with_name": "Client · {name}",
+
+    # -- Round 3, Part 4b: the live PNG previews (org_chart_render.py /
+    # program_render.py / methodology_render.py's render_png(), shown in
+    # the app's own Draft Responses / Team & Resourcing / Fees & Program
+    # tabs) had ZERO language support -- a matplotlib-drawn parallel to the
+    # PPTX builders' own scaffolding, with the identical bug. Most of the
+    # PPTX keys above are reused verbatim since the English wording matches
+    # exactly; the two below are preview-specific text that has no PPTX
+    # twin (a live preview says "re-generate", a downloaded file says
+    # "re-download"). --
+    "org_chart_preview_empty_note": (
+        "[NO TEAM ASSIGNED -- add the management roles and discipline leads in the "
+        "Team & Resourcing tab, then re-generate this]"
+    ),
+    "program_preview_empty_note": (
+        "[NO PROGRAM ENTERED -- build the delivery program in the Fees & Program tab, "
+        "then re-generate this]"
+    ),
 
     # -- Round 3, Part 2: program_pptx.py's swimlanes-style-specific legend
     # text and stage fallback (the shared _activity_legend() helper was
@@ -351,6 +376,11 @@ _EN: dict[str, str] = {
     "export_table_header_commence": "Commence",
     "export_table_header_complete": "Complete",
     "export_table_header_duration": "Duration",
+    # Round 3, Part 4b: the PNG preview's "Formal table" style has its own
+    # inline timeline-bar column and legend, not present in the PPTX table
+    # slide (which has no room for it) -- new keys, no PPTX equivalent to reuse.
+    "program_table_header_timeline": "Timeline",
+    "program_table_legend_scheduled_duration": "Scheduled duration",
     "export_program_anchored_note": (
         "Program anchored to an anticipated commencement of {start_date} -- dates shift with "
         "the actual award date."
@@ -578,6 +608,8 @@ _ES: dict[str, str] = {
     "pptx_insert_project_name": "[Insertar nombre del proyecto]",
     "pptx_program_legend_scheduled": "Actividad programada",
     "pptx_program_legend_milestone": "Hito / punto de espera",
+    "program_milestone_client_hold_point": "Punto de espera del cliente",
+    "program_milestone_submission": "Presentación",
     "pptx_program_empty_note": (
         "[SIN PROGRAMA INGRESADO -- construya el programa de ejecución en la pestaña "
         "Estimación de Honorarios, luego vuelva a descargar este PowerPoint]"
@@ -611,6 +643,15 @@ _ES: dict[str, str] = {
     "pptx_confirm_title": "[CONFIRMAR CARGO]",
     "pptx_role_lead_label": "Líder de {role}",
     "pptx_client_role_with_name": "Cliente · {name}",
+
+    "org_chart_preview_empty_note": (
+        "[SIN EQUIPO ASIGNADO -- agregue los roles de gestión y los líderes de disciplina "
+        "en la pestaña Equipo y Recursos, luego vuelva a generar esto]"
+    ),
+    "program_preview_empty_note": (
+        "[SIN PROGRAMA INGRESADO -- construya el programa de ejecución en la pestaña "
+        "Honorarios y Programa, luego vuelva a generar esto]"
+    ),
 
     "pptx_milestone_legend": "Hito",
     "pptx_unassigned_stage_label": "Sin asignar",
@@ -732,6 +773,8 @@ _ES: dict[str, str] = {
     "export_table_header_commence": "Inicio",
     "export_table_header_complete": "Finalización",
     "export_table_header_duration": "Duración",
+    "program_table_header_timeline": "Cronograma",
+    "program_table_legend_scheduled_duration": "Duración programada",
     "export_program_anchored_note": (
         "El programa está anclado a un inicio previsto el {start_date} -- las fechas cambian "
         "según la fecha real de adjudicación."
@@ -843,6 +886,47 @@ PLACEHOLDER_PREFIXES: dict[str, dict[str, str]] = {
 ALL_PLACEHOLDER_PREFIXES: tuple[str, ...] = tuple(
     prefix for lang_map in PLACEHOLDER_PREFIXES.values() for prefix in lang_map.values()
 )
+
+# Round 3, Part 4b: program_render.build_model() derives the delivery
+# program's month bands with datetime.strftime("%B"), which always returns
+# the ENGLISH month name regardless of output_language (it follows the
+# server's C locale, not the project's language) -- a Spanish "Modern
+# timeline" style program silently showed "JANUARY"/"FEBRUARY" bands no
+# matter what. A fixed lookup table sidesteps strftime's locale dependence
+# entirely rather than trying to get a Spanish locale installed/selected
+# server-side for one string.
+MONTH_NAMES: dict[str, list[str]] = {
+    "en": ["January", "February", "March", "April", "May", "June",
+          "July", "August", "September", "October", "November", "December"],
+    "es": ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+          "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"],
+}
+
+# Same strftime-locale problem as MONTH_NAMES above, for the abbreviated
+# form program_render.py's start_date_text uses (e.g. "15 Aug 2026") -- that
+# string is then spliced, unmodified, into export_program_anchored_note's
+# ES sentence by both program_pptx.py and export_docx.py, so an unfixed
+# English abbreviation here leaks into an otherwise-Spanish sentence even
+# though the surrounding template is correctly translated.
+MONTH_NAMES_ABBR: dict[str, list[str]] = {
+    "en": ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+    "es": ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
+          "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"],
+}
+
+
+def export_month_name(month_number: int, language: str | None, abbreviated: bool = False) -> str:
+    """The localized name of `month_number` (1-12). `language=None` (the
+    opt-in default used throughout this module's callers) resolves to
+    English, matching the un-migrated behaviour every other function here
+    falls back to. An out-of-range month number returns ""."""
+    lang = (language or "en").strip().lower()[:2]
+    table = MONTH_NAMES_ABBR if abbreviated else MONTH_NAMES
+    names = table.get(lang, table["en"])
+    if 1 <= month_number <= 12:
+        return names[month_number - 1]
+    return ""
 
 
 def placeholder_marker(detail: str, language: str | None = None, kind: str = "tbc") -> str:

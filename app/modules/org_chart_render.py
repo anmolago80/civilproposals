@@ -63,6 +63,8 @@ from __future__ import annotations
 import io
 from dataclasses import dataclass, field
 
+from modules import export_i18n
+
 # ---------------------------------------------------------------------------
 # Palette
 # ---------------------------------------------------------------------------
@@ -207,7 +209,7 @@ def build_model(resource_plan: list | None, client_name: str = "", project_name:
     resolves all of them through export_i18n instead -- Round 3, Part 2,
     since an untitled support member, a discipline lead, and the client's
     own box are all everyday, not edge-case, states."""
-    from modules import export_i18n, resourcing
+    from modules import resourcing
 
     model = OrgModel(client_name=(client_name or "").strip(),
                      project_name=(project_name or "").strip(),
@@ -293,8 +295,12 @@ def effective_style(model: OrgModel, style: str) -> str:
 
 
 def render_png(model: OrgModel, style: str = DEFAULT_STYLE,
-               theme_accent: str | None = None) -> bytes | None:
+               theme_accent: str | None = None, language: str | None = None) -> bytes | None:
     """The org chart as a PNG, in the requested style.
+
+    `language` defaults to None, which preserves the exact original
+    English-only behaviour for any caller not yet updated to pass a real
+    language -- see the module-level note on the language opt-in pattern.
 
     Returns None on any failure -- the callers all fall back to something that
     still communicates the team, never to nothing.
@@ -311,7 +317,7 @@ def render_png(model: OrgModel, style: str = DEFAULT_STYLE,
             "bands": _render_bands,
             "tree": _render_tree,
         }[style]
-        figure = renderer(model, theme_accent or DISCIPLINE_COLOURS[0])
+        figure = renderer(model, theme_accent or DISCIPLINE_COLOURS[0], language=language)
         buffer = io.BytesIO()
         # No bbox_inches="tight": that crops the saved PNG back down to the
         # drawn content's bounding box, silently undoing the fixed A4-landscape
@@ -596,14 +602,20 @@ def _line(axes, x0, y0, x1, y1, colour=LINE, width=0.9, zorder=1):
               solid_capstyle="butt")
 
 
-def _title(axes, model: OrgModel, subtitle: str = ""):
+def _title(axes, model: OrgModel, subtitle: str = "", language: str | None = None):
     """Page furniture, not content -- drawn at a constant size regardless of
     team size, anchored to the fixed margin/title band rather than the old
     bare (0, 1)/(1, 1) corners, since the axes now really do span the whole
     physical page (see _new_figure) and (0, 1) would sit flush on the paper
-    edge."""
+    edge.
+
+    `language`: None (the default -- render_png() has always been called
+    with no language, see its own docstring) keeps the plain English title;
+    a real language resolves it through export_i18n -- Round 3, Part 4b."""
+    title_text = (export_i18n.export_t("pptx_org_chart_title", language) if language is not None
+                 else "Project organisation")
     x, y = CONTENT_LEFT, PAGE_TOP
-    axes.text(x, y, "Project organisation", fontsize=16, fontweight="bold",
+    axes.text(x, y, title_text, fontsize=16, fontweight="bold",
               color=INK, ha="left", va="top")
     if subtitle:
         axes.text(x, y - _y_in(0.22), subtitle, fontsize=6.6, color=SUBTLE, ha="left", va="top")
@@ -612,10 +624,12 @@ def _title(axes, model: OrgModel, subtitle: str = ""):
                   color="#6B7280", ha="right", va="top")
 
 
-def _empty_figure(model: OrgModel):
+def _empty_figure(model: OrgModel, language: str | None = None):
     figure, axes = _new_figure()
-    _title(axes, model)
-    axes.text(0.5, (CONTENT_TOP + CONTENT_BOTTOM) / 2, EMPTY_NOTE, fontsize=11,
+    _title(axes, model, language=language)
+    note = (export_i18n.export_t("org_chart_preview_empty_note", language) if language is not None
+           else EMPTY_NOTE)
+    axes.text(0.5, (CONTENT_TOP + CONTENT_BOTTOM) / 2, note, fontsize=11,
               color="#C00000", style="italic", ha="center", va="center", wrap=True)
     return figure
 
@@ -679,7 +693,8 @@ _PANEL_W_IN = 3.1
 
 
 def _draw_peer_review_panel(axes, model: OrgModel, scale: float, labels: list,
-                            x_frac: float, top_frac: float, w_in_ref: float) -> float:
+                            x_frac: float, top_frac: float, w_in_ref: float,
+                            language: str | None = None) -> float:
     """Draws the panel anchored at its top-left corner (x_frac, top_frac) and
     returns its bottom y (axes-fraction), so a caller that needs to clear it
     knows exactly how far down it reaches."""
@@ -693,7 +708,9 @@ def _draw_peer_review_panel(axes, model: OrgModel, scale: float, labels: list,
     _card(axes, x_frac, top_frac - total_h, w, total_h,
           facecolor=ASSURANCE_FILL, edgecolor=ASSURANCE_AMBER,
           radius=min(w, total_h) * 0.05, linewidth=max(0.7, 1.0 * scale))
-    axes.text(x_frac + w / 2, top_frac - header_h / 2, "PEER REVIEW",
+    panel_heading = (export_i18n.export_t("pptx_peer_review_heading", language) if language is not None
+                    else "PEER REVIEW")
+    axes.text(x_frac + w / 2, top_frac - header_h / 2, panel_heading,
               fontsize=max(6.0, 7.4 * scale), fontweight="bold", color=ASSURANCE_AMBER,
               ha="center", va="center", zorder=4)
     pad = w * 0.06
@@ -796,12 +813,12 @@ def _avatar_card(figure, axes, x, y, w, h, person: Person, accent: str, scale: f
     return labels
 
 
-def _render_cards(model: OrgModel, accent: str):
+def _render_cards(model: OrgModel, accent: str, language: str | None = None):
     if model.is_empty:
-        return _empty_figure(model)
+        return _empty_figure(model, language=language)
 
     figure, axes = _new_figure()
-    _title(axes, model)
+    _title(axes, model, language=language)
     labels: list[tuple[object, float]] = []
     centre = (CONTENT_LEFT + CONTENT_RIGHT) / 2
     # The Peer Review panel floats beside the leadership section (client/
@@ -819,7 +836,9 @@ def _render_cards(model: OrgModel, accent: str):
 
     lead_people = list(model.leadership)
     top_person = lead_people[0] if lead_people else None
-    rank = [(p, "") for p in lead_people[1:]] + [(p, "QA / Review") for p in model.assurance]
+    qa_badge = (export_i18n.export_t("pptx_qa_review_badge", language) if language is not None
+               else "QA / Review")
+    rank = [(p, "") for p in lead_people[1:]] + [(p, qa_badge) for p in model.assurance]
     rank_per_row = _balanced_wrap(len(rank), 4) if rank else 0
     rank_rows = -(-len(rank) // rank_per_row) if rank else 0
     rank_h_in = (rank_rows * _CARDS_CARD_H_IN + max(0, rank_rows - 1) * _CARDS_ROW_GAP_IN) if rank else 0.0
@@ -873,8 +892,10 @@ def _render_cards(model: OrgModel, accent: str):
             h = y_top - y_bottom
             x = lead_centre - w / 2
             _card(axes, x, y_bottom, w, h, facecolor=CLIENT_DARK, edgecolor=CLIENT_DARK)
+            client_placeholder = (export_i18n.export_t("export_client_name_placeholder", language)
+                                 if language is not None else "[CLIENT NAME]")
             labels.append((axes.text(lead_centre, y_bottom + h * 0.62,
-                                     model.client_name or "[CLIENT NAME]",
+                                     model.client_name or client_placeholder,
                                      fontsize=max(8.5, 11.0 * scale), fontweight="bold",
                                      color="#FFFFFF" if model.client_name else "#FCA5A5",
                                      ha="center", va="center", zorder=4), w - _x_in(0.14)))
@@ -979,7 +1000,7 @@ def _render_cards(model: OrgModel, accent: str):
     if model.disciplines:
         panel_w = _x_in(_PANEL_W_IN * scale)
         panel_x = CONTENT_RIGHT - panel_w
-        _draw_peer_review_panel(axes, model, scale, labels, panel_x, CONTENT_TOP, _PANEL_W_IN)
+        _draw_peer_review_panel(axes, model, scale, labels, panel_x, CONTENT_TOP, _PANEL_W_IN, language)
 
     for artist, max_frac in labels:
         _fit(figure, artist, max_frac)
@@ -1020,12 +1041,12 @@ def _pill(axes, x, y, w, h, facecolor, label, sub, label_colour, sub_colour, sca
     return artist
 
 
-def _render_columns(model: OrgModel, accent: str):
+def _render_columns(model: OrgModel, accent: str, language: str | None = None):
     if model.is_empty:
-        return _empty_figure(model)
+        return _empty_figure(model, language=language)
 
     figure, axes = _new_figure()
-    _title(axes, model)
+    _title(axes, model, language=language)
     labels: list[tuple[object, float]] = []
     centre = (CONTENT_LEFT + CONTENT_RIGHT) / 2
 
@@ -1049,7 +1070,12 @@ def _render_columns(model: OrgModel, accent: str):
             w = _x_in(_COLUMNS_CLIENT_W_IN * scale)
             h = y_top - y_bottom
             x = centre - w / 2
-            label = f"{model.client_name or '[CLIENT NAME]'} — Client"
+            if language is not None:
+                client_placeholder = export_i18n.export_t("export_client_name_placeholder", language)
+                label = export_i18n.export_t("pptx_client_suffix_label", language,
+                                              label=(model.client_name or client_placeholder))
+            else:
+                label = f"{model.client_name or '[CLIENT NAME]'} — Client"
             colour = "#FFFFFF" if model.client_name else "#FCA5A5"
             labels.append((_pill(axes, x, y_bottom, w, h, CLIENT_DARK, label, "", colour, colour,
                                  scale), w - _x_in(0.15)))
@@ -1130,7 +1156,9 @@ def _render_columns(model: OrgModel, accent: str):
                 _card(axes, x, y_bottom, w, h, facecolor=ASSURANCE_FILL,
                       edgecolor="#FBBF24", radius=h * 0.2)
                 text = " · ".join(f"{p.name or 'TBC'} — {p.role}" for p in model.assurance)
-                labels.append((axes.text(centre, y_bottom + h / 2, f"★ Independent review: {text}",
+                strip_text = (export_i18n.export_t("pptx_independent_review_prefix", language, text=text)
+                             if language is not None else f"★ Independent review: {text}")
+                labels.append((axes.text(centre, y_bottom + h / 2, strip_text,
                                          fontsize=max(7.0, 9.2 * scale), fontweight="bold",
                                          color=ASSURANCE_AMBER, ha="center", va="center", zorder=4),
                               w - _x_in(0.2)))
@@ -1143,7 +1171,7 @@ def _render_columns(model: OrgModel, accent: str):
             def draw_panel(y_top, y_bottom, scale):
                 w = _x_in(_PANEL_W_IN * scale)
                 x = centre - w / 2
-                _draw_peer_review_panel(axes, model, scale, labels, x, y_top, _PANEL_W_IN)
+                _draw_peer_review_panel(axes, model, scale, labels, x, y_top, _PANEL_W_IN, language)
             flow.block(panel_h_in, draw_panel)
 
         return flow, row_width_in
@@ -1176,12 +1204,12 @@ _BANDS_PAD_IN = 0.14
 _BANDS_SECTION_GAP_IN = 0.20
 
 
-def _render_bands(model: OrgModel, accent: str):
+def _render_bands(model: OrgModel, accent: str, language: str | None = None):
     if model.is_empty:
-        return _empty_figure(model)
+        return _empty_figure(model, language=language)
 
     figure, axes = _new_figure()
-    _title(axes, model)
+    _title(axes, model, language=language)
     labels: list[tuple[object, float]] = []
 
     band_left = CONTENT_LEFT + _x_in(_BANDS_LABEL_W_IN)
@@ -1247,9 +1275,23 @@ def _render_bands(model: OrgModel, accent: str):
         flow.block(band_h_in, draw)
         flow.gap(_BANDS_SECTION_GAP_IN)
 
-    make_band("Client", [(model.client_name or "[CLIENT NAME]", model.client_role, False, MUTED)],
+    if language is not None:
+        client_band_title = export_i18n.export_t("pptx_org_band_client", language)
+        leadership_band_title = export_i18n.export_t("pptx_org_band_leadership", language)
+        delivery_band_title = export_i18n.export_t("pptx_org_band_delivery_team", language)
+        assurance_band_title = export_i18n.export_t("pptx_org_band_assurance", language)
+        client_placeholder = export_i18n.export_t("export_client_name_placeholder", language)
+    else:
+        client_band_title = "Client"
+        leadership_band_title = "Leadership"
+        delivery_band_title = "Delivery team"
+        assurance_band_title = "Assurance"
+        client_placeholder = "[CLIENT NAME]"
+
+    make_band(client_band_title,
+             [(model.client_name or client_placeholder, model.client_role, False, MUTED)],
               CLIENT_DARK, chip_edge=CLIENT_DARK)
-    make_band("Leadership",
+    make_band(leadership_band_title,
              [(p.name or "TBC", p.role, p.is_tbc, accent) for p in model.leadership],
              _tint(accent, 0.94))
     delivery = []
@@ -1260,7 +1302,7 @@ def _render_bands(model: OrgModel, accent: str):
                    else f"{person.role} · {group.name}")
             delivery.append((person.name or "TBC", role, person.is_tbc,
                             colour if person.is_lead else MUTED))
-    make_band("Delivery team", delivery, _tint(DISCIPLINE_COLOURS[1], 0.95))
+    make_band(delivery_band_title, delivery, _tint(DISCIPLINE_COLOURS[1], 0.95))
     # The Assurance band now ALWAYS carries the Peer Review element -- one
     # row per discipline, red TBC until a reviewer is entered -- alongside
     # any dedicated reviewer role the plan holds, so the band appears
@@ -1268,16 +1310,23 @@ def _render_bands(model: OrgModel, accent: str):
     # reviewer slot exists.
     assurance_chips = [(p.name or "TBC", p.role, p.is_tbc, ASSURANCE_AMBER) for p in model.assurance]
     assurance_chips += [
-        (group.peer_reviewer or "TBC", f"Peer review — {group.name}",
+        (group.peer_reviewer or "TBC",
+         (export_i18n.export_t("pptx_org_peer_review", language, name=group.name)
+          if language is not None else f"Peer review — {group.name}"),
          not bool((group.peer_reviewer or "").strip()), ASSURANCE_AMBER)
         for group in model.disciplines
     ]
-    make_band("Assurance", assurance_chips, _tint(ASSURANCE_AMBER, 0.93))
+    make_band(assurance_band_title, assurance_chips, _tint(ASSURANCE_AMBER, 0.93))
 
     def draw_footnote(y_top, y_bottom, scale):
-        text = (("Solid reporting lines run top-down; the assurance band reviews independently "
-                "of the delivery team.") if (model.has_assurance or model.disciplines) else
-               "Solid reporting lines run top-down.")
+        if language is not None:
+            footnote_key = ("pptx_org_footnote_with_assurance" if (model.has_assurance or model.disciplines)
+                            else "pptx_org_footnote_plain")
+            text = export_i18n.export_t(footnote_key, language)
+        else:
+            text = (("Solid reporting lines run top-down; the assurance band reviews independently "
+                    "of the delivery team.") if (model.has_assurance or model.disciplines) else
+                   "Solid reporting lines run top-down.")
         axes.text(band_left, y_top, text, fontsize=max(6.5, 8.0 * scale), fontweight="bold",
                   color=SUBTLE, ha="left", va="top")
     flow.block(0.22, draw_footnote)
@@ -1320,12 +1369,12 @@ def _tree_box(axes, x, y, w, h, person_lines, scale, accent=None, tbc=False):
     return out
 
 
-def _render_tree(model: OrgModel, accent: str):
+def _render_tree(model: OrgModel, accent: str, language: str | None = None):
     if model.is_empty:
-        return _empty_figure(model)
+        return _empty_figure(model, language=language)
 
     figure, axes = _new_figure()
-    _title(axes, model)
+    _title(axes, model, language=language)
     labels: list[tuple[object, float]] = []
     panel_anchor: dict = {}
     centre = (CONTENT_LEFT + CONTENT_RIGHT) / 2
@@ -1389,8 +1438,10 @@ def _render_tree(model: OrgModel, accent: str):
             w = _x_in(_TREE_BOX_W_IN * scale)
             h = y_top - y_bottom
             x = lead_centre - w / 2
+            client_placeholder = (export_i18n.export_t("export_client_name_placeholder", language)
+                                  if language is not None else "[CLIENT NAME]")
             labels.extend(_tree_box(axes, x, y_bottom, w, h, [
-                (model.client_name or "[CLIENT NAME]", max(8.5, 11.0 * scale), True,
+                (model.client_name or client_placeholder, max(8.5, 11.0 * scale), True,
                  INK if model.client_name else TBC_RED),
                 (model.client_role, max(6.0, 8.5 * scale), True, MUTED),
             ], scale))
@@ -1491,7 +1542,7 @@ def _render_tree(model: OrgModel, accent: str):
         panel_w = _x_in(_PANEL_W_IN * scale)
         panel_top = panel_anchor.get("y", CONTENT_TOP - _y_in(director_h_in * scale))
         panel_x = CONTENT_RIGHT - panel_w
-        _draw_peer_review_panel(axes, model, scale, labels, panel_x, panel_top, _PANEL_W_IN)
+        _draw_peer_review_panel(axes, model, scale, labels, panel_x, panel_top, _PANEL_W_IN, language)
 
     for artist, max_frac in labels:
         _fit(figure, artist, max_frac)

@@ -1058,6 +1058,7 @@ def _program_model_from_state():
         st.session_state.get("analysis"),
         st.session_state.get("project_name") or "",
         st.session_state.get("client_name") or "",
+        language=st.session_state.get("output_language") or "en",
     )
 
 
@@ -1104,7 +1105,8 @@ def _program_png(style: str | None = None) -> bytes | None:
         return cache[signature]
     try:
         accent = f"#{export_docx._theme_colours(st.session_state.get('proposal_theme'))['accent']}"
-        png = program_render.render_png(_program_model_from_state(), style, accent)
+        language = st.session_state.get("output_language") or "en"
+        png = program_render.render_png(_program_model_from_state(), style, accent, language=language)
     except Exception as exc:  # noqa: BLE001 -- a preview is never worth a traceback
         print(f"[program preview] {exc}", file=sys.stderr)
         png = None
@@ -1868,6 +1870,7 @@ def _org_model_from_state():
         st.session_state.get("client_name") or "",
         st.session_state.get("project_name") or "",
         st.session_state.get("tender_name") or "",
+        language=st.session_state.get("output_language") or "en",
     )
 
 
@@ -1908,7 +1911,8 @@ def _org_png(style: str | None = None) -> bytes | None:
     png = None
     try:
         accent = f"#{export_docx._theme_colours(st.session_state.get('proposal_theme'))['accent']}"
-        png = org_chart_render.render_png(_org_model_from_state(), style, accent)
+        language = st.session_state.get("output_language") or "en"
+        png = org_chart_render.render_png(_org_model_from_state(), style, accent, language=language)
     except Exception as exc:  # noqa: BLE001 -- a preview is never worth a traceback
         print(f"[org chart preview] {exc}", file=sys.stderr)
     if png is None:
@@ -1953,7 +1957,11 @@ def _methodology_signature() -> tuple:
     stage grid (or, before that exists, the brief's scope items via
     `analysis`), the program's week labels (the date chevrons), and the
     client/project names shown in the title. Anything missing here is
-    something a change to could leave a stale preview on screen."""
+    something a change to could leave a stale preview on screen.
+
+    `output_language` included here (Round 3, Part 4b) so a language switch
+    busts this cache instead of serving a stale-language preview -- the same
+    fix _org_signature()/_program_signature() already carry."""
     stages = st.session_state.get("methodology_stages") or []
     return (
         tuple((s.name, tuple(s.key_tasks), tuple(s.engagement_activities), s.outcome,
@@ -1961,6 +1969,7 @@ def _methodology_signature() -> tuple:
         tuple(st.session_state.get("program_week_labels") or []),
         st.session_state.get("client_name") or "",
         st.session_state.get("project_name") or "",
+        st.session_state.get("output_language") or "en",
     )
 
 
@@ -1984,6 +1993,7 @@ def _methodology_png(style: str | None = None) -> bytes | None:
             week_labels=st.session_state.get("program_week_labels"),
             client_name=st.session_state.get("client_name") or "",
             project_name=st.session_state.get("project_name") or "",
+            language=st.session_state.get("output_language") or "en",
         )
     except Exception as exc:  # noqa: BLE001 -- a preview is never worth a traceback
         print(f"[methodology preview] {exc}", file=sys.stderr)

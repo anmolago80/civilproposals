@@ -468,8 +468,11 @@ def _legend(slide, entries: list[tuple[RGBColor, str]], y: int, x: int, scale: f
     for colour, label in entries:
         # A diamond for the milestone key, so it matches the marks on the
         # chart -- it shares its orange with the third stage colour, and
-        # shape is the only thing telling the two apart.
-        if label.lower().startswith("milestone"):
+        # shape is the only thing telling the two apart. Detected by
+        # colour, not by a string prefix on the (possibly translated)
+        # label -- a text check stopped matching once this label started
+        # routing through export_i18n for a Spanish project.
+        if colour == _MILESTONE_ORANGE:
             _diamond(slide, cursor + swatch / 2, y + Inches(0.03) * scale + swatch / 2, swatch,
                      _MILESTONE_ORANGE)
         else:
@@ -979,6 +982,7 @@ def populate_program(
     model = program_render.build_model(
         program_schedule or {}, week_labels or [], methodology_stages or [],
         start_date, analysis, project_name or "", client_name or "",
+        language=output_language,
     )
     if model.is_empty:
         return _placeholder_slide(model, output_language)

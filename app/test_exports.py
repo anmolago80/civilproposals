@@ -891,6 +891,117 @@ def check_spanish_pptx(failures: list[str]) -> None:
         failures.append("[Part5] org_chart_pptx default (no output_language passed) regressed away from English")
 
 
+def check_spanish_png_previews(failures: list[str]) -> None:
+    """Round 3, Part 4b: the live PNG previews next to the Team &
+    Resourcing / Fees & Program / Draft Responses tabs
+    (org_chart_render.py, program_render.py, methodology_render.py) drew
+    with plain English scaffolding regardless of output_language -- only
+    the PPTX companion decks (Part 2, see check_spanish_pptx() above) had
+    language support. Fixed by threading the same `language: str | None =
+    None` opt-in pattern through render_png() and each module's four
+    per-style drawing functions, reusing the identical export_i18n keys
+    Part 2 already added wherever the wording matches exactly.
+
+    Text is read directly off the matplotlib Text artists these renderers
+    draw with (fig.axes[0].texts), not OCR'd from the rendered pixels --
+    exact and deterministic, unlike pixel OCR, and nothing else in this
+    suite depends on tesseract being installed."""
+    from modules import methodology_render, org_chart_render, program_render, resourcing
+    from modules.methodology_stages import MethodologyStage
+
+    def all_text(fig) -> str:
+        return "\n".join(t.get_text() for ax in fig.axes for t in ax.texts)
+
+    # --- org_chart_render --------------------------------------------------
+    org_plan = [
+        resourcing.ResourceAssignment(slot="Project Director", slot_kind="management",
+                                      person_name="Jane Smith"),
+        resourcing.ResourceAssignment(slot="Structural", slot_kind="discipline",
+                                      person_name="Mat Williams", is_lead=True),
+        resourcing.ResourceAssignment(slot="Structural", slot_kind="discipline",
+                                      person_name="Ryan Swagemakers", is_lead=False),
+    ]
+    org_model = org_chart_render.build_model(org_plan, "Cliente Real", "P", "T", language="es")
+    for style in org_chart_render.STYLES:
+        png_bytes = org_chart_render.render_png(org_model, style, "#1D4ED8", language="es")
+        if png_bytes is None:
+            failures.append(f"[Part4b] org_chart_render.render_png (style={style}, es) failed/crashed")
+            continue
+        renderer = {"cards": org_chart_render._render_cards, "columns": org_chart_render._render_columns,
+                   "bands": org_chart_render._render_bands, "tree": org_chart_render._render_tree}[style]
+        text = all_text(renderer(org_model, "#1D4ED8", language="es"))
+        if "Organización" not in text:
+            failures.append(f"[Part4b] org_chart_render (style={style}) title didn't localise to Spanish: {text[:120]!r}")
+        if "CONFIRMAR CARGO" not in text:
+            failures.append(f"[Part4b] org_chart_render (style={style}) untitled-member body text didn't localise to Spanish")
+        if "Líder de" not in text:
+            failures.append(f"[Part4b] org_chart_render (style={style}) discipline-lead body text didn't localise to Spanish")
+
+    org_model_empty = org_chart_render.build_model([], "Client", "P", "T", language="es")
+    for style in org_chart_render.STYLES:
+        renderer = {"cards": org_chart_render._render_cards, "columns": org_chart_render._render_columns,
+                   "bands": org_chart_render._render_bands, "tree": org_chart_render._render_tree}[style]
+        text = all_text(renderer(org_model_empty, "#1D4ED8", language="es"))
+        if "SIN EQUIPO ASIGNADO" not in text:
+            failures.append(f"[Part4b] org_chart_render (style={style}) empty-team note didn't localise to Spanish")
+
+    # --- program_render ------------------------------------------------------
+    from datetime import date
+    program_schedule = {"Item A": [True, True, False, True], "Item B": [False, True, True, True]}
+    prog_stages = [MethodologyStage(name="Etapa 1", week_start=1, week_end=4,
+                                    engagement_activities=["Client hold point"])]
+    prog_model = program_render.build_model(
+        program_schedule, ["Wk 1", "Wk 2", "Wk 3", "Wk 4"], prog_stages, date(2026, 8, 1), None,
+        "P", "Cliente Real", language="es")
+    for style in program_render.STYLES:
+        renderer = {"gantt": program_render._render_gantt, "swimlanes": program_render._render_swimlanes,
+                   "table": program_render._render_table, "timeline": program_render._render_timeline}[style]
+        text = all_text(renderer(prog_model, "#1D4ED8", language="es"))
+        if "Programa de ejecución" not in text:
+            failures.append(f"[Part4b] program_render (style={style}) title didn't localise to Spanish: {text[:120]!r}")
+        if style != "timeline" and "sem" not in text.lower():
+            failures.append(f"[Part4b] program_render (style={style}) duration body text didn't localise to Spanish")
+    # Month bands are only drawn by the timeline style.
+    tl_text = all_text(program_render._render_timeline(prog_model, "#1D4ED8", language="es"))
+    if "AGOSTO" not in tl_text.upper():
+        failures.append("[Part4b] program_render (style=timeline) month band didn't localise to Spanish")
+    if "Punto de espera del cliente" not in tl_text and "Punto de espera del cliente" not in all_text(
+            program_render._render_gantt(prog_model, "#1D4ED8", language="es")):
+        failures.append("[Part4b] program_render client-hold-point milestone label didn't localise to Spanish")
+
+    prog_model_empty = program_render.build_model({}, [], [], None, None, "P", "Cliente Real", language="es")
+    for style in program_render.STYLES:
+        renderer = {"gantt": program_render._render_gantt, "swimlanes": program_render._render_swimlanes,
+                   "table": program_render._render_table, "timeline": program_render._render_timeline}[style]
+        text = all_text(renderer(prog_model_empty, "#1D4ED8", language="es"))
+        if "SIN PROGRAMA INGRESADO" not in text:
+            failures.append(f"[Part4b] program_render (style={style}) empty-schedule note didn't localise to Spanish")
+
+    # --- methodology_render ---------------------------------------------------
+    for style in methodology_render.STYLES:
+        renderer = {"matrix": methodology_render._render_matrix, "chevrons": methodology_render._render_chevrons,
+                   "programme": methodology_render._render_programme, "spine": methodology_render._render_spine}[style]
+        # No stages yet -- exercises the legacy boilerplate columns, mirroring
+        # check_spanish_pptx()'s identical methodology_pptx.py check.
+        cols = methodology_render.build_columns(None, None, [], "es")
+        text = all_text(renderer(cols, "P", "Cliente Real", language="es"))
+        if "metodología propuesta" not in text:
+            failures.append(f"[Part4b] methodology_render (style={style}) title didn't localise to Spanish: {text[:120]!r}")
+        if "TAREAS" not in text.upper() and "QUÉ HACEMOS" not in text.upper():
+            failures.append(f"[Part4b] methodology_render (style={style}) legacy-boilerplate body text didn't localise to Spanish")
+        if not any(marker in text.upper() for marker in ("ENTREGABLES", "LO QUE USTED RECIBE", "USTED RECIBE")):
+            failures.append(f"[Part4b] methodology_render (style={style}) deliverables body text didn't localise to Spanish")
+
+    # English output must be completely unaffected by any of this threading --
+    # this is the un-migrated PNG-preview caller's exact call shape (no
+    # `language` kwarg at all), which must still resolve to plain English via
+    # the `language: str | None = None` opt-in default.
+    org_en = all_text(org_chart_render._render_bands(
+        org_chart_render.build_model([], "Client", "P", "T"), "#1D4ED8"))
+    if "Project organisation" not in org_en:
+        failures.append("[Part4b] org_chart_render default (no language passed) regressed away from English")
+
+
 def check_spanish_resourcing_reasons(failures: list[str]) -> None:
     """Audit Round 2, Part 5: resourcing.suggest_proposal_inclusion()'s
     "reason" strings are user-visible in the Team & Resourcing tab
@@ -1032,6 +1143,7 @@ def main() -> int:
     check_empty_letter_sections(failures)
     check_spanish_placeholders(failures)
     check_spanish_pptx(failures)
+    check_spanish_png_previews(failures)
     check_spanish_resourcing_reasons(failures)
     check_generated_language_stale_notice(failures)
     check_swimlane_bar_colours_match_stage(failures)
