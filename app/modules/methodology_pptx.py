@@ -62,6 +62,8 @@ from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Emu, Inches, Pt
 
+from modules import export_i18n
+
 from modules.divider_designer import THEME_COLOURS
 
 _WHITE = RGBColor(0xFF, 0xFF, 0xFF)
@@ -434,7 +436,7 @@ WVR_CONFIRM_PLACEHOLDER = "[CONFIRM WVR / QA STATEMENT FOR THIS FIRM]"
 
 
 def _slide_matrix(slide, columns_data, from_stages, P, hold_icon, eng_icon,
-                  project_name, client_name, wvr_confirmed) -> None:
+                  project_name, client_name, wvr_confirmed, language: str = "en") -> None:
     """Boardroom matrix -- the original/default style: navy stage headers,
     LEFT row labels (KEY TASKS / ENGAGEMENT / OUTCOME / DELIVERABLES), one
     grid row per cell type. Row heights are CONTENT-sized: each row's real
@@ -539,7 +541,7 @@ def _slide_matrix(slide, columns_data, from_stages, P, hold_icon, eng_icon,
     tp = title_tf.paragraphs[0]
     tp.alignment = PP_ALIGN.LEFT
     tr = tp.add_run()
-    tr.text = "Our proposed methodology"
+    tr.text = export_i18n.export_t("pptx_methodology_title", language)
     tr.font.size = Pt(15)
     tr.font.bold = True
     tr.font.name = _FONT
@@ -547,7 +549,7 @@ def _slide_matrix(slide, columns_data, from_stages, P, hold_icon, eng_icon,
     sp = title_tf.add_paragraph()
     sp.alignment = PP_ALIGN.LEFT
     sr = sp.add_run()
-    sr.text = (project_name or "").strip() or "[Insert project name]"
+    sr.text = (project_name or "").strip() or export_i18n.export_t("pptx_insert_project_name", language)
     sr.font.size = Pt(7.5)
     sr.font.name = _FONT
     sr.font.color.rgb = _DARK_TEXT if (project_name or "").strip() else _RED
@@ -644,7 +646,8 @@ def _slide_matrix(slide, columns_data, from_stages, P, hold_icon, eng_icon,
         # breach in this module. It now only appears once confirmed.
         note_box, note_tf = _textbox(slide, Emu(int(cx + Inches(0.05))), Emu(int(y_deliv + list_h + Inches(0.02))), box_w, note_h)
         nr = note_tf.paragraphs[0].add_run()
-        nr.text = WVR_STATEMENT if wvr_confirmed else WVR_CONFIRM_PLACEHOLDER
+        nr.text = (export_i18n.export_t("pptx_wvr_statement", language) if wvr_confirmed
+                  else export_i18n.export_t("pptx_wvr_confirm_placeholder", language))
         nr.font.size = Pt(5.0)
         nr.font.italic = True
         nr.font.name = _FONT
@@ -666,7 +669,7 @@ def _slide_matrix(slide, columns_data, from_stages, P, hold_icon, eng_icon,
         _icon(slide, hold_icon, Emu(int(col4_x - gap / 2)), Emu(int(y_timeline + h_timeline / 2)), Inches(0.16))
 
 
-def _simple_title(slide, project_name: str) -> None:
+def _simple_title(slide, project_name: str, language: str = "en") -> None:
     """The compact title the three new styles use -- just the heading and
     project name, no KEY legend (the matrix style's hold-point/engagement
     icon legend doesn't apply to these layouts, which show hold points and
@@ -676,7 +679,7 @@ def _simple_title(slide, project_name: str) -> None:
     p = tf.paragraphs[0]
     p.alignment = PP_ALIGN.LEFT
     r = p.add_run()
-    r.text = "Our proposed methodology"
+    r.text = export_i18n.export_t("pptx_methodology_title", language)
     if (project_name or "").strip():
         r.text += f" — {project_name.strip()}"
     r.font.size = Pt(14)
@@ -720,13 +723,13 @@ def _deliverable_chips(slide, x, w, y, avail_h, items, fill, text_fill, size_pt=
 
 
 def _slide_chevrons(slide, columns_data, from_stages, P, hold_icon, eng_icon,
-                    project_name, client_name, wvr_confirmed) -> None:
+                    project_name, client_name, wvr_confirmed, language: str = "en") -> None:
     """Stage chevrons -- an arrowed banner per stage (stage colour, name +
     weeks), a bordered card below with coloured section labels and
     deliverables as tinted chips. See the module docstring and
     methodology_render.py's for the shared reasoning."""
     n = max(len(columns_data), 1)
-    _simple_title(slide, project_name)
+    _simple_title(slide, project_name, language)
 
     M = Inches(0.14)
     gap = Inches(0.12)
@@ -822,14 +825,14 @@ def _slide_chevrons(slide, columns_data, from_stages, P, hold_icon, eng_icon,
 
 
 def _slide_programme(slide, columns_data, from_stages, P, hold_icon, eng_icon,
-                     project_name, client_name, wvr_confirmed) -> None:
+                     project_name, client_name, wvr_confirmed, language: str = "en") -> None:
     """Programme-matched columns -- stage-coloured column cards (WHAT WE DO
     / WITH YOU / YOU RECEIVE, deliverables as white chips), with orange
     HOLD POINT diamonds between columns wherever a stage actually carries
     one (see methodology_render.stage_carries_hold_point -- derived from
     the stage's own content, never asserted)."""
     n = max(len(columns_data), 1)
-    _simple_title(slide, project_name)
+    _simple_title(slide, project_name, language)
 
     M = Inches(0.14)
     gap = Inches(0.42)  # room for hold-point diamonds between columns
@@ -901,12 +904,12 @@ def _slide_programme(slide, columns_data, from_stages, P, hold_icon, eng_icon,
 
 
 def _slide_spine(slide, columns_data, from_stages, P, hold_icon, eng_icon,
-                 project_name, client_name, wvr_confirmed) -> None:
+                 project_name, client_name, wvr_confirmed, language: str = "en") -> None:
     """Timeline spine -- a coloured node per stage on a vertical spine at
     the left, a full-width band per stage (tinted left cell with
     name/weeks/outcome, then What we do / What you receive columns)."""
     n = max(len(columns_data), 1)
-    _simple_title(slide, project_name)
+    _simple_title(slide, project_name, language)
 
     M = Inches(0.14)
     spine_x = Emu(int(M + Inches(0.08)))
@@ -1022,7 +1025,7 @@ _RENDERERS = {
 def populate_methodology(
     analysis, client_name: str = "", project_name: str = "", theme_name: str | None = None,
     stages: list | None = None, week_labels: list | None = None,
-    wvr_confirmed: bool = False, style: str | None = None,
+    wvr_confirmed: bool = False, style: str | None = None, output_language: str = "en",
 ) -> bytes:
     """
     Builds a fresh A4-landscape .pptx (returned as bytes) of the delivery
@@ -1069,7 +1072,7 @@ def populate_methodology(
     slide = prs.slides.add_slide(prs.slide_layouts[6])
 
     _RENDERERS[resolved](slide, columns_data, from_stages, P, hold_icon, eng_icon,
-                         project_name, client_name, wvr_confirmed)
+                         project_name, client_name, wvr_confirmed, output_language)
 
     buffer = io.BytesIO()
     prs.save(buffer)

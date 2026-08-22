@@ -238,6 +238,9 @@ STRINGS: dict[str, str] = {
     ),
     "drafting_generation_complete_success": "Generación de borradores completa para {n} sección(es).",
     "drafting_generation_failed_error": "Falló la generación de borradores",
+    "generated_language_stale_notice": (
+        "Estos borradores se generaron en {from_lang} -- vuelve a generarlos para obtenerlos en {to_lang}."
+    ),
 
     "drafting_risk_register_heading": "#### Registro de riesgos",
     "drafting_risk_register_caption": (

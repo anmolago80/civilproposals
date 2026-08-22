@@ -1057,7 +1057,12 @@ def _program_model_from_state():
 
 def _program_signature(style: str) -> tuple:
     """Everything the drawn program depends on. Anything not in here is
-    something a change to could leave a stale picture on screen."""
+    something a change to could leave a stale picture on screen.
+
+    Also reused (see 80_export.py) as the cache signature for the exported
+    delivery-program PPTX, which DOES vary with output_language now (Audit
+    Round 2, Part 5) -- included here so a language switch busts that cache
+    instead of serving a stale-language deck."""
     stages = st.session_state.get("methodology_stages") or []
     start = st.session_state.get("program_start_date")
     analysis = st.session_state.get("analysis")
@@ -1073,6 +1078,7 @@ def _program_signature(style: str) -> tuple:
         st.session_state.get("project_name") or "",
         st.session_state.get("client_name") or "",
         st.session_state.get("proposal_theme") or "",
+        st.session_state.get("output_language") or "en",
     )
 
 
@@ -1357,6 +1363,20 @@ def _draft_would_consume_pass() -> bool:
     if _last_sig is None:
         return False
     return _draft_generation_input_signature() != _last_sig
+
+
+def _generated_language_stale() -> bool:
+    """Audit fix Part 5: True when drafts exist but were generated in a
+    DIFFERENT language than the project's current output_language -- e.g.
+    the user drafted in English, then switched the project to Spanish
+    without regenerating. Purely informational (drives a non-blocking
+    notice on the drafting/export tabs); never triggers a regeneration
+    itself. False before any draft has ever been generated (generated_
+    language is None) -- nothing to warn about yet."""
+    _generated = st.session_state.get("generated_language")
+    if not _generated:
+        return False
+    return _generated != st.session_state.get("output_language", "en")
 
 
 def _mark_export_generated() -> None:
@@ -1850,7 +1870,12 @@ def _org_model_from_state():
 
 def _org_signature(style: str) -> tuple:
     """Everything the drawn chart depends on. Anything missing here is
-    something a change to could leave a stale picture on screen."""
+    something a change to could leave a stale picture on screen.
+
+    Also reused (see 80_export.py) as the cache signature for the exported
+    org chart PPTX, which DOES vary with output_language now (Audit Round 2,
+    Part 5) -- included here so a language switch busts that cache instead
+    of serving a stale-language deck."""
     plan = st.session_state.get("resource_plan") or []
     return (
         style,
@@ -1860,6 +1885,7 @@ def _org_signature(style: str) -> tuple:
         st.session_state.get("project_name") or "",
         st.session_state.get("tender_name") or "",
         st.session_state.get("proposal_theme") or "",
+        st.session_state.get("output_language") or "en",
     )
 
 

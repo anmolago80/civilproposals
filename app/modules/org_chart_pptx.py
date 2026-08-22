@@ -50,6 +50,8 @@ from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Emu, Inches, Pt
 
+from modules import export_i18n
+
 # ---- palette -------------------------------------------------------------
 # The fallback palette, used when no proposal theme is given. Everything
 # below is now themed from divider_designer.THEME_COLOURS instead (see
@@ -266,11 +268,11 @@ def _person_lines(person, role_colour: RGBColor, scale: float = 1.0):
     return lines
 
 
-def _title_block(slide, model, style_note: str = ""):
+def _title_block(slide, model, style_note: str = "", language: str = "en"):
     box = slide.shapes.add_textbox(_STYLE_MARGIN, Inches(0.22),
                                    Emu(int(_SLIDE_W - 2 * _STYLE_MARGIN)), Inches(0.7))
     box.text_frame.word_wrap = True
-    _set_text(box.text_frame, [("Project organisation", 20, True, _DARK_TEXT)],
+    _set_text(box.text_frame, [(export_i18n.export_t("pptx_org_chart_title", language), 20, True, _DARK_TEXT)],
               align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP)
     if model.heading:
         right = slide.shapes.add_textbox(Emu(int(_SLIDE_W / 2)), Inches(0.24),
@@ -620,9 +622,9 @@ def _render_cards_slide(prs, slide, model, accent: RGBColor):
     _grow(prs, bottom + int(Inches(0.35)))
 
 
-def _slide_cards(model, accent: RGBColor) -> bytes:
+def _slide_cards(model, accent: RGBColor, language: str = "en") -> bytes:
     prs, slide = _new_deck()
-    _title_block(slide, model)
+    _title_block(slide, model, language=language)
     _render_cards_slide(prs, slide, model, accent)
     return _save(prs)
 
@@ -654,11 +656,11 @@ def _pill(slide, x, y, w, h, facecolor, label, sub, label_colour, sub_colour, sc
     _stack(slide, Emu(int(x)), Emu(int(y)), Emu(int(w)), Emu(int(h)), lines, align=PP_ALIGN.CENTER)
 
 
-def _slide_columns(model, accent: RGBColor) -> bytes:
+def _slide_columns(model, accent: RGBColor, language: str = "en") -> bytes:
     from modules.org_chart_render import _row_candidates, DISCIPLINE_COLOURS
 
     prs, slide = _new_deck()
-    _title_block(slide, model)
+    _title_block(slide, model, language=language)
     centre = int(_SLIDE_W / 2)
 
     def build_flow(per_row):
@@ -801,11 +803,11 @@ _BANDS_PAD = int(Inches(0.14))
 _BANDS_SECTION_GAP = int(Inches(0.20))
 
 
-def _slide_bands(model, accent: RGBColor) -> bytes:
+def _slide_bands(model, accent: RGBColor, language: str = "en") -> bytes:
     from modules.org_chart_render import DISCIPLINE_COLOURS
 
     prs, slide = _new_deck()
-    _title_block(slide, model)
+    _title_block(slide, model, language=language)
 
     band_left = int(_STYLE_MARGIN) + _BANDS_LABEL_W
     band_right = int(_SLIDE_W - _STYLE_MARGIN)
@@ -860,9 +862,10 @@ def _slide_bands(model, accent: RGBColor) -> bytes:
         flow.block(band_h, draw)
         flow.gap(_BANDS_SECTION_GAP)
 
-    make_band("Client", [(_client_label(model)[0], model.client_role, False, _MUTED)],
+    make_band(export_i18n.export_t("pptx_org_band_client", language),
+             [(_client_label(model)[0], model.client_role, False, _MUTED)],
               _CLIENT_DARK, chip_edge=_CLIENT_DARK)
-    make_band("Leadership",
+    make_band(export_i18n.export_t("pptx_org_band_leadership", language),
              [(p.name or "TBC", p.role, p.is_tbc, accent) for p in model.leadership],
              _tint(accent, 0.94))
     delivery = []
@@ -873,21 +876,24 @@ def _slide_bands(model, accent: RGBColor) -> bytes:
                    else f"{person.role} · {group.name}")
             delivery.append((person.name or "TBC", role, person.is_tbc,
                             colour if person.is_lead else _GREY_TEXT))
-    make_band("Delivery team", delivery, _tint(_hex(DISCIPLINE_COLOURS[1]), 0.95))
+    make_band(export_i18n.export_t("pptx_org_band_delivery_team", language),
+             delivery, _tint(_hex(DISCIPLINE_COLOURS[1]), 0.95))
     assurance_chips = [(p.name or "TBC", p.role, p.is_tbc, _ASSURANCE_AMBER) for p in model.assurance]
     assurance_chips += [
-        (group.peer_reviewer or "TBC", f"Peer review — {group.name}",
+        (group.peer_reviewer or "TBC",
+         export_i18n.export_t("pptx_org_peer_review", language, name=group.name),
          not bool((group.peer_reviewer or "").strip()), _ASSURANCE_AMBER)
         for group in model.disciplines
     ]
-    make_band("Assurance", assurance_chips, _tint(_ASSURANCE_AMBER, 0.93))
+    make_band(export_i18n.export_t("pptx_org_band_assurance", language),
+             assurance_chips, _tint(_ASSURANCE_AMBER, 0.93))
 
     def draw_footnote(y_top, y_bottom, scale):
+        footnote_key = ("pptx_org_footnote_with_assurance" if (model.has_assurance or model.disciplines)
+                        else "pptx_org_footnote_plain")
         _stack(slide, _STYLE_MARGIN, Emu(int(y_top)), Emu(int(_SLIDE_W - 2 * _STYLE_MARGIN)),
               Emu(int(Inches(0.3))),
-              [((("Solid reporting lines run top-down; the assurance band reviews independently "
-                 "of the delivery team.") if (model.has_assurance or model.disciplines) else
-                "Solid reporting lines run top-down."), max(7.0, 9.0 * scale), True, _MUTED)])
+              [(export_i18n.export_t(footnote_key, language), max(7.0, 9.0 * scale), True, _MUTED)])
     flow.block(int(Inches(0.22)), draw_footnote)
 
     natural_h = flow.natural_height()
@@ -914,11 +920,11 @@ def _tree_box(slide, x, y, w, h, person_lines, accent=None, tbc=False):
     _stack(slide, Emu(int(x)), Emu(int(y)), Emu(int(w)), Emu(int(h)), person_lines, align=PP_ALIGN.CENTER)
 
 
-def _slide_tree(model, accent: RGBColor) -> bytes:
+def _slide_tree(model, accent: RGBColor, language: str = "en") -> bytes:
     from modules.org_chart_render import _row_candidates, _balanced_wrap
 
     prs, slide = _new_deck()
-    _title_block(slide, model)
+    _title_block(slide, model, language=language)
     centre = int(_SLIDE_W / 2)
     # Same split as _render_cards_slide: the director level sits beside the
     # panel and gives up width for it; the discipline rows always sit below
@@ -1076,22 +1082,18 @@ _STYLE_RENDERERS = {
 }
 
 
-def _empty_slide(model) -> bytes:
+def _empty_slide(model, language: str = "en") -> bytes:
     prs, slide = _new_deck()
-    y = _title_block(slide, model)
+    y = _title_block(slide, model, language=language)
     _stack(slide, _STYLE_MARGIN, y + Inches(0.4),
            Emu(int(_SLIDE_W - 2 * _STYLE_MARGIN)), Inches(0.6),
-           [(_ORG_EMPTY_NOTE, 14, False, _RED_TBC)], align=PP_ALIGN.CENTER)
+           [(export_i18n.export_t("pptx_org_empty_note", language), 14, False, _RED_TBC)], align=PP_ALIGN.CENTER)
     return _save(prs)
-
-
-_ORG_EMPTY_NOTE = ("[NO TEAM ASSIGNED -- add the management roles and discipline leads in "
-                   "the Team & Resourcing tab, then re-download this PowerPoint]")
 
 
 def populate_org_chart(resource_plan: list, client_name: str = "", project_name: str = "",
                        tender_name: str = "", theme_name: str | None = None,
-                       style: str | None = None) -> bytes:
+                       style: str | None = None, output_language: str = "en") -> bytes:
     """
     Builds a fresh .pptx (returned as bytes) of the project organisation
     chart, in the user's chosen presentation style.
@@ -1113,8 +1115,8 @@ def populate_org_chart(resource_plan: list, client_name: str = "", project_name:
     model = org_chart_render.build_model(resource_plan, client_name, project_name,
                                          tender_name)
     if model.is_empty:
-        return _empty_slide(model)
+        return _empty_slide(model, output_language)
     resolved = org_chart_render.effective_style(
         model, style or org_chart_render.DEFAULT_STYLE)
     accent = _resolve_palette(theme_name)["header"]
-    return _STYLE_RENDERERS[resolved](model, accent)
+    return _STYLE_RENDERERS[resolved](model, accent, output_language)

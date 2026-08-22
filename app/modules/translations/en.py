@@ -245,6 +245,17 @@ STRINGS: dict[str, str] = {
     ),
     "drafting_generation_complete_success": "Draft generation complete for {n} section(s).",
     "drafting_generation_failed_error": "Draft generation failed",
+    # Audit fix Part 5: shown on the drafting/export tabs when a project's
+    # drafts were generated in one language but output_language has since
+    # been switched to the other -- e.g. "These drafts were generated in
+    # English -- regenerate to get them in Spanish." Never triggers a
+    # regeneration itself; see _generated_language_stale() in
+    # 10_state_helpers.py. {from_lang}/{to_lang} come from i18n.LANGUAGES
+    # (proper nouns -- "English"/"Español" -- so they're the same string in
+    # both catalogs, not further translated).
+    "generated_language_stale_notice": (
+        "These drafts were generated in {from_lang} -- regenerate to get them in {to_lang}."
+    ),
 
     "drafting_risk_register_heading": "#### Risk register",
     "drafting_risk_register_caption": (

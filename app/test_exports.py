@@ -792,6 +792,128 @@ def check_spanish_placeholders(failures: list[str]) -> None:
         failures.append("[Part4] a Spanish-output pack with unfilled sections swept to an empty placeholder list")
 
 
+def check_spanish_pptx(failures: list[str]) -> None:
+    """Audit Round 2, Part 5: the three PPTX companions (org chart,
+    methodology, delivery program) ignored export_i18n entirely -- a Spanish
+    project got fully English PowerPoints. Generate each with
+    output_language="es" and confirm the builder-written scaffolding text
+    (titles, band/legend labels, empty-state notes) actually came out in
+    Spanish, not just that the file didn't crash."""
+    from pptx import Presentation
+
+    from modules import methodology_pptx, org_chart_pptx, program_pptx
+
+    def all_text(blob: bytes) -> str:
+        prs = Presentation(io.BytesIO(blob))
+        parts = []
+        for slide in prs.slides:
+            for shape in slide.shapes:
+                if shape.has_text_frame:
+                    parts.append(shape.text_frame.text)
+        return "\n".join(parts)
+
+    org_es = all_text(org_chart_pptx.populate_org_chart(
+        [], client_name="Client", project_name="P", tender_name="T",
+        style="bands", output_language="es"))
+    if "Organización del proyecto" not in org_es:
+        failures.append(f"[Part5] org_chart_pptx (style=bands) title didn't localise to Spanish: {org_es[:120]!r}")
+    if "NO SE HA ASIGNADO EQUIPO" not in org_es:
+        failures.append("[Part5] org_chart_pptx empty-team note didn't localise to Spanish")
+
+    for style in ("gantt", "swimlanes", "table", "timeline"):
+        prog_es = all_text(program_pptx.populate_program(
+            {"Item": [True] * 4}, ["Wk 1", "Wk 2", "Wk 3", "Wk 4"],
+            project_name="P", style=style, output_language="es"))
+        if "Programa de ejecución" not in prog_es:
+            failures.append(f"[Part5] program_pptx (style={style}) title didn't localise to Spanish: {prog_es[:120]!r}")
+
+    for style in ("matrix", "chevrons", "programme", "spine"):
+        meth_es = all_text(methodology_pptx.populate_methodology(
+            None, project_name="P", style=style, output_language="es"))
+        if "metodología propuesta" not in meth_es:
+            failures.append(f"[Part5] methodology_pptx (style={style}) title didn't localise to Spanish: {meth_es[:120]!r}")
+
+    # English output must be completely unaffected by any of this threading.
+    org_en = all_text(org_chart_pptx.populate_org_chart(
+        [], client_name="Client", project_name="P", tender_name="T", style="bands"))
+    if "Project organisation" not in org_en:
+        failures.append("[Part5] org_chart_pptx default (no output_language passed) regressed away from English")
+
+
+def check_spanish_resourcing_reasons(failures: list[str]) -> None:
+    """Audit Round 2, Part 5: resourcing.suggest_proposal_inclusion()'s
+    "reason" strings are user-visible in the Team & Resourcing tab
+    (pages/60_team.py) but were English-only regardless of the project's
+    output_language. Covers the two paths that don't need an AI call: the
+    fixed firm-leadership reason, and the "no tender analysis yet" fallback."""
+    from modules import resourcing
+
+    class _FakeAssignment:
+        def __init__(self, slot, slot_kind):
+            self.slot = slot
+            self.slot_kind = slot_kind
+
+    if "Liderazgo" not in resourcing.firm_leadership_reason("es"):
+        failures.append(
+            f"[Part5] resourcing.firm_leadership_reason('es') didn't localise: "
+            f"{resourcing.firm_leadership_reason('es')!r}")
+    if resourcing.firm_leadership_reason("en") != resourcing.FIRM_LEADERSHIP_REASON:
+        failures.append("[Part5] resourcing.firm_leadership_reason('en') regressed away from the English default")
+
+    plan = [_FakeAssignment("Project Director", "management"), _FakeAssignment("Bridges", "discipline")]
+    result_es = resourcing.suggest_proposal_inclusion(plan, analysis=None, output_language="es")
+    if "Liderazgo" not in result_es.get("Project Director", {}).get("reason", ""):
+        failures.append("[Part5] suggest_proposal_inclusion(..., output_language='es') management reason not localised")
+    if "análisis" not in result_es.get("Bridges", {}).get("reason", "").lower():
+        failures.append(
+            "[Part5] suggest_proposal_inclusion(..., output_language='es') "
+            "no-analysis-yet fallback reason not localised")
+
+    result_en = resourcing.suggest_proposal_inclusion(plan, analysis=None)
+    if result_en.get("Project Director", {}).get("reason") != resourcing.FIRM_LEADERSHIP_REASON:
+        failures.append("[Part5] suggest_proposal_inclusion() default (no output_language) regressed away from English")
+
+
+def check_generated_language_stale_notice(failures: list[str]) -> None:
+    """Audit Round 2, Part 5's last piece: the stale-language notice.
+    generated_language is a plain companion key to output_language (same
+    project_store.PLAIN_KEYS category), stamped with the language a
+    "Generate/Regenerate All Drafts" run actually used -- the drafting/
+    export tabs (10_state_helpers.py's _generated_language_stale()) compare
+    it against the project's CURRENT output_language to decide whether to
+    show a non-blocking "these drafts were generated in X -- regenerate to
+    get them in Y" notice. This check covers the two pieces that don't
+    require the Streamlit page-script machinery those tabs run in: the
+    key's save/load round trip, and the i18n notice string itself actually
+    localising and substituting both language names."""
+    from modules import i18n, project_store
+
+    saved = project_store.save_project({"output_language": "es", "generated_language": "en"})
+    loaded = project_store.load_project(saved)
+    if loaded.get("generated_language") != "en":
+        failures.append(
+            f"[Part5] generated_language didn't round-trip through save/load: {loaded.get('generated_language')!r}")
+    if loaded.get("output_language") != "es":
+        failures.append(
+            f"[Part5] output_language didn't round-trip alongside generated_language: {loaded.get('output_language')!r}")
+
+    en_notice = i18n.t("generated_language_stale_notice", from_lang=i18n.LANGUAGES["en"], to_lang=i18n.LANGUAGES["es"])
+    if "English" not in en_notice or "Español" not in en_notice:
+        failures.append(f"[Part5] English stale-language notice didn't substitute both language names: {en_notice!r}")
+
+    # i18n.t() always resolves against st.session_state["_lang"], which isn't
+    # set up outside a running app -- fetch the Spanish catalog entry
+    # directly instead, so this check exercises the real Spanish string
+    # rather than guessing at a language-selection call convention.
+    from modules.translations import es as _es_catalog
+    es_template = _es_catalog.STRINGS["generated_language_stale_notice"]
+    if "{from_lang}" not in es_template or "{to_lang}" not in es_template:
+        failures.append(f"[Part5] Spanish stale-language notice template lost a format placeholder: {es_template!r}")
+    es_filled = es_template.format(from_lang=i18n.LANGUAGES["en"], to_lang=i18n.LANGUAGES["es"])
+    if "English" not in es_filled or "Español" not in es_filled:
+        failures.append(f"[Part5] Spanish stale-language notice didn't substitute both language names: {es_filled!r}")
+
+
 def main() -> int:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     out_dir = None
@@ -815,6 +937,9 @@ def main() -> int:
     check_methodology_styles(failures, files)
     check_empty_letter_sections(failures)
     check_spanish_placeholders(failures)
+    check_spanish_pptx(failures)
+    check_spanish_resourcing_reasons(failures)
+    check_generated_language_stale_notice(failures)
 
     if failures:
         print("EXPORT TESTS FAILED:")

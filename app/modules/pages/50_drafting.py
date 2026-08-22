@@ -40,6 +40,18 @@ with tabs[5]:
     if _structure_format_stale():
         st.warning(i18n.t("drafting_format_stale_warning"))
 
+    # Audit fix Part 5: non-blocking notice only -- these drafts are still
+    # perfectly usable, they just no longer match the project's CURRENT
+    # output_language (the user switched it after generating). Deliberately
+    # never auto-regenerates; that would silently spend a pass / API call
+    # the user didn't ask for. See _generated_language_stale().
+    if _generated_language_stale():
+        st.info(i18n.t(
+            "generated_language_stale_notice",
+            from_lang=i18n.LANGUAGES.get(st.session_state.get("generated_language"), "English"),
+            to_lang=i18n.LANGUAGES.get(st.session_state.get("output_language", "en"), "English"),
+        ))
+
     # Audit fix Part 3a: a full "Generate/Regenerate All Drafts" run is a
     # full generation cycle under Part B2's definition -- tell the user
     # up front whether clicking it will spend one of a paid project's
@@ -146,6 +158,15 @@ with tabs[5]:
                     queue_args=(targets, st.session_state.analysis, _material_for_draft, _redacted_ai_config),
                 )
                 st.session_state.drafts = {**(st.session_state.drafts or {}), **new_drafts}
+                # Audit fix Part 5: record the language this run actually drafted
+                # in, separately from output_language (the project's CURRENT
+                # target language, which the user is free to flip afterwards).
+                # The drafting/export tabs compare the two and show a
+                # non-blocking notice when they've drifted apart -- see
+                # _generated_language_stale() below. Deliberately never
+                # auto-regenerates: that would silently spend a pass / API
+                # call the user didn't ask for.
+                st.session_state["generated_language"] = st.session_state.get("output_language", "en")
                 progress.progress(1.0, text=i18n.t("drafting_done_text"))
                 # "Complete" has to mean complete. An empty or one-sentence draft
                 # used to render as a blank expander under a green success

@@ -104,7 +104,7 @@ def build_docx(
     _add_page_numbers(doc)
 
     _build_cover_page(doc, project_info, cover_image_bytes, cover_theme_image_bytes, theme,
-                      firm=firm)
+                      firm=firm, output_language=output_language)
 
     _add_ocr_notice(doc, ocr_note)
 
@@ -314,33 +314,35 @@ def build_letter_docx(
     _add_page_numbers(doc)
 
     _build_cover_page(doc, project_info, cover_image_bytes, cover_theme_image_bytes, theme,
-                      firm=firm)
+                      firm=firm, output_language=output_language)
 
     _add_ocr_notice(doc, ocr_note)
-    _add_company_footer_line(doc.sections[-1].footer, project_info, firm)
+    _add_company_footer_line(doc.sections[-1].footer, project_info, firm, output_language)
 
     _build_executive_summary(doc, executive_summary, project_info, theme,
                              differentiator_text=differentiator_text, output_language=output_language)
     doc.add_page_break()
 
     doc.add_heading(export_i18n.export_t("heading_letter_intro", output_language), level=1)
-    _add_letter_body_text(doc, understanding_text, "[NO INTRODUCTION DRAFTED YET -- generate a draft or write one in the Draft Responses step]", theme)
+    _add_letter_body_text(doc, understanding_text,
+                          export_i18n.export_t("export_no_introduction", output_language), theme)
 
     doc.add_heading(export_i18n.export_t("heading_letter_scope_of_work", output_language), level=1)
-    _build_letter_scope_of_work(doc, analysis.scope_items)
+    _build_letter_scope_of_work(doc, analysis.scope_items, output_language)
 
     doc.add_heading(export_i18n.export_t("heading_letter_methodology", output_language), level=1)
-    _build_letter_methodology(doc, methodology_text, theme, sales_pitch_text=sales_pitch_text)
+    _build_letter_methodology(doc, methodology_text, theme, sales_pitch_text=sales_pitch_text,
+                              output_language=output_language)
 
     doc.add_heading(export_i18n.export_t("heading_letter_team", output_language), level=1)
-    _build_letter_team(doc, resource_plan, personnel_photos, theme)
+    _build_letter_team(doc, resource_plan, personnel_photos, theme, output_language)
 
     doc.add_heading(export_i18n.export_t("heading_letter_fees", output_language), level=1)
     # Stable order, and only the presentations the user ticked on the Fee
     # Estimate tab. The defaults reproduce what this pack always exported.
     _letter_fee = fee_sections(fee_sections_included)
     if not any(_letter_fee.values()):
-        _add_placeholder_paragraph(doc, FEE_NOTHING_SELECTED)
+        _add_placeholder_paragraph(doc, export_i18n.export_t("export_fee_nothing_selected", output_language))
     if _letter_fee["pct_split"] and fee_estimates:
         _build_letter_fee_split(doc, fee_estimates, theme, output_language)
     if _letter_fee["discipline_buildup"] and discipline_fee_lines:
@@ -355,9 +357,7 @@ def build_letter_docx(
         # to have deliberately said nothing about fees is worse than one that
         # visibly still needs them.
         _add_placeholder_paragraph(
-            doc,
-            "[NO FEES ENTERED -- price the discipline fee build-up, or generate the "
-            "discipline fee split, in the Fees & Program step]",
+            doc, export_i18n.export_t("export_no_fees_entered_letter", output_language),
         )
 
     doc.add_heading(export_i18n.export_t("heading_letter_program", output_language), level=1)
@@ -367,13 +367,14 @@ def build_letter_docx(
         start_date=program_start_date, analysis=analysis,
         project_name=project_info.get("project_name", ""),
         client_name=project_info.get("client_name", ""),
+        output_language=output_language,
     )
 
     doc.add_heading(export_i18n.export_t("heading_letter_assumptions", output_language), level=1)
     if analysis.assumptions:
         _add_bullets(doc, analysis.assumptions)
     else:
-        _add_placeholder_paragraph(doc, "[NO ASSUMPTIONS EXTRACTED -- add any that apply]")
+        _add_placeholder_paragraph(doc, export_i18n.export_t("export_no_assumptions", output_language))
     # The brief's risks used to go in here as raw bullets -- the client's own
     # sentences read back to the client who wrote them, saying nothing about
     # what they mean for delivery or what this firm would do about them. With
@@ -386,9 +387,10 @@ def build_letter_docx(
         _add_bullets(doc, analysis.risks)
 
     doc.add_heading(export_i18n.export_t("heading_letter_terms", output_language), level=1)
-    _add_letter_body_text(doc, terms_of_engagement_text, "[NO TERMS OF ENGAGEMENT ENTERED -- reference the applicable contract/commercial conditions]")
+    _add_letter_body_text(doc, terms_of_engagement_text,
+                          export_i18n.export_t("export_no_terms_of_engagement", output_language))
 
-    _build_letter_signoff(doc, sender)
+    _build_letter_signoff(doc, sender, output_language)
 
     doc.add_page_break()
     _build_letter_review_checklist(doc, output_language)
@@ -403,7 +405,8 @@ def build_letter_docx(
 # Small Scope pack-specific sections
 # ---------------------------------------------------------------------------
 
-def _add_company_footer_line(footer, project_info: dict, firm: dict | None = None) -> None:
+def _add_company_footer_line(footer, project_info: dict, firm: dict | None = None,
+                             output_language: str = "en") -> None:
     """Second footer line, below the "Page X of Y" one _build_cover_page already
     wrote -- the bidder's registered company details, for the user to confirm
     before sending. Pre-fills the real bidder name where we have it; ABN and
@@ -420,8 +423,12 @@ def _add_company_footer_line(footer, project_info: dict, firm: dict | None = Non
     text = firm.get("footer_line")
     complete = bool(firm.get("footer_complete"))
     if not text:
-        bidder = (project_info.get("bidder_name") or "").strip() or "[BIDDER COMPANY NAME]"
-        text = f"{bidder} | ABN [XX XXX XXX XXX] | [REGISTERED ADDRESS]"
+        bidder = (project_info.get("bidder_name") or "").strip() or export_i18n.export_t(
+            "export_footer_bidder_placeholder", output_language)
+        # "ABN [XX XXX XXX XXX]" stays as-is in both languages -- ABN is a
+        # fixed Australian legal-identifier label, not translatable content.
+        registered_address = export_i18n.export_t("export_footer_registered_address", output_language)
+        text = f"{bidder} | ABN [XX XXX XXX XXX] | {registered_address}"
         complete = False
     run = p.add_run(text)
     run.font.size = Pt(8)
@@ -430,7 +437,7 @@ def _add_company_footer_line(footer, project_info: dict, firm: dict | None = Non
 
 
 def _build_letter_methodology(doc: Document, methodology_text: str, theme: dict | None,
-                               sales_pitch_text: str | None = None):
+                               sales_pitch_text: str | None = None, output_language: str = "en"):
     """Renders the AI-drafted "Methodology and Deliverables" section -- same
     continuous-prose, bold-**subheading** convention as every other AI section
     draft in this tool (see draft_generator.py), reusing _add_draft_paragraph
@@ -440,15 +447,16 @@ def _build_letter_methodology(doc: Document, methodology_text: str, theme: dict 
     whether the methodology itself has been drafted yet."""
     theme = theme or _theme_colours(None)
     methodology_text = (methodology_text or "").strip()
+    eyebrow = export_i18n.export_t("export_eyebrow_why_choose_us", output_language)
     if not methodology_text:
         _add_placeholder_paragraph(
-            doc, "[NO METHODOLOGY DRAFTED YET -- generate first-pass drafts in the Draft Responses step]",
+            doc, export_i18n.export_t("export_no_methodology", output_language),
         )
-        _add_pull_quote_box(doc, sales_pitch_text, theme, eyebrow="Why choose us")
+        _add_pull_quote_box(doc, sales_pitch_text, theme, eyebrow=eyebrow)
         return
     for para_text in [p.strip() for p in methodology_text.split("\n\n") if p.strip()]:
         _add_draft_paragraph(doc, para_text, theme)
-    _add_pull_quote_box(doc, sales_pitch_text, theme, eyebrow="Why choose us")
+    _add_pull_quote_box(doc, sales_pitch_text, theme, eyebrow=eyebrow)
 
 
 def _add_letter_body_text(doc: Document, text: str, placeholder: str, theme: dict | None = None):
@@ -461,9 +469,9 @@ def _add_letter_body_text(doc: Document, text: str, placeholder: str, theme: dic
             _add_draft_paragraph(doc, para.strip(), theme)
 
 
-def _build_letter_scope_of_work(doc: Document, scope_items: list):
+def _build_letter_scope_of_work(doc: Document, scope_items: list, output_language: str = "en"):
     if not scope_items:
-        _add_placeholder_paragraph(doc, "[NO SCOPE ITEMS EXTRACTED -- run Tender Analysis, or add scope items manually]")
+        _add_placeholder_paragraph(doc, export_i18n.export_t("export_no_scope_items", output_language))
         return
     for i, item in enumerate(scope_items, start=1):
         doc.add_heading(f"2.{i} {item.title}", level=2)
@@ -472,10 +480,12 @@ def _build_letter_scope_of_work(doc: Document, scope_items: list):
                 p = doc.add_paragraph(style="List Bullet")
                 p.add_run(str(task))
         else:
-            _add_placeholder_paragraph(doc, f"[NO TASKS EXTRACTED FOR {item.title.upper()}]")
+            _add_placeholder_paragraph(
+                doc, export_i18n.export_t("export_no_tasks_for_item", output_language, item=item.title.upper()))
 
 
-def _build_letter_team(doc: Document, resource_plan: list, personnel_photos: dict, theme: dict):
+def _build_letter_team(doc: Document, resource_plan: list, personnel_photos: dict, theme: dict,
+                       output_language: str = "en"):
     """Built from the SAME resourcing plan (Team & Resourcing tab) and the
     same "include in proposal" ticks as the Large Scope pack's Key Personnel
     profiles -- see resourcing.letter_team_entries -- rather than a separate,
@@ -491,9 +501,7 @@ def _build_letter_team(doc: Document, resource_plan: list, personnel_photos: dic
     entries = letter_team_entries(resource_plan or [])
     if not entries:
         _add_placeholder_paragraph(
-            doc,
-            "[NO TEAM MEMBERS ASSIGNED -- assign people (and tick 'Include in proposal') "
-            "in the Team & Resourcing tab]",
+            doc, export_i18n.export_t("export_no_team_members", output_language),
         )
         return
 
@@ -699,7 +707,7 @@ def _letter_program_native_table(doc: Document, model, theme: dict):
 def _build_letter_program(doc: Document, program_schedule: dict, week_labels: list, theme: dict,
                           style: str | None = None, methodology_stages: list | None = None,
                           start_date=None, analysis=None, project_name: str = "",
-                          client_name: str = ""):
+                          client_name: str = "", output_language: str = "en"):
     """The Program section, in the presentation style the user chose.
 
     Three of the four styles render as a full-width themed image of exactly
@@ -708,7 +716,7 @@ def _build_letter_program(doc: Document, program_schedule: dict, week_labels: li
     goes wrong falls back to the original shaded week grid rather than
     leaving the section empty."""
     if not program_schedule or not week_labels:
-        _add_placeholder_paragraph(doc, "[NO PROGRAM ENTERED -- set the delivery weeks in the Program step]")
+        _add_placeholder_paragraph(doc, export_i18n.export_t("export_no_program_entered", output_language))
         return
 
     try:
@@ -760,13 +768,15 @@ def _build_risk_table(doc: Document, register, theme: dict | None):
     run.italic = True
 
 
-def _build_letter_signoff(doc: Document, sender: dict):
+def _build_letter_signoff(doc: Document, sender: dict, output_language: str = "en"):
     doc.add_paragraph()
-    doc.add_paragraph("Regards")
+    doc.add_paragraph(export_i18n.export_t("export_letter_signoff_regards", output_language))
     doc.add_paragraph()
     doc.add_paragraph()
     name_p = doc.add_paragraph()
-    name_p.add_run(sender.get("name") or "[SENDER NAME]").bold = True
+    name_p.add_run(
+        sender.get("name") or export_i18n.export_t("export_letter_sender_placeholder", output_language)
+    ).bold = True
     if sender.get("title"):
         doc.add_paragraph(sender["title"])
     if sender.get("phone"):
@@ -778,13 +788,15 @@ def _build_letter_signoff(doc: Document, sender: dict):
 def _build_letter_review_checklist(doc: Document, output_language: str = "en"):
     doc.add_heading(export_i18n.export_t("heading_letter_review_checklist", output_language), level=1)
     items = [
-        "Replace every red bracketed placeholder above with real, verified content.",
-        "Confirm every fee figure is a real, reviewed number -- not a seeded estimate.",
-        "Confirm named team members' availability for the stated program.",
-        "Confirm the program dates are realistic and reflect any award-date dependency.",
-        "Confirm the Terms of Engagement reference the correct/current contract.",
-        "Fill in the footer's ABN and registered address placeholders on every page.",
-        "Proofread the document as a whole -- cover page, Executive Summary, and sign-off details.",
+        export_i18n.export_t(key, output_language) for key in (
+            "export_letter_checklist_placeholders",
+            "export_letter_checklist_fees",
+            "export_letter_checklist_team",
+            "export_letter_checklist_program",
+            "export_letter_checklist_terms",
+            "export_letter_checklist_footer",
+            "export_letter_checklist_proofread",
+        )
     ]
     _add_bullets(doc, items, color=RED)
 
@@ -796,10 +808,16 @@ def _build_letter_review_checklist(doc: Document, output_language: str = "en"):
 def _build_cover_page(
     doc: Document, project_info: dict, cover_image_bytes: bytes | None,
     cover_theme_image_bytes: bytes | None = None, theme: dict | None = None,
-    firm: dict | None = None,
+    firm: dict | None = None, output_language: str = "en",
 ):
     theme = theme or _theme_colours(project_info.get("proposal_theme"))
 
+    # NOTE: this English disclaimer_text is what gets BAKED into the
+    # full-bleed cover PNG below (divider_designer.render_full_bleed_cover
+    # renders it as a raster image) -- localising that is a font-rendering
+    # change in divider_designer.py, out of scope here. The plain-text
+    # FALLBACK cover (used only if the image render fails) gets its own
+    # language-aware disclaimer further down instead.
     disclaimer_text = (
         "FIRST-PASS PREPARATION PACK -- NOT SUBMISSION READY. Generated "
         f"{datetime.now().strftime('%d %B %Y')}. Every red guidance box and bracketed "
@@ -839,7 +857,10 @@ def _build_cover_page(
         doc.add_paragraph()
     title = doc.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = title.add_run(project_info.get("tender_name") or "Tender Response Pack")
+    run = title.add_run(
+        project_info.get("tender_name")
+        or export_i18n.export_t("export_cover_fallback_title", output_language)
+    )
     run.font.size = Pt(26)
     run.font.bold = True
     run.font.color.rgb = theme["heading"]
@@ -857,14 +878,16 @@ def _build_cover_page(
             img_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
             img_para.add_run().add_picture(io.BytesIO(image_bytes), width=Cm(16))
         except Exception:
-            _add_placeholder_paragraph(doc, "[COVER IMAGE PLACEHOLDER]")
+            _add_placeholder_paragraph(doc, export_i18n.export_t("export_cover_image_placeholder", output_language))
     else:
-        _add_placeholder_paragraph(doc, "[COVER IMAGE PLACEHOLDER: PROJECT / SITE PHOTO]")
+        _add_placeholder_paragraph(
+            doc, export_i18n.export_t("export_cover_image_placeholder_detail", output_language))
 
     doc.add_paragraph()
     warn = doc.add_paragraph()
     warn.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = warn.add_run(disclaimer_text)
+    run = warn.add_run(export_i18n.export_t(
+        "export_cover_disclaimer", output_language, date=datetime.now().strftime('%d %B %Y')))
     run.font.italic = True
     run.font.size = Pt(10)
     run.font.color.rgb = RED
@@ -923,13 +946,14 @@ def _build_executive_summary(doc: Document, exec_summary, project_info: dict | N
 
     intro = getattr(exec_summary, "intro", "") if exec_summary else ""
     blocks = getattr(exec_summary, "blocks", None) if exec_summary else None
+    eyebrow = export_i18n.export_t("export_pull_quote_eyebrow_differentiator", output_language)
 
     if not intro and not blocks:
         _add_placeholder_paragraph(
-            doc, "[NO EXECUTIVE SUMMARY DRAFTED YET -- generate one in the Draft Responses step]",
+            doc, export_i18n.export_t("export_no_executive_summary", output_language),
         )
         doc.add_paragraph()
-        _add_pull_quote_box(doc, differentiator_text, theme, eyebrow="What sets us apart")
+        _add_pull_quote_box(doc, differentiator_text, theme, eyebrow=eyebrow)
         return
 
     if intro:
@@ -944,28 +968,27 @@ def _build_executive_summary(doc: Document, exec_summary, project_info: dict | N
             title_p = doc.add_paragraph()
             title_p.paragraph_format.space_before = Pt(8)
             title_p.paragraph_format.space_after = Pt(2)
-            title_run = title_p.add_run(block.title or "[UNTITLED]")
+            title_run = title_p.add_run(
+                block.title or export_i18n.export_t("export_block_untitled", output_language))
             title_run.bold = True
             title_run.font.size = Pt(13)
             title_run.font.color.rgb = theme["heading"]
 
             body_p = doc.add_paragraph()
             body_p.paragraph_format.space_after = Pt(10)
-            body_run = body_p.add_run(block.body or "[NO CONTENT DRAFTED]")
+            body_run = body_p.add_run(
+                block.body or export_i18n.export_t("export_no_content_drafted", output_language))
             body_run.font.size = Pt(11)
             if not block.body:
                 body_run.font.color.rgb = RED
                 body_run.italic = True
         _end_columns(doc)
 
-    _add_pull_quote_box(doc, differentiator_text, theme, eyebrow="What sets us apart")
+    _add_pull_quote_box(doc, differentiator_text, theme, eyebrow=eyebrow)
 
     note = doc.add_paragraph()
     note.paragraph_format.space_before = Pt(6)
-    note_run = note.add_run(
-        "[UNWEIGHTED -- carries no evaluation score, but sets the tone for everything that "
-        "follows. Confirm every claim above before submission.]"
-    )
+    note_run = note.add_run(export_i18n.export_t("export_unweighted_note", output_language))
     note_run.italic = True
     note_run.font.size = Pt(8)
     note_run.font.color.rgb = RED
@@ -1621,13 +1644,8 @@ def _build_personnel_block(
             pass
     _add_placeholder_paragraph(
         doc,
-        ("[FIRST-PASS CHART ABOVE, generated from the Team & Resourcing tab -- "
-         "replace it with the finished chart. A companion PowerPoint org chart is "
-         "exported alongside this document; finish it there, then paste it over "
-         "the image above.]") if org_chart_png else
-        ("[INSERT ORGANISATION CHART HERE -- paste in the finished chart image. A "
-         "companion PowerPoint org chart template is exported alongside this "
-         "document; build the chart there, then paste it into this space.]"),
+        export_i18n.export_t("export_org_chart_firstpass_note", output_language) if org_chart_png else
+        export_i18n.export_t("export_org_chart_insert_note", output_language),
     )
 
     _build_personnel_profiles(doc, resource_plan, personnel_photos, theme, output_language)
@@ -1697,7 +1715,7 @@ def _build_personnel_profiles(
             except Exception:
                 photo_bytes = None
         if not photo_bytes:
-            _add_photo_placeholder_box(photo_cell)
+            _add_photo_placeholder_box(photo_cell, output_language)
 
         name_p = text_cell.paragraphs[0]
         name_run = name_p.add_run(name or "[INSERT KEY PERSONNEL NAME]")
@@ -1761,7 +1779,7 @@ def _add_personnel_field_line(cell, label: str, value: str, placeholder: str):
         r2.italic = True
 
 
-def _add_photo_placeholder_box(cell) -> None:
+def _add_photo_placeholder_box(cell, output_language: str = "en") -> None:
     """A shaded, empty photo slot -- as close to a one-click 'drop a headshot
     here' affordance as a static .docx can offer: click the cell, delete the
     placeholder text, then Insert > Pictures. Used for both key-personnel
@@ -1771,13 +1789,13 @@ def _add_photo_placeholder_box(cell) -> None:
     _set_cell_margins(cell, top=260, bottom=260, left=100, right=100)
     p = cell.paragraphs[0]
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = p.add_run("[INSERT PHOTO]")
+    r = p.add_run(export_i18n.export_t("export_photo_placeholder", output_language))
     r.font.color.rgb = RED
     r.italic = True
     r.font.size = Pt(9)
     p2 = cell.add_paragraph()
     p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r2 = p2.add_run("Click here, delete this text, then Insert ▸ Pictures")
+    r2 = p2.add_run(export_i18n.export_t("export_photo_placeholder_instruction", output_language))
     r2.font.size = Pt(7)
     r2.font.color.rgb = DARK_GREY
     r2.italic = True
@@ -1867,7 +1885,7 @@ def _build_sc1_project_experience_compact(
             except Exception:
                 photo_bytes = None
         if not photo_bytes:
-            _add_photo_placeholder_box(photo_cell)
+            _add_photo_placeholder_box(photo_cell, output_language)
 
         title_p = text_cell.paragraphs[0]
         title_text = project.title + (f" | {project.client}" if project.client else "")
@@ -1944,7 +1962,8 @@ def _build_reference_experience(
         table.autofit = True
         for i, cell in enumerate(table.rows[0].cells):
             if i < len(pair):
-                _fill_reference_project_cell(cell, pair[i], reference_project_photos, theme, photo_w)
+                _fill_reference_project_cell(cell, pair[i], reference_project_photos, theme, photo_w,
+                                             output_language)
         doc.add_paragraph()
 
 
@@ -1966,7 +1985,7 @@ def _reference_photo_width(doc: Document):
 
 
 def _fill_reference_project_cell(cell, project, photos: dict[str, bytes], theme: dict,
-                                 photo_width=None):
+                                 photo_width=None, output_language: str = "en"):
     photo_width = photo_width or Cm(7.8)
     photo_bytes = _photo_for(photos, project, project.title)
     p0 = cell.paragraphs[0]
@@ -1983,7 +2002,7 @@ def _fill_reference_project_cell(cell, project, photos: dict[str, bytes], theme:
         nested.autofit = False
         nested.rows[0].height = Cm(3.6)
         nested.rows[0].cells[0].width = photo_width
-        _add_photo_placeholder_box(nested.rows[0].cells[0])
+        _add_photo_placeholder_box(nested.rows[0].cells[0], output_language)
 
     title_p = cell.add_paragraph()
     title_text = project.title + (f" | {project.client}" if project.client else "")
@@ -2190,9 +2209,9 @@ def _build_commercial_section(doc: Document, discipline_fee_lines: list | None, 
     # Nothing ticked must never produce a silently fee-less proposal.
     if not any(fee_included.values()):
         doc.add_heading(export_i18n.export_t("heading_fee_summary", output_language), level=2)
-        _add_placeholder_paragraph(doc, FEE_NOTHING_SELECTED)
+        _add_placeholder_paragraph(doc, export_i18n.export_t("export_fee_nothing_selected", output_language))
         doc.add_paragraph()
-        _build_cash_flow(doc, discipline_fee_lines, program_schedule, program_week_labels, theme)
+        _build_cash_flow(doc, discipline_fee_lines, program_schedule, program_week_labels, theme, output_language)
         _build_contractual_arrangements(doc, output_language)
         return
 
@@ -2202,7 +2221,7 @@ def _build_commercial_section(doc: Document, discipline_fee_lines: list | None, 
     if not fee_included["discipline_buildup"]:
         # The other ticked presentation(s) have rendered; the cash flow below
         # still derives from the priced build-up whether or not it is shown.
-        _build_cash_flow(doc, discipline_fee_lines, program_schedule, program_week_labels, theme)
+        _build_cash_flow(doc, discipline_fee_lines, program_schedule, program_week_labels, theme, output_language)
         _build_contractual_arrangements(doc, output_language)
         return
 
@@ -2230,7 +2249,7 @@ def _build_commercial_section(doc: Document, discipline_fee_lines: list | None, 
             run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
 
     doc.add_heading(export_i18n.export_t("heading_cash_flow", output_language), level=3)
-    _build_cash_flow(doc, discipline_fee_lines, program_schedule, program_week_labels, theme)
+    _build_cash_flow(doc, discipline_fee_lines, program_schedule, program_week_labels, theme, output_language)
 
     _build_contractual_arrangements(doc, output_language)
 
@@ -2308,7 +2327,8 @@ def cash_flow_rows(discipline_fee_lines: list | None,
 
 def _build_cash_flow(doc: Document, discipline_fee_lines: list | None,
                      program_schedule: dict[str, list[bool]] | None,
-                     program_week_labels: list[str] | None, theme: dict | None):
+                     program_week_labels: list[str] | None, theme: dict | None,
+                     output_language: str = "en"):
     """Renders the derived cash-flow profile, or the original placeholder when
     the inputs it needs don't exist yet.
 
@@ -2319,7 +2339,7 @@ def _build_cash_flow(doc: Document, discipline_fee_lines: list | None,
     theme = theme or _theme_colours(None)
     rows = cash_flow_rows(discipline_fee_lines, program_schedule, program_week_labels)
     if not rows:
-        _add_placeholder_paragraph(doc, "[INSERT PROJECT CASH FLOW PROFILE, BASED ON THE FEE AND PROGRAM]")
+        _add_placeholder_paragraph(doc, export_i18n.export_t("export_cash_flow_insert", output_language))
         return
 
     note = doc.add_paragraph()
@@ -2362,11 +2382,7 @@ def _build_local_benefits(doc: Document, project_info: dict | None, theme: dict 
 
     doc.add_heading(export_i18n.export_t("heading_local_benefits", output_language), level=2)
     note = doc.add_paragraph()
-    r = note.add_run(
-        "The brief calls for local-benefit / local-content commitments -- the headings below are "
-        "a standard starting structure; every figure and claim must be confirmed for this bid "
-        "before submission."
-    )
+    r = note.add_run(export_i18n.export_t("export_local_benefits_intro_note", output_language))
     r.italic = True
     r.font.color.rgb = RED
 
@@ -2376,31 +2392,28 @@ def _build_local_benefits(doc: Document, project_info: dict | None, theme: dict 
     # instruction to go and write them again for this bid. The other two are
     # genuinely per-bid (which office delivers THIS job, which local strategy
     # THIS brief names) and keep their placeholders.
-    for heading, placeholder, real_text in [
-        ("Local resources and location",
-         "[CONFIRM % OF THE TEAM BASED LOCALLY AND WHICH OFFICE(S) WILL DELIVER THE WORK]",
+    for heading_key, placeholder, real_text in [
+        ("export_local_benefits_heading_resources",
+         export_i18n.export_t("export_local_benefits_confirm_local", output_language),
          firm.get("offices_text")),
-        ("Contribution to the local economy",
-         f"[DESCRIBE HOW THIS BID SUPPORTS LOCAL EMPLOYMENT, LOCAL SUPPLIERS/SUBCONSULTANTS, AND "
-         f"REINVESTMENT IN {client.upper()}'S REGION]",
+        ("export_local_benefits_heading_economy",
+         export_i18n.export_t("export_local_benefits_describe_economy", output_language,
+                              client=client.upper()),
          None),
-        ("Alignment with local strategy / vision",
-         "[REFERENCE ANY NAMED LOCAL/REGIONAL STRATEGY OR VISION DOCUMENT THE BRIEF CALLS OUT]",
+        ("export_local_benefits_heading_strategy",
+         export_i18n.export_t("export_local_benefits_reference_strategy", output_language),
          None),
-        ("Profit / community reinvestment",
-         "[CONFIRM A REAL, CURRENT FIRM COMMUNITY/REINVESTMENT PROGRAM TO REFERENCE HERE]",
+        ("export_local_benefits_heading_reinvestment",
+         export_i18n.export_t("export_local_benefits_confirm_reinvestment", output_language),
          firm.get("community_text")),
     ]:
-        # TODO A3 i18n: these 4 level-3 sub-headings are entangled with the
-        # firm-profile real_text/placeholder branching above -- left in
-        # English for this pass (minor structural headings, not top-level).
-        doc.add_heading(heading, level=3)
+        doc.add_heading(export_i18n.export_t(heading_key, output_language), level=3)
         if (real_text or "").strip():
             for para in str(real_text).split("\n\n"):
                 if para.strip():
                     doc.add_paragraph(para.strip())
             confirm = doc.add_paragraph()
-            cr = confirm.add_run("[FROM YOUR FIRM PROFILE -- confirm it still reads correctly for this bid]")
+            cr = confirm.add_run(export_i18n.export_t("export_local_benefits_from_profile", output_language))
             cr.font.color.rgb = RED
             cr.italic = True
         else:
@@ -2412,23 +2425,23 @@ def _build_local_benefits(doc: Document, project_info: dict | None, theme: dict 
 
 def _build_review_checklist(doc: Document, sections: list, output_language: str = "en"):
     doc.add_heading(export_i18n.export_t("heading_review_checklist", output_language), level=1)
+    # The marker format named in export_checklist_replace_placeholders has to
+    # match what the exporters actually write in THIS language, or the
+    # instruction sends someone searching the document for a string that
+    # occurs nowhere in it -- see export_i18n.PLACEHOLDER_PREFIXES.
     items = [
-        "Delete every red 'DELETE BEFORE SUBMISSION' guidance box in this document.",
-        # The marker format named here has to match what the exporters
-        # actually write, or the instruction sends someone searching the
-        # document for a string that occurs nowhere in it. "[USER TO
-        # INSERT ...]" is a draft_generator prompt convention that never
-        # survives into an export; these three are what really appears.
-        "Replace every red bracketed placeholder -- [INSERT ...], [CONFIRM ...] and "
-        "[TO BE COMPLETED: ...] -- with verified, project-specific content.",
-        "Confirm every page limit and formatting rule against the current brief and any addenda.",
-        "Complete and attach all returnable schedules / forms listed in the Compliance Matrix.",
-        "Confirm named personnel, CVs, certifications, and insurances are current and accurate.",
-        "Confirm the priced schedule against any stated fee cap.",
-        "Replace all graphic placeholders with final, approved graphics.",
-        "Update the Table of Contents field before final export.",
-        "Run a final compliance check against every row in the Compliance Matrix.",
-        "Confirm the submission method, format, and deadline one more time before lodging.",
+        export_i18n.export_t(key, output_language) for key in (
+            "export_checklist_delete_boxes",
+            "export_checklist_replace_placeholders",
+            "export_checklist_page_limits",
+            "export_checklist_schedules",
+            "export_checklist_personnel",
+            "export_checklist_fee_cap",
+            "export_checklist_graphics",
+            "export_checklist_toc",
+            "export_checklist_compliance_check",
+            "export_checklist_submission",
+        )
     ]
     _add_bullets(doc, items)
 
@@ -2485,7 +2498,7 @@ def collect_placeholders(doc: Document, limit: int = 60) -> list[str]:
 def _build_user_input_list(doc: Document, compliance_items: list, gap_items: list, drafts: dict,
                            document_placeholders: list | None = None, output_language: str = "en"):
     doc.add_heading(export_i18n.export_t("heading_user_input_required", output_language), level=1)
-    doc.add_paragraph("Everything below still needs a human to supply real information.")
+    doc.add_paragraph(export_i18n.export_t("export_user_input_intro", output_language))
 
     seen = set()
     entries = []
@@ -2506,7 +2519,7 @@ def _build_user_input_list(doc: Document, compliance_items: list, gap_items: lis
         doc.add_heading(export_i18n.export_t("heading_placeholders_in_document", output_language), level=2)
         _add_bullets(doc, document_placeholders, color=RED)
 
-    _add_bullets(doc, entries or ["(none identified -- verify manually)"])
+    _add_bullets(doc, entries or [export_i18n.export_t("export_user_input_none", output_language)])
 
 
 # ---------------------------------------------------------------------------

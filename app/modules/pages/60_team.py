@@ -329,6 +329,7 @@ with tabs[7]:
                     _record_ai_click()
                     suggestions = resourcing.suggest_proposal_inclusion(
                         st.session_state.resource_plan, st.session_state.analysis, st.session_state.ai_config,
+                        output_language=st.session_state.get("output_language", "en"),
                     )
                     st.session_state.personnel_inclusion_suggestions = suggestions
                     # Apply the recommendation to each MERGED profile's tick, keyed on the
@@ -481,7 +482,8 @@ with tabs[7]:
             # even if the user has since overridden the tick by hand, so they can see
             # what the recommendation was.
             if a.slot in resourcing.FIRM_MANAGEMENT_ROLES:
-                st.caption(i18n.t("team_ai_note_prefix", reason=resourcing.FIRM_LEADERSHIP_REASON))
+                st.caption(i18n.t("team_ai_note_prefix", reason=resourcing.firm_leadership_reason(
+                    st.session_state.get("output_language", "en"))))
             else:
                 _verdict = st.session_state.personnel_inclusion_suggestions.get(a.slot)
                 if _verdict:

@@ -54,8 +54,18 @@ OPTIONAL_MANAGEMENT_ROLES = {"Design Manager"}
 
 # Fixed note shown next to the firm's three leadership roles' "include in proposal"
 # tick -- these three are never judged against scope (see suggest_proposal_inclusion),
-# they're just tickable "in case" per the user's own instruction.
+# they're just tickable "in case" per the user's own instruction. Kept as a
+# plain English constant for backward compatibility with any caller that
+# still reads it directly; UI callers should prefer firm_leadership_reason()
+# below, which respects the project's output_language (Audit Round 2, Part 5).
 FIRM_LEADERSHIP_REASON = "Project leadership -- recommended to include."
+
+_FIRM_LEADERSHIP_REASON_ES = "Liderazgo del proyecto -- se recomienda incluir."
+
+
+def firm_leadership_reason(output_language: str = "en") -> str:
+    """Same note as FIRM_LEADERSHIP_REASON, in the project's output_language."""
+    return _FIRM_LEADERSHIP_REASON_ES if output_language == "es" else FIRM_LEADERSHIP_REASON
 
 # Project Management is always part of the discipline fee build-up.
 ALWAYS_INCLUDED_DISCIPLINE = "Project Management"
@@ -895,7 +905,7 @@ Return a JSON object:
 
 
 def suggest_proposal_inclusion(
-    plan: list, analysis=None, config: dict | None = None,
+    plan: list, analysis=None, config: dict | None = None, output_language: str = "en",
 ) -> dict[str, dict]:
     """
     Recommend which Key Personnel slots should be ticked "include in proposal".
@@ -916,13 +926,21 @@ def suggest_proposal_inclusion(
     AI call never silently drops someone from the proposal. The caller (app.py)
     applies the result to session state, and the checkbox always stays
     user-overridable regardless of what's recommended here.
-    """
+
+    `output_language`: language for the AI-drafted "reason" strings (and the
+    fixed fallback reasons below) -- "en" (default) or "es", same convention
+    as every other AI builder in this app. These reasons are shown directly
+    in the Team & Resourcing tab (see pages/60_team.py), not baked into an
+    exported document, but they track the project's output_language rather
+    than the app's own UI language for the same reason draft prose does:
+    a Spanish-speaking user could easily be preparing an English-language
+    tender, or vice versa."""
     result: dict[str, dict] = {}
     discipline_slots: list[str] = []
     for a in plan or []:
         if a.slot_kind == "management":
             if a.slot in FIRM_MANAGEMENT_ROLES:
-                result[a.slot] = {"recommended": True, "reason": FIRM_LEADERSHIP_REASON}
+                result[a.slot] = {"recommended": True, "reason": firm_leadership_reason(output_language)}
             # else: the client's own PM (CLIENT_ROLE) -- not a firm profile, skip.
             continue
         if a.slot not in discipline_slots:
@@ -935,7 +953,11 @@ def suggest_proposal_inclusion(
         for slot in discipline_slots:
             result[slot] = {
                 "recommended": True,
-                "reason": "No tender analysis available yet to judge relevance against -- recommended by default.",
+                "reason": (
+                    "No hay análisis de la licitación disponible aún para evaluar la relevancia -- "
+                    "recomendado por defecto." if output_language == "es" else
+                    "No tender analysis available yet to judge relevance against -- recommended by default."
+                ),
             }
         return result
 
@@ -951,6 +973,12 @@ def suggest_proposal_inclusion(
         scope_items=scope_items_text,
         roles="\n".join(f"- {s}" for s in discipline_slots),
     )
+    if output_language == "es":
+        prompt += (
+            "\n\nWrite the \"reason\" string for each role in Spanish (Español). Keep the JSON "
+            "field names and the \"slot\" values exactly as given, in English -- translate only "
+            "the reason's language, not its substance."
+        )
 
     try:
         data = call_ai_json(prompt, system_message=_INCLUSION_SYSTEM_MESSAGE, config=config, max_tokens=2000)
@@ -958,7 +986,11 @@ def suggest_proposal_inclusion(
         for slot in discipline_slots:
             result[slot] = {
                 "recommended": True,
-                "reason": "AI recommendation unavailable -- recommended by default; review and untick anything not needed.",
+                "reason": (
+                    "Recomendación de IA no disponible -- recomendado por defecto; revise y "
+                    "desmarque lo que no sea necesario." if output_language == "es" else
+                    "AI recommendation unavailable -- recommended by default; review and untick anything not needed."
+                ),
             }
         return result
 
@@ -973,11 +1005,17 @@ def suggest_proposal_inclusion(
         if item is not None:
             result[slot] = {
                 "recommended": bool(item.get("recommended", True)),
-                "reason": (item.get("reason") or "").strip() or "No reason given by the AI.",
+                "reason": (item.get("reason") or "").strip() or (
+                    "La IA no proporcionó un motivo." if output_language == "es" else
+                    "No reason given by the AI."
+                ),
             }
         else:
             result[slot] = {
                 "recommended": True,
-                "reason": "Not covered by the AI's response -- recommended by default.",
+                "reason": (
+                    "No cubierto por la respuesta de la IA -- recomendado por defecto." if output_language == "es" else
+                    "Not covered by the AI's response -- recommended by default."
+                ),
             }
     return result

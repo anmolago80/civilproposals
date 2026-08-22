@@ -19,6 +19,20 @@ from __future__ import annotations
 with tabs[9]:
     st.subheader(i18n.t("export_subheader"))
 
+    # Audit fix Part 5: same non-blocking notice as the Drafting tab --
+    # exported packs are built from st.session_state.drafts as they stand
+    # right now, so if those were generated in a different language than
+    # the project's current output_language, the exported pack will still
+    # be in the OLD language until the user goes back and regenerates.
+    # Never triggers a regeneration itself. See _generated_language_stale()
+    # in 10_state_helpers.py.
+    if _generated_language_stale():
+        st.info(i18n.t(
+            "generated_language_stale_notice",
+            from_lang=i18n.LANGUAGES.get(st.session_state.get("generated_language"), "English"),
+            to_lang=i18n.LANGUAGES.get(st.session_state.get("output_language", "en"), "English"),
+        ))
+
     # Audit fix Part 2c: _mark_free_artifact_downloaded() (10_state_helpers.py)
     # now distinguishes a genuine database failure from the expected
     # duplicate-key "already downloaded" case -- a genuine failure sets this
@@ -363,6 +377,7 @@ with tabs[9]:
                                 tender_name=st.session_state.tender_name,
                                 theme_name=st.session_state.proposal_theme,
                                 style=st.session_state.org_chart_style,
+                                output_language=st.session_state.get("output_language", "en"),
                             ),
                         )
                         # Audit fix Part 2a -- see the proposal DOCX button above.
@@ -413,6 +428,7 @@ with tabs[9]:
                                 st.session_state.client_name, st.session_state.project_name,
                                 st.session_state.proposal_theme,
                                 bool(st.session_state.methodology_wvr_confirmed),
+                                st.session_state.get("output_language", "en"),
                             ),
                             lambda: methodology_pptx.populate_methodology(
                                 st.session_state.analysis,
@@ -423,6 +439,7 @@ with tabs[9]:
                                 week_labels=st.session_state.program_week_labels,
                                 wvr_confirmed=bool(st.session_state.methodology_wvr_confirmed),
                                 style=st.session_state.methodology_style,
+                                output_language=st.session_state.get("output_language", "en"),
                             ),
                         )
                         st.download_button(
@@ -467,6 +484,7 @@ with tabs[9]:
                                 methodology_stages=st.session_state.methodology_stages,
                                 start_date=st.session_state.program_start_date,
                                 analysis=st.session_state.analysis,
+                                output_language=st.session_state.get("output_language", "en"),
                             ),
                         )
                         st.download_button(

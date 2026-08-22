@@ -38,7 +38,7 @@ from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.oxml.ns import qn
 from pptx.util import Emu, Inches, Pt
 
-from modules import program_render
+from modules import export_i18n, program_render
 from modules.divider_designer import THEME_COLOURS
 
 _WHITE = RGBColor(0xFF, 0xFF, 0xFF)
@@ -59,6 +59,11 @@ _SLIDE_W = Inches(11.6929)
 _SLIDE_H = Inches(8.2677)
 _M = Inches(0.3)
 
+# Superseded by export_i18n's "pptx_program_empty_note" key (Audit Round 2,
+# Part 5, which made this note respect output_language) -- kept here as a
+# fixed English constant only for backward compatibility with any external
+# caller that still imports this name directly; _placeholder_slide() itself
+# no longer reads it.
 EMPTY_NOTE = ("[NO PROGRAM ENTERED -- build the delivery program in the Fee Estimate tab, then "
               "re-download this PowerPoint]")
 
@@ -234,15 +239,15 @@ def _save(prs) -> bytes:
     return buffer.read()
 
 
-def _heading(slide, model) -> int:
+def _heading(slide, model, language: str = "en") -> int:
     """Title + subtitle. Returns the y the content may start at -- a FIXED
     value (only _M and the two Inches() constants below, none of which
     depend on the slide's height), so it can be used as CONTENT_TOP_EMU
     below without calling this first."""
     title_h = Inches(0.5)
-    _text(slide, _M, _M, Emu(int(_SLIDE_W - 2 * _M)), title_h, "Delivery program", 20,
-          _DARK_TEXT, bold=True)
-    subtitle = (model.project_name or "").strip() or "[Insert project name]"
+    _text(slide, _M, _M, Emu(int(_SLIDE_W - 2 * _M)), title_h,
+          export_i18n.export_t("pptx_program_title", language), 20, _DARK_TEXT, bold=True)
+    subtitle = (model.project_name or "").strip() or export_i18n.export_t("pptx_insert_project_name", language)
     if (model.client_name or "").strip():
         subtitle = f"{subtitle} — {model.client_name.strip()}"
     _text(slide, _M, Emu(int(_M + title_h)), Emu(int(_SLIDE_W - 2 * _M)), Inches(0.3), subtitle, 11,
@@ -446,12 +451,12 @@ def _milestones(slide, model, grid_left, grid_right, grid_top, grid_bottom, labe
               milestone.label, pt, _MILESTONE_ORANGE, bold=True, align=align)
 
 
-def _activity_legend(model, accent: RGBColor) -> list[tuple[RGBColor, str]]:
+def _activity_legend(model, accent: RGBColor, language: str = "en") -> list[tuple[RGBColor, str]]:
     """See program_render._activity_legend(): no key for a mark that isn't on
     the chart."""
-    entries = [(accent, "Scheduled activity")]
+    entries = [(accent, export_i18n.export_t("pptx_program_legend_scheduled", language))]
     if model.milestones:
-        entries.append((_MILESTONE_ORANGE, "Milestone / hold point"))
+        entries.append((_MILESTONE_ORANGE, export_i18n.export_t("pptx_program_legend_milestone", language)))
     return entries
 
 
@@ -492,11 +497,11 @@ def _legend(slide, entries: list[tuple[RGBColor, str]], y: int, x: int, scale: f
         cursor = text_x + width_emu + int(Inches(0.14) * scale)
 
 
-def _placeholder_slide(model) -> bytes:
+def _placeholder_slide(model, language: str = "en") -> bytes:
     prs, slide = _new_deck()
-    top = _heading(slide, model)
+    top = _heading(slide, model, language)
     _text(slide, _M, Emu(int(top + Inches(0.3))), Emu(int(_SLIDE_W - 2 * _M)), Inches(0.6),
-          EMPTY_NOTE, 14, _RED, align=PP_ALIGN.CENTER)
+          export_i18n.export_t("pptx_program_empty_note", language), 14, _RED, align=PP_ALIGN.CENTER)
     return _save(prs)
 
 
@@ -512,7 +517,7 @@ _GANTT_MILESTONE_H_REF = 0.42
 _GANTT_LEGEND_H_REF = 0.34
 
 
-def _slide_gantt(model, accent: RGBColor) -> bytes:
+def _slide_gantt(model, accent: RGBColor, language: str = "en") -> bytes:
     n = len(model.items)
     has_ms = bool(model.milestones)
     natural_h_in = (_GANTT_HEADER_H_REF + _GANTT_GAP_REF
@@ -522,7 +527,7 @@ def _slide_gantt(model, accent: RGBColor) -> bytes:
     scale, total_h_emu, avail_h_emu = _fit_height(int(Inches(natural_h_in)))
 
     prs, slide = _new_deck()
-    top = _heading(slide, model)
+    top = _heading(slide, model, language)
 
     label_col_w = int(Inches(_GANTT_LABEL_COL_REF_IN) * scale)
     grid_left = CONTENT_LEFT_EMU + label_col_w
@@ -588,7 +593,7 @@ def _slide_gantt(model, accent: RGBColor) -> bytes:
     if has_ms:
         _milestones(slide, model, grid_left, grid_right, bounds["grid_top"], bounds["grid_bottom"],
                     bounds["ms_y"], bounds["ms_h"], scale)
-    _legend(slide, _activity_legend(model, accent), bounds["legend_y"], CONTENT_LEFT_EMU, scale)
+    _legend(slide, _activity_legend(model, accent, language), bounds["legend_y"], CONTENT_LEFT_EMU, scale)
 
     _grow(prs, total_h_emu)
     return _save(prs)
@@ -616,7 +621,7 @@ _SWIM_MILESTONE_H_REF = 0.42
 _SWIM_LEGEND_H_REF = 0.34
 
 
-def _slide_swimlanes(model, accent: RGBColor) -> bytes:
+def _slide_swimlanes(model, accent: RGBColor, language: str = "en") -> bytes:
     grouped = _grouped_by_stage(model)
     total_rows = sum(len(members) for _, members in grouped)
     has_ms = bool(model.milestones)
@@ -629,7 +634,7 @@ def _slide_swimlanes(model, accent: RGBColor) -> bytes:
     scale, total_h_emu, avail_h_emu = _fit_height(int(Inches(natural_h_in)))
 
     prs, slide = _new_deck()
-    top = _heading(slide, model)
+    top = _heading(slide, model, language)
 
     label_col_w = int(Inches(_SWIM_LABEL_COL_REF_IN) * scale)
     grid_left = CONTENT_LEFT_EMU + label_col_w
@@ -740,7 +745,7 @@ _TABLE_GAP_REF = 0.16
 _TABLE_LEGEND_H_REF = 0.32
 
 
-def _slide_table(model, accent: RGBColor) -> bytes:
+def _slide_table(model, accent: RGBColor, language: str = "en") -> bytes:
     n = len(model.items)
     natural_h_in = (_TABLE_HEADER_H_REF + n * _TABLE_ROW_H_REF + _TABLE_GAP_REF
                    + _TABLE_LEGEND_H_REF)
@@ -761,7 +766,7 @@ def _slide_table(model, accent: RGBColor) -> bytes:
     row_h = min(int(Inches(_TABLE_ROW_H_MAX_IN)), int(remaining_for_rows / n)) if n else 0
 
     prs, slide = _new_deck()
-    top = _heading(slide, model)
+    top = _heading(slide, model, language)
 
     headers = ["Scope item", "Commence", "Complete", "Duration"]
     widths = [Inches(5.0), Inches(2.1), Inches(2.1), Inches(1.89)]
@@ -842,7 +847,7 @@ _TL_MILESTONE_H_REF = 0.42
 _TL_LEGEND_H_REF = 0.34
 
 
-def _slide_timeline(model, accent: RGBColor) -> bytes:
+def _slide_timeline(model, accent: RGBColor, language: str = "en") -> bytes:
     n = len(model.items)
     has_ms = bool(model.milestones)
     has_bands = bool(model.month_bands)
@@ -854,7 +859,7 @@ def _slide_timeline(model, accent: RGBColor) -> bytes:
     scale, total_h_emu, avail_h_emu = _fit_height(int(Inches(natural_h_in)))
 
     prs, slide = _new_deck()
-    top = _heading(slide, model)
+    top = _heading(slide, model, language)
 
     grid_left = CONTENT_LEFT_EMU
     grid_right = CONTENT_RIGHT_EMU
@@ -920,7 +925,7 @@ def _slide_timeline(model, accent: RGBColor) -> bytes:
     if has_ms:
         _milestones(slide, model, grid_left, grid_right, bounds["grid_top"], bounds["grid_bottom"],
                     bounds["ms_y"], bounds["ms_h"], scale)
-    _legend(slide, _activity_legend(model, accent), bounds["legend_y"], CONTENT_LEFT_EMU, scale)
+    _legend(slide, _activity_legend(model, accent, language), bounds["legend_y"], CONTENT_LEFT_EMU, scale)
 
     _grow(prs, total_h_emu)
     return _save(prs)
@@ -944,6 +949,7 @@ def populate_program(
     methodology_stages: list | None = None,
     start_date=None,
     analysis=None,
+    output_language: str = "en",
 ) -> bytes:
     """
     Builds a fresh A4-landscape .pptx (returned as bytes) of the delivery
@@ -963,7 +969,7 @@ def populate_program(
         start_date, analysis, project_name or "", client_name or "",
     )
     if model.is_empty:
-        return _placeholder_slide(model)
+        return _placeholder_slide(model, output_language)
     resolved = program_render.effective_style(model, style or program_render.DEFAULT_STYLE)
     accent = _resolve_palette(theme_name)["active_bg"]
-    return _RENDERERS[resolved](model, accent)
+    return _RENDERERS[resolved](model, accent, output_language)
