@@ -59,15 +59,6 @@ _SLIDE_W = Inches(11.6929)
 _SLIDE_H = Inches(8.2677)
 _M = Inches(0.3)
 
-# Below this a program row is too thin to read the scope item in; the slide
-# grows rather than squeezing past it.
-_MIN_ROW_H = Inches(0.3)
-
-# Narrower than this and consecutive "Wk 12" headers touch, exactly as they
-# did in the rendered preview -- so the labels thin out and the every-week
-# gridlines carry the detail instead.
-_MIN_HEADER_PITCH = Inches(0.42)
-
 EMPTY_NOTE = ("[NO PROGRAM ENTERED -- build the delivery program in the Fee Estimate tab, then "
               "re-download this PowerPoint]")
 
@@ -177,10 +168,10 @@ def _line(slide, x, y, w, h, colour):
     return _rect(slide, Emu(int(x)), Emu(int(y)), Emu(max(1, int(w))), Emu(max(1, int(h))), colour)
 
 
-def _text(slide, x, y, w, h, text, size_pt, color, bold=False, align=PP_ALIGN.LEFT):
+def _text(slide, x, y, w, h, text, size_pt, color, bold=False, align=PP_ALIGN.LEFT, wrap=True):
     box = slide.shapes.add_textbox(x, y, w, h)
     tf = box.text_frame
-    tf.word_wrap = True
+    tf.word_wrap = wrap
     tf.vertical_anchor = MSO_ANCHOR.MIDDLE
     tf.margin_left = Pt(4)
     tf.margin_right = Pt(4)
@@ -244,7 +235,10 @@ def _save(prs) -> bytes:
 
 
 def _heading(slide, model) -> int:
-    """Title + subtitle. Returns the y the content may start at."""
+    """Title + subtitle. Returns the y the content may start at -- a FIXED
+    value (only _M and the two Inches() constants below, none of which
+    depend on the slide's height), so it can be used as CONTENT_TOP_EMU
+    below without calling this first."""
     title_h = Inches(0.5)
     _text(slide, _M, _M, Emu(int(_SLIDE_W - 2 * _M)), title_h, "Delivery program", 20,
           _DARK_TEXT, bold=True)
@@ -257,25 +251,135 @@ def _heading(slide, model) -> int:
 
 
 def _grow(prs, needed_height: float) -> None:
-    """Past roughly 15 scope items the rows stop fitting on a standard slide,
-    and the minimum row height then pushed the surplus rows straight off the
-    bottom edge -- silently, since PowerPoint happily stores shapes outside
-    the slide and simply doesn't show them. Grow the slide instead, exactly
-    as org_chart_pptx.py already does for wide charts: a taller slide is a
-    normal thing to paste from, a program missing its last four scope items
-    is not."""
+    """A defensive last resort only -- see org_chart_pptx._grow(). Every
+    style below sizes itself to the fixed A4 slide via _fit_height()'s
+    scale-to-fill search first; this only fires if that search's own
+    MIN_SCALE floor still wasn't enough (an extreme scope-item/week count),
+    growing the slide rather than leaving shapes silently positioned past
+    its bottom edge, which is what PowerPoint does with them."""
     if int(needed_height) > int(prs.slide_height):
         prs.slide_height = Emu(int(needed_height))
 
 
-def _header_step(week_col_w: float) -> int:
-    return max(1, math.ceil(int(_MIN_HEADER_PITCH) / max(int(week_col_w), 1)))
+# ---------------------------------------------------------------------------
+# SCALE-TO-FILL, LIKE THE ORG CHART AND THE PNG RENDERER
+# ---------------------------------------------------------------------------
+# This used to draw every row/lane at a fixed size and grow the slide (via
+# _grow, above) only once that fixed sizing overflowed it -- so a short
+# program's deck was a small grid pasted at the top of an otherwise-empty
+# A4 slide, and _grow() never fired to fix that because nothing overflowed.
+# The slide is now the fixed A4 landscape page every export in this pack
+# uses (_SLIDE_W / _SLIDE_H); each style instead measures its content at a
+# reference scale, picks ONE scale factor from how much of that fixed page
+# it needs, and derives row height, bar thickness, gridline weight,
+# milestone size and every font from that one number -- the same approach
+# program_render.py takes for the PNG (see that module's matching note),
+# now shared by the companion deck so the two outputs read as the same
+# document. _grow() above stays only as the same defensive floor
+# program_render._fit_height() already has: past MIN_SCALE the page grows
+# instead of shrinking text further.
+
+CONTENT_LEFT_EMU = int(_M)
+CONTENT_RIGHT_EMU = int(_SLIDE_W - _M)
+AVAIL_W_EMU = CONTENT_RIGHT_EMU - CONTENT_LEFT_EMU
+
+# Matches _heading()'s fixed return value exactly (same _M / Inches(0.5) /
+# Inches(0.45) constants) -- needed before a slide exists, to size the
+# scale-to-fill search below.
+CONTENT_TOP_EMU = int(_M + Inches(0.5) + Inches(0.45))
+CONTENT_BOTTOM_EMU = int(_SLIDE_H - _M)
+AVAIL_H_EMU = CONTENT_BOTTOM_EMU - CONTENT_TOP_EMU
+
+MIN_SCALE = 0.55
+MAX_SCALE = 1.25
 
 
-def _header_indices(count: int, week_col_w: float) -> list[int]:
+def _fit_height(natural_h_emu: float) -> tuple[float, int, int]:
+    """(scale, total_slide_h_emu, avail_h_emu) for content whose natural
+    (scale=1.0) height is `natural_h_emu` -- EMU counterpart to
+    program_render._fit_height(); see that function's docstring for the
+    ordinary/overflow split, identical here."""
+    if natural_h_emu <= 0:
+        return MAX_SCALE, int(_SLIDE_H), AVAIL_H_EMU
+    scale = max(MIN_SCALE, min(MAX_SCALE, AVAIL_H_EMU / natural_h_emu))
+    needed = natural_h_emu * scale
+    if needed <= AVAIL_H_EMU + 1:
+        return scale, int(_SLIDE_H), AVAIL_H_EMU
+    overflow = needed - AVAIL_H_EMU
+    return scale, int(_SLIDE_H) + int(overflow), AVAIL_H_EMU + int(overflow)
+
+
+class _PVFlow:
+    """EMU-space vertical flow -- see org_chart_pptx._PFlow for the shared
+    rationale (fixed-size blocks; gaps that stretch to absorb leftover slide
+    height, so a short program's leftover room becomes breathing space
+    between sections rather than one dead band) and program_render._VFlow
+    for the identical idea in matplotlib inches. The third "fixed" kind is
+    for content whose height is already final and must NOT be multiplied by
+    scale again -- the table style's row-height cap, the one place here
+    where "how tall" isn't a straight scale multiply."""
+
+    def __init__(self):
+        self._items: list[dict] = []
+
+    def block(self, h_emu, draw=None) -> None:
+        self._items.append({"kind": "block", "h": max(0, int(h_emu)), "draw": draw})
+
+    def gap(self, h_emu, draw=None) -> None:
+        self._items.append({"kind": "gap", "h": max(0, int(h_emu)), "draw": draw})
+
+    def fixed(self, h_emu, draw=None) -> None:
+        self._items.append({"kind": "fixed", "h": max(0, int(h_emu)), "draw": draw})
+
+    def render(self, top_emu: int, scale: float, avail_emu: int) -> int:
+        n_gaps = sum(1 for it in self._items if it["kind"] == "gap")
+        used = sum(it["h"] if it["kind"] == "fixed" else int(it["h"] * scale) for it in self._items)
+        leftover = max(0, avail_emu - used)
+        extra_per_gap = (leftover // n_gaps) if n_gaps else 0
+        y = top_emu
+        for it in self._items:
+            h = it["h"] if it["kind"] == "fixed" else int(it["h"] * scale) + \
+                (extra_per_gap if it["kind"] == "gap" else 0)
+            y_bottom = y + h
+            if it["draw"] is not None:
+                it["draw"](y, y_bottom, scale)
+            y = y_bottom
+        return y
+
+
+# Font sizes at scale=1.0, and the floor each is allowed to shrink to --
+# same numbers as program_render.py's matplotlib renderer (see that
+# module's matching constants block) so the PNG preview/letter-pack embed
+# and this companion deck read as the same document at the same program
+# size, not two different type scales.
+_ROW_LABEL_PT_REF, _ROW_LABEL_PT_MIN = 12.5, 7.0
+_BAR_LABEL_PT_REF, _BAR_LABEL_PT_MIN = 9.5, 6.0
+_WEEK_PT_REF, _WEEK_PT_MIN = 11.0, 6.0
+_WEEK_DATE_PT_REF, _WEEK_DATE_PT_MIN = 8.8, 5.5
+_MILESTONE_PT_REF, _MILESTONE_PT_MIN = 9.5, 6.0
+_LEGEND_PT_REF, _LEGEND_PT_MIN = 9.5, 6.5
+_LANE_PT_REF, _LANE_PT_MIN = 10.5, 6.5
+
+# The narrowest a "Wk NN" header can sit next to its neighbour, in inches at
+# scale=1.0, before the two touch -- see program_render._HEADER_MIN_PITCH_IN,
+# identical logic here.
+_HEADER_MIN_PITCH_IN = 0.50
+
+
+def _header_indices(model, week_col_w_emu: float, scale: float = 1.0, pt: float | None = None) -> list[int]:
+    """See program_render._header_indices() for the full rationale --
+    identical here except the "measure the widest label" step uses the
+    same avg-glyph-width estimate _fit_label()/_legend() already use in
+    this file, since there is no real renderer to measure with."""
+    count = len(model.week_labels)
     if count <= 1:
         return list(range(count))
-    step = _header_step(week_col_w)
+    pitch_emu = int(Inches(_HEADER_MIN_PITCH_IN) * max(scale, 1e-6))
+    if pt is not None and model.week_labels:
+        widest = max(model.week_labels, key=len)
+        label_w_emu = int(len(widest) * _AVG_CHAR_EM * pt * 12700 * 1.15)
+        pitch_emu = max(pitch_emu, label_w_emu)
+    step = max(1, math.ceil(pitch_emu / max(int(week_col_w_emu), 1)))
     kept = list(range(0, count, step))
     last = count - 1
     if kept[-1] != last:
@@ -285,52 +389,61 @@ def _header_indices(count: int, week_col_w: float) -> list[int]:
     return kept
 
 
-def _week_header(slide, model, grid_left, grid_top, week_col_w, header_h, show_dates=True):
-    for index in _header_indices(len(model.week_labels), week_col_w):
+def _week_header(slide, model, grid_left, y, week_col_w, scale, show_dates=True):
+    pt = max(_WEEK_PT_MIN, _WEEK_PT_REF * scale)
+    date_pt = max(_WEEK_DATE_PT_MIN, _WEEK_DATE_PT_REF * scale)
+    label_h = Inches(0.26) * scale
+    date_h = Inches(0.20) * scale
+    for index in _header_indices(model, week_col_w, scale, pt=pt):
         cx = Emu(int(grid_left + index * week_col_w))
-        _text(slide, cx, Emu(int(grid_top)), Emu(int(week_col_w)), Emu(int(header_h * 0.6)),
-              model.week_labels[index], 9, _INK, bold=True, align=PP_ALIGN.CENTER)
+        _text(slide, cx, Emu(int(y)), Emu(int(week_col_w)), Emu(int(label_h)),
+              model.week_labels[index], pt, _INK, bold=True, align=PP_ALIGN.CENTER)
         date_text = model.week_dates[index] if index < len(model.week_dates) else ""
         if show_dates and date_text:
-            _text(slide, cx, Emu(int(grid_top + header_h * 0.55)), Emu(int(week_col_w)),
-                  Emu(int(header_h * 0.45)), date_text, 7.5, _MUTED, align=PP_ALIGN.CENTER)
+            _text(slide, cx, Emu(int(y + label_h * 0.9)), Emu(int(week_col_w)), Emu(int(date_h)),
+                  date_text, date_pt, _MUTED, align=PP_ALIGN.CENTER)
 
 
-def _gridlines(slide, model, grid_left, grid_top, grid_bottom, week_col_w):
+def _gridlines(slide, model, grid_left, grid_top, grid_bottom, week_col_w, scale):
+    weight = Inches(0.006) * max(0.7, scale)
     for index in range(len(model.week_labels) + 1):
-        _line(slide, grid_left + index * week_col_w, grid_top, Inches(0.008),
+        _line(slide, grid_left + index * week_col_w, grid_top, weight,
               grid_bottom - grid_top, _GRIDLINE)
 
 
-def _milestones(slide, model, grid_left, grid_top, grid_bottom, week_col_w) -> int:
-    """Diamonds on a faint vertical rule, labels underneath. Returns the y
-    below the labels (== grid_bottom when there are no milestones -- and
-    there are none unless the user's own inputs produced them)."""
+def _milestones(slide, model, grid_left, grid_right, grid_top, grid_bottom, label_y, label_h, scale):
+    """Diamonds on a faint vertical rule at grid_bottom, labels in the
+    reserved band [label_y, label_y + label_h) below -- the two are drawn
+    apart (rather than immediately under the diamond) because grid_bottom
+    is the end of the ROWS block and label_y is the start of the dedicated
+    milestone block one gap further down; see the gantt/swimlanes/timeline
+    renderers below for how those two y's are produced by the flow."""
     if not model.milestones:
-        return int(grid_bottom)
-    size = Inches(0.16)
+        return
+    size = Inches(0.16) * max(0.7, scale)
+    pt = max(_MILESTONE_PT_MIN, _MILESTONE_PT_REF * scale)
+    weeks = max(1, len(model.week_labels))
+    week_col_w = (grid_right - grid_left) / weeks
     seen = set()
     for milestone in model.milestones:
-        week = max(1, min(int(milestone.week), max(1, len(model.week_labels))))
-        cx = grid_left + week * week_col_w
+        week = max(1, min(int(milestone.week), weeks))
         if week in seen:
             continue
         seen.add(week)
+        cx = grid_left + week * week_col_w
         _line(slide, cx - Inches(0.004), grid_top, Inches(0.008), grid_bottom - grid_top,
               _tint(_MILESTONE_ORANGE, 0.45))
-        _diamond(slide, cx, grid_bottom + size * 0.6, size, _MILESTONE_ORANGE)
+        _diamond(slide, cx, grid_bottom, size, _MILESTONE_ORANGE)
         # A milestone in the last week sits on the slide's right edge, so a
         # centred label runs off it -- the label swings inboard instead.
         width = Inches(1.6)
         label_x, align = cx - width / 2, PP_ALIGN.CENTER
-        if label_x + width > int(_SLIDE_W - _M):
-            label_x, align = int(_SLIDE_W - _M) - width, PP_ALIGN.RIGHT
-        elif label_x < int(_M):
-            label_x, align = int(_M), PP_ALIGN.LEFT
-        _text(slide, Emu(int(label_x)), Emu(int(grid_bottom + size * 1.25)),
-              Emu(int(width)), Inches(0.22), milestone.label, 8, _MILESTONE_ORANGE,
-              bold=True, align=align)
-    return int(grid_bottom + size * 1.25 + Inches(0.22))
+        if label_x + width > CONTENT_RIGHT_EMU:
+            label_x, align = CONTENT_RIGHT_EMU - width, PP_ALIGN.RIGHT
+        elif label_x < CONTENT_LEFT_EMU:
+            label_x, align = CONTENT_LEFT_EMU, PP_ALIGN.LEFT
+        _text(slide, Emu(int(label_x)), Emu(int(label_y)), Emu(int(width)), Emu(int(label_h)),
+              milestone.label, pt, _MILESTONE_ORANGE, bold=True, align=align)
 
 
 def _activity_legend(model, accent: RGBColor) -> list[tuple[RGBColor, str]]:
@@ -342,23 +455,41 @@ def _activity_legend(model, accent: RGBColor) -> list[tuple[RGBColor, str]]:
     return entries
 
 
-def _legend(slide, entries: list[tuple[RGBColor, str]], y: int) -> None:
-    cursor = int(_M)
-    swatch = Inches(0.14)
+def _legend(slide, entries: list[tuple[RGBColor, str]], y: int, x: int, scale: float) -> None:
+    cursor = int(x)
+    swatch = Inches(0.14) * scale
+    pt = max(_LEGEND_PT_MIN, _LEGEND_PT_REF * scale)
+    label_h = Inches(0.2) * scale
     for colour, label in entries:
         # A diamond for the milestone key, so it matches the marks on the
         # chart -- it shares its orange with the third stage colour, and
         # shape is the only thing telling the two apart.
         if label.lower().startswith("milestone"):
-            _diamond(slide, cursor + swatch / 2, y + Inches(0.03) + swatch / 2, swatch,
+            _diamond(slide, cursor + swatch / 2, y + Inches(0.03) * scale + swatch / 2, swatch,
                      _MILESTONE_ORANGE)
         else:
-            _rect(slide, Emu(cursor), Emu(int(y + Inches(0.03))), Emu(int(swatch)),
+            _rect(slide, Emu(cursor), Emu(int(y + Inches(0.03) * scale)), Emu(int(swatch)),
                   Emu(int(swatch)), colour)
-        width = Inches(0.09) * max(6, len(label))
-        _text(slide, Emu(int(cursor + swatch * 1.5)), Emu(int(y)), Emu(int(width)), Inches(0.2),
-              label, 8.5, _INK, bold=True)
-        cursor = int(cursor + swatch * 1.5 + width + Inches(0.15))
+        text_x = cursor + int(swatch * 1.5)
+        # Estimated from the ACTUAL point size the label draws at, via the
+        # same avg-glyph-width model _fit_label() already uses for bar
+        # labels in this file -- not a flat per-character inch guess that
+        # ignores the font size entirely. Legend text is floored at
+        # _LEGEND_PT_MIN rather than shrinking all the way with scale, so
+        # near MIN_SCALE a flat guess underestimated the true (larger,
+        # floored) text width and let the next entry's swatch -- at the
+        # far end, the milestone diamond -- crowd into this label; a fixed
+        # guess also overshot at MAX_SCALE's smaller relative text. A small
+        # +30% safety margin (generous, since the box's own left/right text
+        # margins eat into it too) covers the estimate's own error, and
+        # wrap=False is the backstop if it's still wrong: a legend entry
+        # running a little wide reads far better than one word-wrapped
+        # into "Documentaio / n" inside a single-line-tall box, which is
+        # what a wrapped overflow looks like here.
+        width_emu = int(len(label) * _AVG_CHAR_EM * pt * 12700 * 1.30)
+        _text(slide, Emu(text_x), Emu(int(y)), Emu(width_emu), Emu(int(label_h)),
+              label, pt, _INK, bold=True, wrap=False)
+        cursor = text_x + width_emu + int(Inches(0.14) * scale)
 
 
 def _placeholder_slide(model) -> bytes:
@@ -373,46 +504,93 @@ def _placeholder_slide(model) -> bytes:
 # A. Refined Gantt
 # ---------------------------------------------------------------------------
 
+_GANTT_LABEL_COL_REF_IN = 2.5
+_GANTT_HEADER_H_REF = 0.46
+_GANTT_ROW_H_REF = 0.80
+_GANTT_GAP_REF = 0.14
+_GANTT_MILESTONE_H_REF = 0.42
+_GANTT_LEGEND_H_REF = 0.34
+
+
 def _slide_gantt(model, accent: RGBColor) -> bytes:
+    n = len(model.items)
+    has_ms = bool(model.milestones)
+    natural_h_in = (_GANTT_HEADER_H_REF + _GANTT_GAP_REF
+                   + n * _GANTT_ROW_H_REF + _GANTT_GAP_REF
+                   + (_GANTT_MILESTONE_H_REF + _GANTT_GAP_REF if has_ms else 0.0)
+                   + _GANTT_LEGEND_H_REF)
+    scale, total_h_emu, avail_h_emu = _fit_height(int(Inches(natural_h_in)))
+
     prs, slide = _new_deck()
     top = _heading(slide, model)
 
-    label_col_w = Inches(3.0)
-    grid_left = int(_M + label_col_w)
-    grid_right = int(_SLIDE_W - _M)
+    label_col_w = int(Inches(_GANTT_LABEL_COL_REF_IN) * scale)
+    grid_left = CONTENT_LEFT_EMU + label_col_w
+    grid_right = CONTENT_RIGHT_EMU
     weeks = max(1, len(model.week_labels))
     week_col_w = (grid_right - grid_left) / weeks
 
-    header_h = Inches(0.42)
-    grid_top = int(top + header_h)
-    row_h = max(int(_MIN_ROW_H), int(Inches(0.34)))
-    grid_bottom = grid_top + row_h * len(model.items)
+    bounds: dict[str, int] = {}
+    flow = _PVFlow()
 
-    _week_header(slide, model, grid_left, top, week_col_w, header_h)
+    def draw_header(y_top, y_bottom, scale):
+        _week_header(slide, model, grid_left, y_top, week_col_w, scale)
+        bounds["grid_top"] = y_bottom
+    flow.block(Inches(_GANTT_HEADER_H_REF), draw_header)
+    flow.gap(Inches(_GANTT_GAP_REF))
 
-    # Order matters, and only shows up once it is wrong: PowerPoint paints in
-    # insertion order, so the row bands go down first, the week gridlines on
-    # top of them, and the bars and labels last. Drawing the gridlines first
-    # buried them under the bands; drawing them last ruled white lines
-    # straight across every bar.
-    for index in range(1, len(model.items), 2):
-        _rect(slide, _M, Emu(int(grid_top + index * row_h)), Emu(int(grid_right - _M)),
-              Emu(int(row_h)), _ROW_BAND)
-    _gridlines(slide, model, grid_left, grid_top, grid_bottom, week_col_w)
-
+    # Row bands, then gridlines, then bars+labels are all drawn AFTER
+    # flow.render() below rather than inline here, in insertion order --
+    # PowerPoint paints shapes in the order they're added, and gridlines
+    # added ahead of the bars they cross would rule white lines straight
+    # over them; added behind the row bands they'd be buried instead. Each
+    # per-row draw() closure below only records the label text and pill; the
+    # band/gridline passes run once every row position is known.
+    row_draws = []
     for index, item in enumerate(model.items):
-        y = grid_top + index * row_h
-        _text(slide, _M, Emu(int(y)), Emu(int(label_col_w)), Emu(int(row_h)),
-              item.label or "[UNTITLED SCOPE ITEM]", 9.5, _INK, bold=True)
+        def draw_row(y_top, y_bottom, scale, index=index, item=item):
+            row_draws.append((index, item, y_top, y_bottom))
+            bounds["grid_bottom"] = y_bottom
+        flow.block(Inches(_GANTT_ROW_H_REF), draw_row)
+
+    flow.gap(Inches(_GANTT_GAP_REF))
+
+    if has_ms:
+        def draw_ms_anchor(y_top, y_bottom, scale):
+            bounds["ms_y"] = y_top
+            bounds["ms_h"] = y_bottom - y_top
+        flow.block(Inches(_GANTT_MILESTONE_H_REF), draw_ms_anchor)
+        flow.gap(Inches(_GANTT_GAP_REF))
+
+    def draw_legend_anchor(y_top, y_bottom, scale):
+        bounds["legend_y"] = y_top
+    flow.block(Inches(_GANTT_LEGEND_H_REF), draw_legend_anchor)
+
+    flow.render(top, scale, avail_h_emu)
+
+    for index, item, y_top, y_bottom in row_draws:
+        if index % 2 == 1:
+            _rect(slide, Emu(CONTENT_LEFT_EMU), Emu(int(y_top)),
+                  Emu(int(grid_right - CONTENT_LEFT_EMU)), Emu(int(y_bottom - y_top)), _ROW_BAND)
+    _gridlines(slide, model, grid_left, bounds["grid_top"], bounds["grid_bottom"], week_col_w, scale)
+    for index, item, y_top, y_bottom in row_draws:
+        row_h = y_bottom - y_top
+        pt = max(_ROW_LABEL_PT_MIN, _ROW_LABEL_PT_REF * scale)
+        _text(slide, Emu(CONTENT_LEFT_EMU), Emu(int(y_top)), Emu(int(label_col_w)), Emu(int(row_h)),
+              item.label or "[UNTITLED SCOPE ITEM]", pt, _INK, bold=True)
         x0 = grid_left + (item.start_week - 1) * week_col_w
         x1 = grid_left + item.end_week * week_col_w
-        bar_h = int(row_h * 0.56)
-        _pill(slide, Emu(int(x0 + Inches(0.02))), Emu(int(y + (row_h - bar_h) / 2)),
-              x1 - x0 - Inches(0.04), Emu(bar_h), accent, f"{item.weeks} wk", 9.0)
+        bar_h = int(row_h * 0.45)
+        bar_pt = max(_BAR_LABEL_PT_MIN, _BAR_LABEL_PT_REF * scale)
+        _pill(slide, Emu(int(x0 + Inches(0.02))), Emu(int(y_top + (row_h - bar_h) / 2)),
+              Emu(int(x1 - x0 - Inches(0.04))), Emu(bar_h), accent, f"{item.weeks} wk", bar_pt)
 
-    below = _milestones(slide, model, grid_left, grid_top, grid_bottom, week_col_w)
-    _legend(slide, _activity_legend(model, accent), below + int(Inches(0.12)))
-    _grow(prs, below + Inches(0.5))
+    if has_ms:
+        _milestones(slide, model, grid_left, grid_right, bounds["grid_top"], bounds["grid_bottom"],
+                    bounds["ms_y"], bounds["ms_h"], scale)
+    _legend(slide, _activity_legend(model, accent), bounds["legend_y"], CONTENT_LEFT_EMU, scale)
+
+    _grow(prs, total_h_emu)
     return _save(prs)
 
 
@@ -429,63 +607,123 @@ def _grouped_by_stage(model):
     return grouped
 
 
+_SWIM_LANE_HEADER_H_REF = 0.34
+_SWIM_ROW_H_REF = 0.62
+_SWIM_GAP_REF = 0.10
+_SWIM_LABEL_COL_REF_IN = 2.5
+_SWIM_HEADER_H_REF = 0.46
+_SWIM_MILESTONE_H_REF = 0.42
+_SWIM_LEGEND_H_REF = 0.34
+
+
 def _slide_swimlanes(model, accent: RGBColor) -> bytes:
+    grouped = _grouped_by_stage(model)
+    total_rows = sum(len(members) for _, members in grouped)
+    has_ms = bool(model.milestones)
+    natural_h_in = (_SWIM_HEADER_H_REF + _SWIM_GAP_REF
+                   + len(grouped) * _SWIM_LANE_HEADER_H_REF + total_rows * _SWIM_ROW_H_REF
+                   + max(0, len(grouped) - 1) * _SWIM_GAP_REF
+                   + _SWIM_GAP_REF
+                   + (_SWIM_MILESTONE_H_REF + _SWIM_GAP_REF if has_ms else 0.0)
+                   + _SWIM_LEGEND_H_REF)
+    scale, total_h_emu, avail_h_emu = _fit_height(int(Inches(natural_h_in)))
+
     prs, slide = _new_deck()
     top = _heading(slide, model)
 
-    label_col_w = Inches(3.0)
-    grid_left = int(_M + label_col_w)
-    grid_right = int(_SLIDE_W - _M)
+    label_col_w = int(Inches(_SWIM_LABEL_COL_REF_IN) * scale)
+    grid_left = CONTENT_LEFT_EMU + label_col_w
+    grid_right = CONTENT_RIGHT_EMU
     weeks = max(1, len(model.week_labels))
     week_col_w = (grid_right - grid_left) / weeks
 
-    header_h = Inches(0.42)
-    grid_top = int(top + header_h)
-    lane_header_h = int(Inches(0.26))
-    row_h = max(int(_MIN_ROW_H), int(Inches(0.34)))
+    bounds: dict[str, int] = {}
+    flow = _PVFlow()
 
-    _week_header(slide, model, grid_left, top, week_col_w, header_h)
+    def draw_header(y_top, y_bottom, scale):
+        _week_header(slide, model, grid_left, y_top, week_col_w, scale)
+        bounds["grid_top"] = y_bottom
+    flow.block(Inches(_SWIM_HEADER_H_REF), draw_header)
+    flow.gap(Inches(_SWIM_GAP_REF))
 
-    # Laid out first, then drawn in three passes -- lane washes, gridlines,
-    # then bars and labels. See the same note in _slide_gantt(): drawing the
-    # gridlines after the bars rules white lines straight across them.
-    lanes, y = [], grid_top
-    for stage_index, members in _grouped_by_stage(model):
+    # Same three-pass ordering as _slide_gantt(): lane tint washes, then
+    # gridlines, then bars+labels on top -- recorded here, drawn after
+    # flow.render() once every lane/row position is known.
+    lane_draws, row_draws = [], []
+    for lane_index, (stage_index, members) in enumerate(grouped):
         colour = (_hex(program_render.STAGE_COLOURS[stage_index % len(program_render.STAGE_COLOURS)])
                   if stage_index is not None else _MUTED)
-        lane_h = lane_header_h + row_h * len(members)
-        lanes.append((stage_index, members, colour, y, lane_h))
-        y += lane_h
 
-    for stage_index, _members, colour, lane_y, lane_h in lanes:
+        def draw_lane_header(y_top, y_bottom, scale, stage_index=stage_index, colour=colour,
+                             members=members):
+            # The tint spans the WHOLE lane (header + its member rows), so
+            # it's computed here from the member count even though this
+            # callback only owns the header's own band -- see
+            # program_render._render_swimlanes's identical note.
+            member_h = (y_bottom - y_top) + len(members) * int(Inches(_SWIM_ROW_H_REF) * scale)
+            lane_draws.append((y_top, member_h, colour, stage_index))
+        flow.block(Inches(_SWIM_LANE_HEADER_H_REF), draw_lane_header)
+
+        for item in members:
+            def draw_row(y_top, y_bottom, scale, item=item, colour=colour):
+                row_draws.append((item, colour, y_top, y_bottom))
+                bounds["grid_bottom"] = y_bottom
+            flow.block(Inches(_SWIM_ROW_H_REF), draw_row)
+
+        if lane_index < len(grouped) - 1:
+            flow.gap(Inches(_SWIM_GAP_REF))
+
+    flow.gap(Inches(_SWIM_GAP_REF))
+
+    if has_ms:
+        def draw_ms_anchor(y_top, y_bottom, scale):
+            bounds["ms_y"] = y_top
+            bounds["ms_h"] = y_bottom - y_top
+        flow.block(Inches(_SWIM_MILESTONE_H_REF), draw_ms_anchor)
+        flow.gap(Inches(_SWIM_GAP_REF))
+
+    def draw_legend_anchor(y_top, y_bottom, scale):
+        bounds["legend_y"] = y_top
+    flow.block(Inches(_SWIM_LEGEND_H_REF), draw_legend_anchor)
+
+    flow.render(top, scale, avail_h_emu)
+
+    for y_top, member_h, colour, _stage_index in lane_draws:
         # ~5% tint: enough to group the rows, never enough to fight the bars
         # sitting on it.
-        _rect(slide, _M, Emu(int(lane_y)), Emu(int(grid_right - _M)), Emu(int(lane_h)),
-              _tint(colour, 0.95))
-    _gridlines(slide, model, grid_left, grid_top, y, week_col_w)
+        _rect(slide, Emu(CONTENT_LEFT_EMU), Emu(int(y_top)), Emu(int(grid_right - CONTENT_LEFT_EMU)),
+              Emu(int(member_h)), _tint(colour, 0.95))
+    _gridlines(slide, model, grid_left, bounds["grid_top"], bounds["grid_bottom"], week_col_w, scale)
 
-    for stage_index, members, colour, lane_y, _lane_h in lanes:
+    for y_top, _member_h, colour, stage_index in lane_draws:
         name = (model.stages[stage_index] if stage_index is not None else "Unassigned").upper()
-        _text(slide, _M, Emu(int(lane_y)), Emu(int(grid_right - _M)), Emu(int(lane_header_h)),
-              name, 8.5, colour, bold=True)
-        row_y = lane_y + lane_header_h
-        for item in members:
-            _text(slide, Emu(int(_M + Inches(0.12))), Emu(int(row_y)),
-                  Emu(int(label_col_w - Inches(0.12))), Emu(int(row_h)),
-                  item.label or "[UNTITLED SCOPE ITEM]", 9.5, _INK, bold=True)
-            x0 = grid_left + (item.start_week - 1) * week_col_w
-            x1 = grid_left + item.end_week * week_col_w
-            bar_h = int(row_h * 0.56)
-            _pill(slide, Emu(int(x0 + Inches(0.02))), Emu(int(row_y + (row_h - bar_h) / 2)),
-                  x1 - x0 - Inches(0.04), Emu(bar_h), colour, f"{item.weeks} wk", 9.0)
-            row_y += row_h
-    below = _milestones(slide, model, grid_left, grid_top, y, week_col_w)
+        pt = max(_LANE_PT_MIN, _LANE_PT_REF * scale)
+        header_h = int(Inches(_SWIM_LANE_HEADER_H_REF) * scale)
+        _text(slide, Emu(CONTENT_LEFT_EMU), Emu(int(y_top)), Emu(int(grid_right - CONTENT_LEFT_EMU)),
+              Emu(header_h), name, pt, colour, bold=True)
+    for item, colour, y_top, y_bottom in row_draws:
+        row_h = y_bottom - y_top
+        pt = max(_ROW_LABEL_PT_MIN, _ROW_LABEL_PT_REF * 0.92 * scale)
+        inset = int(Inches(0.10) * scale)
+        _text(slide, Emu(CONTENT_LEFT_EMU + inset), Emu(int(y_top)), Emu(int(label_col_w - inset)),
+              Emu(int(row_h)), item.label or "[UNTITLED SCOPE ITEM]", pt, _INK, bold=True)
+        x0 = grid_left + (item.start_week - 1) * week_col_w
+        x1 = grid_left + item.end_week * week_col_w
+        bar_h = int(row_h * 0.48)
+        bar_pt = max(_BAR_LABEL_PT_MIN, _BAR_LABEL_PT_REF * scale)
+        _pill(slide, Emu(int(x0 + Inches(0.02))), Emu(int(y_top + (row_h - bar_h) / 2)),
+              Emu(int(x1 - x0 - Inches(0.04))), Emu(bar_h), colour, f"{item.weeks} wk", bar_pt)
+
+    if has_ms:
+        _milestones(slide, model, grid_left, grid_right, bounds["grid_top"], bounds["grid_bottom"],
+                    bounds["ms_y"], bounds["ms_h"], scale)
     legend = [(_hex(program_render.STAGE_COLOURS[i % len(program_render.STAGE_COLOURS)]), name)
               for i, name in enumerate(model.stages)]
     if model.milestones:
         legend.append((_MILESTONE_ORANGE, "Milestone"))
-    _legend(slide, legend, below + int(Inches(0.12)))
-    _grow(prs, below + Inches(0.5))
+    _legend(slide, legend, bounds["legend_y"], CONTENT_LEFT_EMU, scale)
+
+    _grow(prs, total_h_emu)
     return _save(prs)
 
 
@@ -493,18 +731,45 @@ def _slide_swimlanes(model, accent: RGBColor) -> bytes:
 # C. Formal table -- a real PowerPoint table, so it stays editable
 # ---------------------------------------------------------------------------
 
+_TABLE_HEADER_H_REF = 0.40
+_TABLE_ROW_H_REF = 0.56
+_TABLE_ROW_H_MAX_IN = 1.35   # "comfortable maximum" -- a 5-row table
+                             # shouldn't grow rows past this even on an
+                             # otherwise-empty slide.
+_TABLE_GAP_REF = 0.16
+_TABLE_LEGEND_H_REF = 0.32
+
+
 def _slide_table(model, accent: RGBColor) -> bytes:
+    n = len(model.items)
+    natural_h_in = (_TABLE_HEADER_H_REF + n * _TABLE_ROW_H_REF + _TABLE_GAP_REF
+                   + _TABLE_LEGEND_H_REF)
+    scale, total_h_emu, avail_h_emu = _fit_height(int(Inches(natural_h_in)))
+
+    header_h = int(Inches(_TABLE_HEADER_H_REF) * scale)
+    gap_h = int(Inches(_TABLE_GAP_REF) * scale)
+    legend_h = int(Inches(_TABLE_LEGEND_H_REF) * scale)
+    chrome_h = header_h + gap_h + legend_h
+    remaining_for_rows = max(0, avail_h_emu - chrome_h)
+    # Rows are NOT a straight scale multiply -- per the brief, "distribute
+    # across the available height, up to a comfortable maximum". Computed
+    # this way, a short table spends its leftover height on taller (still
+    # capped) rows instead of a gap the reader reads as broken layout; only
+    # once the cap is hit does genuine leftover exist, and it lands in the
+    # one gap between the table and the legend rather than stranding the
+    # table in the slide's top third.
+    row_h = min(int(Inches(_TABLE_ROW_H_MAX_IN)), int(remaining_for_rows / n)) if n else 0
+
     prs, slide = _new_deck()
     top = _heading(slide, model)
 
     headers = ["Scope item", "Commence", "Complete", "Duration"]
     widths = [Inches(5.0), Inches(2.1), Inches(2.1), Inches(1.89)]
-    rows = len(model.items) + 1
-    row_h = max(int(_MIN_ROW_H), int(Inches(0.32)))
+    rows = n + 1
 
     shape = slide.shapes.add_table(
         rows, len(headers), _M, Emu(int(top)), Emu(int(sum(int(w) for w in widths))),
-        Emu(int(row_h * rows)),
+        Emu(int(header_h + row_h * n)),
     )
     table = shape.table
     # No banded fills, no first-row emphasis: the styling below is the whole
@@ -513,8 +778,13 @@ def _slide_table(model, accent: RGBColor) -> bytes:
     table.horz_banding = False
     for index, width in enumerate(widths):
         table.columns[index].width = Emu(int(width))
-    for index in range(rows):
+    table.rows[0].height = Emu(int(header_h))
+    for index in range(1, rows):
         table.rows[index].height = Emu(int(row_h))
+
+    head_pt = max(6.5, 9.5 * scale)
+    cell_pt = max(6.5, 9.0 * scale)
+    name_pt = max(_ROW_LABEL_PT_MIN, _ROW_LABEL_PT_REF * scale)
 
     def _fill(cell, colour, text, size, font_colour, bold=False):
         cell.fill.solid()
@@ -534,7 +804,7 @@ def _slide_table(model, accent: RGBColor) -> bytes:
         _no_borders(cell)
 
     for index, header in enumerate(headers):
-        _fill(table.cell(0, index), accent, header.upper(), 9.5, _WHITE, bold=True)
+        _fill(table.cell(0, index), accent, header.upper(), head_pt, _WHITE, bold=True)
 
     def _week_text(week: int) -> str:
         label = model.week_labels[week - 1] if week - 1 < len(model.week_labels) else f"Wk {week}"
@@ -543,19 +813,20 @@ def _slide_table(model, accent: RGBColor) -> bytes:
 
     for row_index, item in enumerate(model.items, start=1):
         band = _WHITE if row_index % 2 else _ROW_BAND
-        _fill(table.cell(row_index, 0), band, item.label or "[UNTITLED SCOPE ITEM]", 9.5,
+        _fill(table.cell(row_index, 0), band, item.label or "[UNTITLED SCOPE ITEM]", name_pt,
               _INK, bold=True)
-        _fill(table.cell(row_index, 1), band, _week_text(item.start_week), 9, _DARK_TEXT)
-        _fill(table.cell(row_index, 2), band, _week_text(item.end_week), 9, _DARK_TEXT)
+        _fill(table.cell(row_index, 1), band, _week_text(item.start_week), cell_pt, _DARK_TEXT)
+        _fill(table.cell(row_index, 2), band, _week_text(item.end_week), cell_pt, _DARK_TEXT)
         _fill(table.cell(row_index, 3), band,
-              f"{item.weeks} week{'s' if item.weeks != 1 else ''}", 9, _DARK_TEXT)
+              f"{item.weeks} week{'s' if item.weeks != 1 else ''}", cell_pt, _DARK_TEXT)
 
-    bottom = int(top + row_h * rows)
+    bottom = int(top + header_h + row_h * n)
+    legend_y = bottom + gap_h + max(0, remaining_for_rows - row_h * n)
     if model.start_date_text:
-        _text(slide, _M, Emu(int(bottom + Inches(0.1))), Emu(int(_SLIDE_W - 2 * _M)), Inches(0.24),
+        _text(slide, _M, Emu(int(legend_y)), Emu(int(_SLIDE_W - 2 * _M)), Emu(int(legend_h)),
               f"Program anchored to an anticipated commencement of {model.start_date_text} "
-              f"— dates shift with the actual award date.", 8.5, _MUTED)
-    _grow(prs, bottom + Inches(0.6))
+              f"— dates shift with the actual award date.", max(6.5, 8.0 * scale), _MUTED)
+    _grow(prs, total_h_emu)
     return _save(prs)
 
 
@@ -563,45 +834,95 @@ def _slide_table(model, accent: RGBColor) -> bytes:
 # D. Modern timeline
 # ---------------------------------------------------------------------------
 
+_TL_HEADER_H_REF = 0.36
+_TL_ROW_H_REF = 0.80
+_TL_GAP_REF = 0.14
+_TL_MONTH_BAND_H_REF = 0.30
+_TL_MILESTONE_H_REF = 0.42
+_TL_LEGEND_H_REF = 0.34
+
+
 def _slide_timeline(model, accent: RGBColor) -> bytes:
+    n = len(model.items)
+    has_ms = bool(model.milestones)
+    has_bands = bool(model.month_bands)
+    natural_h_in = ((_TL_MONTH_BAND_H_REF if has_bands else 0.0)
+                   + _TL_HEADER_H_REF + _TL_GAP_REF
+                   + n * _TL_ROW_H_REF + _TL_GAP_REF
+                   + (_TL_MILESTONE_H_REF + _TL_GAP_REF if has_ms else 0.0)
+                   + _TL_LEGEND_H_REF)
+    scale, total_h_emu, avail_h_emu = _fit_height(int(Inches(natural_h_in)))
+
     prs, slide = _new_deck()
     top = _heading(slide, model)
 
-    grid_left = int(_M)
-    grid_right = int(_SLIDE_W - _M)
+    grid_left = CONTENT_LEFT_EMU
+    grid_right = CONTENT_RIGHT_EMU
     weeks = max(1, len(model.week_labels))
     week_col_w = (grid_right - grid_left) / weeks
 
-    band_h = int(Inches(0.26)) if model.month_bands else 0
-    for name, first, last in model.month_bands:
-        x0 = grid_left + (first - 1) * week_col_w
-        x1 = grid_left + last * week_col_w
-        _rect(slide, Emu(int(x0 + Inches(0.01))), Emu(int(top)),
-              Emu(int(x1 - x0 - Inches(0.02))), Emu(band_h), _tint(accent, 0.9))
-        _text(slide, Emu(int(x0)), Emu(int(top)), Emu(int(x1 - x0)), Emu(band_h),
-              name, 8.5, accent, bold=True, align=PP_ALIGN.CENTER)
+    bounds: dict[str, int] = {}
+    flow = _PVFlow()
 
-    header_h = Inches(0.3)
-    header_top = int(top + band_h)
-    _week_header(slide, model, grid_left, header_top, week_col_w, header_h, show_dates=False)
+    if has_bands:
+        def draw_bands(y_top, y_bottom, scale):
+            band_h = int((y_bottom - y_top) * 0.72)
+            band_y = y_bottom - band_h
+            pt = max(6.5, 8.5 * scale)
+            for name, first, last in model.month_bands:
+                x0 = grid_left + (first - 1) * week_col_w
+                x1 = grid_left + last * week_col_w
+                _rect(slide, Emu(int(x0 + Inches(0.01))), Emu(int(band_y)),
+                      Emu(int(x1 - x0 - Inches(0.02))), Emu(band_h), _tint(accent, 0.9))
+                _text(slide, Emu(int(x0)), Emu(int(band_y)), Emu(int(x1 - x0)), Emu(band_h),
+                      name, pt, accent, bold=True, align=PP_ALIGN.CENTER)
+        flow.block(Inches(_TL_MONTH_BAND_H_REF), draw_bands)
 
-    grid_top = int(header_top + header_h)
-    row_h = max(int(_MIN_ROW_H), int(Inches(0.4)))
-    grid_bottom = grid_top + row_h * len(model.items)
-    _gridlines(slide, model, grid_left, grid_top, grid_bottom, week_col_w)
+    def draw_header(y_top, y_bottom, scale):
+        _week_header(slide, model, grid_left, y_top, week_col_w, scale, show_dates=False)
+        bounds["grid_top"] = y_bottom
+    flow.block(Inches(_TL_HEADER_H_REF), draw_header)
+    flow.gap(Inches(_TL_GAP_REF))
 
+    row_draws = []
     for index, item in enumerate(model.items):
-        y = grid_top + index * row_h
+        def draw_row(y_top, y_bottom, scale, item=item):
+            row_draws.append((item, y_top, y_bottom))
+            bounds["grid_bottom"] = y_bottom
+        flow.block(Inches(_TL_ROW_H_REF), draw_row)
+
+    flow.gap(Inches(_TL_GAP_REF))
+
+    if has_ms:
+        def draw_ms_anchor(y_top, y_bottom, scale):
+            bounds["ms_y"] = y_top
+            bounds["ms_h"] = y_bottom - y_top
+        flow.block(Inches(_TL_MILESTONE_H_REF), draw_ms_anchor)
+        flow.gap(Inches(_TL_GAP_REF))
+
+    def draw_legend_anchor(y_top, y_bottom, scale):
+        bounds["legend_y"] = y_top
+    flow.block(Inches(_TL_LEGEND_H_REF), draw_legend_anchor)
+
+    flow.render(top, scale, avail_h_emu)
+
+    _gridlines(slide, model, grid_left, bounds["grid_top"], bounds["grid_bottom"], week_col_w, scale)
+    for item, y_top, y_bottom in row_draws:
+        row_h = y_bottom - y_top
         x0 = grid_left + (item.start_week - 1) * week_col_w
         x1 = grid_left + item.end_week * week_col_w
-        bar_h = int(row_h * 0.72)
-        _pill(slide, Emu(int(x0 + Inches(0.01))), Emu(int(y + (row_h - bar_h) / 2)),
-              x1 - x0 - Inches(0.02), Emu(bar_h),
-              accent, item.label or "[UNTITLED SCOPE ITEM]", 9.5, align=PP_ALIGN.LEFT)
+        bar_h = int(row_h * 0.60)
+        pt = max(_BAR_LABEL_PT_MIN, _BAR_LABEL_PT_REF * scale + 0.5)
+        _pill(slide, Emu(int(x0 + Inches(0.01))), Emu(int(y_top + (row_h - bar_h) / 2)),
+              Emu(int(x1 - x0 - Inches(0.02))), Emu(bar_h),
+              accent, item.label or "[UNTITLED SCOPE ITEM]", pt, align=PP_ALIGN.LEFT)
 
-    below = _milestones(slide, model, grid_left, grid_top, grid_bottom, week_col_w)
-    _legend(slide, _activity_legend(model, accent), below + int(Inches(0.12)))
-    _grow(prs, below + Inches(0.5))
+    if has_ms:
+        _milestones(slide, model, grid_left, grid_right, bounds["grid_top"], bounds["grid_bottom"],
+                    bounds["ms_y"], bounds["ms_h"], scale)
+    _legend(slide, _activity_legend(model, accent), bounds["legend_y"], CONTENT_LEFT_EMU, scale)
+
+    _grow(prs, total_h_emu)
     return _save(prs)
 
 
