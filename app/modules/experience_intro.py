@@ -20,6 +20,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from modules.ai_interface import call_ai_json
+from modules.export_i18n import canonical_marker_instruction
 
 SYSTEM_MESSAGE = """You are drafting a short, sales-forward intro paragraph for the start of \
 the "Relevant project experience" section of an engineering/infrastructure tender proposal -- \
@@ -115,10 +116,13 @@ def draft_experience_intro(
         projects_context=projects_context or "(no reference projects entered yet)",
     )
     if output_language == "es":
+        # Round 3, Part 1c: canonical-marker instruction shared via
+        # export_i18n.canonical_marker_instruction() -- see its docstring.
         prompt += (
             "\n\nWrite \"paragraph\" in Spanish (Español). Keep the JSON field name above exactly "
             "as given, in English. Translate only the language, not the substance -- do not "
             "invent, omit, or alter any project, name, or claim because of this instruction."
+            + canonical_marker_instruction(output_language)
         )
 
     data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=800)

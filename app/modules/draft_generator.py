@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pydantic import BaseModel
 
 from modules.ai_interface import call_ai_json
-from modules.export_i18n import PLACEHOLDER_PREFIXES
+from modules.export_i18n import PLACEHOLDER_PREFIXES, canonical_marker_instruction
 from modules.proposal_structure import ProposalSection
 from modules.tender_analyser import TenderAnalysis
 
@@ -268,20 +268,16 @@ def generate_draft_section(
         # matched -- Spanish packs under-reported what still needed a human.
         # It must now use ONLY the canonical Spanish prefixes so
         # collect_placeholders() (export_docx.py) reliably finds them.
-        _es = PLACEHOLDER_PREFIXES["es"]
+        # Round 3, Part 1c: this instruction is now shared via
+        # export_i18n.canonical_marker_instruction() -- every other
+        # AI-drafting module gets the identical text instead of its own copy.
         prompt += (
             "\n\nWrite \"draft_heading\", \"draft_text\", and the entries of "
             "\"required_user_inputs\" in Spanish (Español) -- the full drafted prose, not just a "
             "summary. Keep the JSON field names above exactly as given, in English. Translate only "
             "the language, not the substance: do not invent, omit, or alter any fact, name, figure, "
-            "deliverable, or placeholder because of this instruction. Any bracketed placeholder you "
-            "write for missing information MUST use exactly one of these Spanish markers -- never a "
-            f"free translation of your own: {_es['insert']} ...] for something to insert, "
-            f"{_es['confirm']} ...] for something to confirm, {_es['tbc']}: ...] for something to be "
-            f"completed, {_es['no']} ...] for something not supplied. For example, write "
-            f"{_es['insert']}: DETALLE ESPECÍFICO DEL PROYECTO] -- not a paraphrase of it -- so a "
-            "reviewer scanning the Spanish draft, and the app's own automated sweep for placeholders, "
-            "both reliably find every gap."
+            "deliverable, or placeholder because of this instruction."
+            + canonical_marker_instruction(output_language)
         )
 
     data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config,

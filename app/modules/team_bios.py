@@ -18,6 +18,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from modules.ai_interface import call_ai_json, was_repaired
+from modules.export_i18n import canonical_marker_instruction
 
 SYSTEM_MESSAGE = """You are compressing real CVs into short bios for a fee proposal letter, \
 in this exact three-line format:
@@ -124,6 +125,8 @@ def draft_team_bios_from_cv(
     prompt = PROMPT_TEMPLATE.format(material=material,
                                     tender_context=format_tender_context(analysis))
     if output_language == "es":
+        # Round 3, Part 1c: canonical-marker instruction shared via
+        # export_i18n.canonical_marker_instruction() -- see its docstring.
         prompt += (
             "\n\nWrite each person's \"relevance_text\" in Spanish (Español) -- the 2-4 sentences "
             "on their relevant experience. Keep \"name\", \"qualified\", and \"connected\" exactly "
@@ -132,6 +135,7 @@ def draft_team_bios_from_cv(
             "registration/membership text. Keep the JSON field names above exactly as given, in "
             "English. Translate only the language of the prose, not the substance -- do not "
             "invent, omit, or alter any fact, qualification, or project because of this instruction."
+            + canonical_marker_instruction(output_language)
         )
 
     data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=3000)

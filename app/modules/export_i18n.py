@@ -81,7 +81,12 @@ _EN: dict[str, str] = {
     # flagged (specific file:line citations) -- a full sweep of every
     # remaining English string in this module (personnel-profile field
     # labels, business-boilerplate paragraphs, etc.) is a larger follow-up.
-    "export_footer_bidder_placeholder": "[BIDDER COMPANY NAME]",
+    # Round 3, Part 1b follow-up: reworded to open with the canonical
+    # "[INSERT" prefix -- it previously matched no PLACEHOLDER_PREFIXES
+    # entry in EITHER language (a pre-existing gap wider than Part 1b's own
+    # citation list), so an English pack's own placeholder sweep silently
+    # missed it too, not just a Spanish one.
+    "export_footer_bidder_placeholder": "[INSERT BIDDER COMPANY NAME]",
     "export_footer_registered_address": "[REGISTERED ADDRESS]",
     "export_no_introduction": "[NO INTRODUCTION DRAFTED YET -- generate a draft or write one in the Draft Responses step]",
     "export_no_fees_entered_letter": "[NO FEES ENTERED -- price the discipline fee build-up, or generate the discipline fee split, in the Fees & Program step]",
@@ -95,7 +100,7 @@ _EN: dict[str, str] = {
     "export_no_team_members": "[NO TEAM MEMBERS ASSIGNED -- assign people (and tick 'Include in proposal') in the Team & Resourcing tab]",
     "export_no_program_entered": "[NO PROGRAM ENTERED -- set the delivery weeks in the Program step]",
     "export_letter_signoff_regards": "Regards",
-    "export_letter_sender_placeholder": "[SENDER NAME]",
+    "export_letter_sender_placeholder": "[INSERT SENDER NAME]",
     "export_letter_checklist_placeholders": "Replace every red bracketed placeholder above with real, verified content.",
     "export_letter_checklist_fees": "Confirm every fee figure is a real, reviewed number -- not a seeded estimate.",
     "export_letter_checklist_team": "Confirm named team members' availability for the stated program.",
@@ -189,6 +194,138 @@ _EN: dict[str, str] = {
     "pptx_methodology_title": "Our proposed methodology",
     "pptx_wvr_statement": "All design deliverables will be issued with completed Work Verification Records (WVRs)",
     "pptx_wvr_confirm_placeholder": "[CONFIRM WVR / QA STATEMENT FOR THIS FIRM]",
+
+    # -- Round 3, Part 1a: export_docx.py placeholders/labels that were still
+    # written as raw English constants regardless of output_language. --
+    "export_methodology_table_placeholder": (
+        "[INSERT METHODOLOGY TABLE -- generate it in the app and paste the finished PowerPoint "
+        "table here]"
+    ),
+    "export_no_draft_generated_section": "[NO DRAFT GENERATED YET -- run Draft Responses for this section]",
+    "export_no_draft_body": "[NO DRAFT BODY -- generate a draft for this section]",
+    "export_insert_key_personnel_name": "[INSERT KEY PERSONNEL NAME]",
+    "export_insert_qualification": "[INSERT QUALIFICATION]",
+    "export_confirm_registration_status": "[CONFIRM REGISTRATION STATUS AND NUMBER]",
+    "export_insert_years_experience": "[INSERT YEARS OF EXPERIENCE FOR CV ATTACHMENT]",
+    "export_insert_project_specific_detail": "[INSERT PROJECT-SPECIFIC DETAIL]",
+    "export_enter_fee": "[ENTER FEE]",
+    "export_not_assigned": "[NOT ASSIGNED]",
+    "export_not_provided": "[NOT PROVIDED]",
+    "export_no_description_drafted": "[NO DESCRIPTION DRAFTED -- draft/review this reference project in Upload Docs]",
+    "export_insert_relevance_to_tender": "[INSERT RELEVANCE TO THIS TENDER]",
+    "export_confirm_personnel_worked_on_project": "[CONFIRM WHICH KEY PERSONNEL WORKED ON THIS PROJECT]",
+    "export_no_personnel_assigned_yet": "[NO PERSONNEL ASSIGNED YET -- assign names in the Team & Resourcing tab]",
+    "export_no_personnel_ticked": (
+        "[NO KEY PERSONNEL ARE TICKED FOR INCLUSION -- tick at least the project leadership "
+        "(Project Director/Manager/Design Manager) in the Team & Resourcing tab]"
+    ),
+    "export_confirm_contractual_arrangements": (
+        "[CONFIRM THE PANEL / CONTRACT AND RATES THIS FEE IS BASED ON, AND ANY SUBCONSULTANT "
+        "ARRANGEMENTS (E.G. MEMORANDUM OF UNDERSTANDING / SUBCONSULTANCY AGREEMENTS)]"
+    ),
+    "export_evaluation_weighting_dashboard_placeholder": "[EVALUATION WEIGHTING DASHBOARD PLACEHOLDER]",
+    "export_graphic_placeholder": "[{title} PLACEHOLDER]",
+    "export_no_fee_buildup_entered": "[NO FEE BUILD-UP ENTERED -- price the discipline fee table in the Fees & Program tab]",
+    "export_no_fee_buildup_entered_tab": "[NO FEE BUILD-UP ENTERED -- price the discipline fee table in the Fee Estimate tab]",
+
+    # -- Round 3, Part 4a: table headers and inline labels around the same
+    # sites, and a few personnel-block sites outside Part 1a's list. --
+    "export_label_qualification": "Qualification",
+    "export_label_experience": "Experience",
+    "export_label_on_project_will": "On this project, {name} will",
+    "export_label_relevant_experience": "Relevant project experience:",
+    "export_label_local_experience": "Local district experience:",
+    "export_label_rpeq_status": "RPEQ / registration status",
+    "export_label_years_experience": "Years of experience",
+    "export_label_relevance_to_project": "Relevance to project: ",
+    "export_label_personnel_involved": "Personnel involved: ",
+    "export_heading_graphics_for_section": "Graphics for this section",
+    "export_table_header_discipline": "Discipline",
+    "export_table_header_discipline_stage": "Discipline / stage",
+    "export_table_header_fee_excl_gst": "Fee (excl. GST)",
+    "export_table_header_total": "Total",
+    "export_table_header_id": "ID",
+    "export_table_header_description": "Description",
+    "export_table_header_type": "Type",
+    "export_table_header_mapped_section": "Mapped Section",
+    "export_table_header_priority": "Priority",
+    "export_table_header_status": "Status",
+    "export_table_header_action_required": "Action Required",
+    "export_table_header_risk": "Risk",
+    "export_table_header_issue": "Issue",
+    "export_table_header_impact": "Impact",
+    "export_table_header_recommended_action": "Recommended Action",
+    "export_compliance_matrix_intro": (
+        "Every requirement identified in the brief, mapped to a proposal section and a status. "
+        "'Missing' items need user input before this pack is usable."
+    ),
+    "export_gap_analysis_intro": "Risks and gaps this pack could identify automatically -- nothing here is invented.",
+    "export_no_scope_item_fees_entered": "[NO SCOPE ITEM FEES ENTERED -- price the scope item table in the Fee Estimate tab]",
+    "export_untitled_scope_item": "[UNTITLED SCOPE ITEM]",
+    "export_table_header_scope_item": "Scope item",
+    "export_table_header_notes": "Notes",
+    "export_note_selected_past_projects": (
+        "Selected past projects most relevant to this brief's scope, drawn from the firm's "
+        "project reference library."
+    ),
+    "export_no_relevance_drafted": "[NO RELEVANCE DRAFTED -- draft/review this reference project in Upload Docs]",
+    "export_table_header_scope_item_cap": "Scope Item",
+    "export_table_header_commence": "Commence",
+    "export_table_header_complete": "Complete",
+    "export_table_header_duration": "Duration",
+    "export_program_anchored_note": (
+        "Program anchored to an anticipated commencement of {start_date} -- dates shift with "
+        "the actual award date."
+    ),
+    "export_table_header_risk_cap": "Risk",
+    "export_table_header_impact_cap": "Impact",
+    "export_table_header_mitigation": "Mitigation",
+    "export_risk_register_firstpass_note": (
+        "[FIRST-PASS REGISTER -- every mitigation is a commitment this firm will be held to. "
+        "Confirm each one, and replace every red TBC, before submission.]"
+    ),
+    "export_no_reference_projects_entered": (
+        "[NO REFERENCE PROJECTS ENTERED -- add project references in Upload Docs, then "
+        "draft/review them there before export]"
+    ),
+    "export_client_name_placeholder": "[CLIENT NAME]",
+    "export_relationship_intro": (
+        "We focus on the moments that matter -- looking beyond the technical solution to foster "
+        "a united, professional relationship with {client}. By maintaining live comment "
+        "registers and prioritising timely review closure, we minimise rework and ensure "
+        "stakeholder input is captured and actioned. Proactive engagement and clear "
+        "communication are central to our relationship management approach and underpin our "
+        "proven ability to deliver projects on time."
+    ),
+    "export_label_leadership_oversight": "Leadership oversight. ",
+    "export_relationship_standard_text_note": (
+        "[STANDARD TEXT -- confirm real local staff/offices, and tailor to this project's actual "
+        "engagement plan, before submission]"
+    ),
+    "export_table_header_principles": "Principles",
+    "export_table_header_our_approach": "Our approach",
+    "export_length_note_under_over": (
+        "[LENGTH: this draft is about {words} words against roughly {target} for its {pages}-page "
+        "allocation -- {verdict_text} budget (more than {tolerance_pct}% out). {action_text}"
+    ),
+    "export_length_verdict_under": "well under",
+    "export_length_verdict_over": "well over",
+    "export_length_action_under": "Expand it with real detail, or re-check the allocation.",
+    "export_length_action_over": "Cut it back, or re-check the allocation.",
+
+    # -- Round 3, Part 4a: fee_estimation_engine.py's INDICATIVE_NOTE and the
+    # fee-table headers around its two call sites in export_docx.py. --
+    "export_indicative_fee_split_note": (
+        "INDICATIVE FEE SPLIT -- INTERNAL PLANNING ONLY, NOT FOR SUBMISSION. This is a rough "
+        "sanity check for the bid team, not a priced offer. It must be reviewed and re-priced "
+        "by whoever owns commercial sign-off before any number here is used anywhere near an "
+        "actual submission."
+    ),
+    "export_table_header_fee_pct": "Fee %",
+    "export_table_header_confidence": "Confidence",
+    "export_table_header_source": "Source",
+    "export_table_header_indicative_amount": "Indicative $",
+    "export_fee_cap_anchored_note": "Anchored to the brief's stated fee cap: {fee_cap}",
 }
 
 # Spanish overrides -- only keys that differ from English need an entry here;
@@ -244,21 +381,32 @@ _ES: dict[str, str] = {
     "heading_placeholders_in_document": "Marcadores de posición encontrados en el propio documento de la propuesta",
 
     # -- Non-heading scaffolding (Audit Round 2, Part 5) --
-    "export_footer_bidder_placeholder": "[NOMBRE DE LA EMPRESA LICITANTE]",
+    # Round 3, Part 1b follow-up: reworded to open with the canonical
+    # "[INSERTAR" prefix -- it used to open "[NOMBRE...", which happened to
+    # match EN's "[NO" prefix as a substring (accidental cross-language
+    # match), and matched no ES prefix at all.
+    "export_footer_bidder_placeholder": "[INSERTAR NOMBRE DE LA EMPRESA LICITANTE]",
     "export_footer_registered_address": "[DIRECCIÓN REGISTRADA]",
-    "export_no_introduction": "[NO SE HA REDACTADO AÚN LA INTRODUCCIÓN -- genere un borrador o escríbala en el paso Redactar Respuestas]",
-    "export_no_fees_entered_letter": "[NO SE HAN INGRESADO HONORARIOS -- calcule el desglose de honorarios por disciplina, o genere el reparto por disciplina, en el paso Honorarios y Programa]",
+    # Round 3, Part 1b: every one of these used to open "[NO SE ...]", which
+    # is NOT one of PLACEHOLDER_PREFIXES["es"] (that set has "[SIN", not
+    # "[NO") -- they were only ever found by collect_placeholders() because
+    # the ENGLISH "[NO" prefix happens to also match "[NO SE...]" as a
+    # substring. Reworded to open with the canonical "[SIN ..." prefix so a
+    # Spanish pack's placeholder sweep no longer silently depends on the
+    # English prefix set being present too (see test 5a).
+    "export_no_introduction": "[SIN INTRODUCCIÓN REDACTADA AÚN -- genere un borrador o escríbala en el paso Redactar Respuestas]",
+    "export_no_fees_entered_letter": "[SIN HONORARIOS INGRESADOS -- calcule el desglose de honorarios por disciplina, o genere el reparto por disciplina, en el paso Honorarios y Programa]",
     "export_fee_nothing_selected": "[SELECCIONE QUÉ PRESENTACIÓN DE HONORARIOS INCLUIR -- pestaña Estimación de Honorarios]",
-    "export_no_assumptions": "[NO SE EXTRAJERON SUPUESTOS -- agregue los que correspondan]",
-    "export_no_terms_of_engagement": "[NO SE HAN INGRESADO TÉRMINOS DE CONTRATACIÓN -- haga referencia al contrato o condiciones comerciales aplicables]",
-    "export_no_scope_items": "[NO SE EXTRAJERON PARTIDAS DE ALCANCE -- ejecute el Análisis de la Licitación, o agregue partidas de alcance manualmente]",
-    "export_no_tasks_for_item": "[NO SE EXTRAJERON TAREAS PARA {item}]",
-    "export_no_methodology": "[NO SE HA REDACTADO AÚN LA METODOLOGÍA -- genere borradores iniciales en el paso Redactar Respuestas]",
+    "export_no_assumptions": "[SIN SUPUESTOS EXTRAÍDOS -- agregue los que correspondan]",
+    "export_no_terms_of_engagement": "[SIN TÉRMINOS DE CONTRATACIÓN INGRESADOS -- haga referencia al contrato o condiciones comerciales aplicables]",
+    "export_no_scope_items": "[SIN PARTIDAS DE ALCANCE EXTRAÍDAS -- ejecute el Análisis de la Licitación, o agregue partidas de alcance manualmente]",
+    "export_no_tasks_for_item": "[SIN TAREAS EXTRAÍDAS PARA {item}]",
+    "export_no_methodology": "[SIN METODOLOGÍA REDACTADA AÚN -- genere borradores iniciales en el paso Redactar Respuestas]",
     "export_eyebrow_why_choose_us": "Por qué elegirnos",
-    "export_no_team_members": "[NO SE HAN ASIGNADO INTEGRANTES DEL EQUIPO -- asigne personas (y marque 'Incluir en la propuesta') en la pestaña Equipo y Recursos]",
-    "export_no_program_entered": "[NO SE HA INGRESADO EL PROGRAMA -- defina las semanas de ejecución en el paso Programa]",
+    "export_no_team_members": "[SIN INTEGRANTES DEL EQUIPO ASIGNADOS -- asigne personas (y marque 'Incluir en la propuesta') en la pestaña Equipo y Recursos]",
+    "export_no_program_entered": "[SIN PROGRAMA INGRESADO -- defina las semanas de ejecución en el paso Programa]",
     "export_letter_signoff_regards": "Saludos cordiales",
-    "export_letter_sender_placeholder": "[NOMBRE DEL REMITENTE]",
+    "export_letter_sender_placeholder": "[INSERTAR NOMBRE DEL REMITENTE]",
     "export_letter_checklist_placeholders": "Reemplace todo marcador de posición en rojo entre corchetes anterior por contenido real y verificado.",
     "export_letter_checklist_fees": "Confirme que cada cifra de honorarios sea un número real y revisado -- no una estimación de referencia.",
     "export_letter_checklist_team": "Confirme la disponibilidad de los integrantes del equipo nombrados para el programa indicado.",
@@ -286,15 +434,20 @@ _ES: dict[str, str] = {
     ),
     "export_cover_fallback_title": "Paquete de Respuesta a la Licitación",
     "export_pull_quote_eyebrow_differentiator": "Qué nos diferencia",
-    "export_no_executive_summary": "[NO SE HA REDACTADO AÚN EL RESUMEN EJECUTIVO -- genere uno en el paso Redactar Respuestas]",
+    "export_no_executive_summary": "[SIN RESUMEN EJECUTIVO REDACTADO AÚN -- genere uno en el paso Redactar Respuestas]",
     "export_block_untitled": "[SIN TÍTULO]",
     "export_no_content_drafted": "[SIN CONTENIDO REDACTADO]",
     "export_unweighted_note": (
         "[SIN PONDERACIÓN -- no otorga puntaje de evaluación, pero marca el tono de todo lo que "
         "sigue. Confirme cada afirmación anterior antes de presentar.]"
     ),
+    # Round 3, Part 1b: reworded to open with the canonical "[PRIMERA
+    # VERSIÓN" prefix (PLACEHOLDER_PREFIXES["es"]["first_pass"]) -- it used
+    # to open "[ORGANIGRAMA DE PRIMERA VERSIÓN...", which that prefix does
+    # NOT match (only the English "[FIRST-PASS" twin did), so
+    # collect_placeholders() silently missed it in an ES-only sweep.
     "export_org_chart_firstpass_note": (
-        "[ORGANIGRAMA DE PRIMERA VERSIÓN ARRIBA, generado desde la pestaña Equipo y Recursos -- "
+        "[PRIMERA VERSIÓN DEL ORGANIGRAMA ARRIBA, generado desde la pestaña Equipo y Recursos -- "
         "reemplácelo por el organigrama definitivo. Un organigrama complementario en PowerPoint "
         "se exporta junto con este documento; termínelo allí y luego péguelo sobre la imagen de "
         "arriba.]"
@@ -340,7 +493,7 @@ _ES: dict[str, str] = {
     ),
     "pptx_org_footnote_plain": "Las líneas continuas de reporte van de arriba hacia abajo.",
     "pptx_org_empty_note": (
-        "[NO SE HA ASIGNADO EQUIPO -- agregue los roles de gestión y los líderes de disciplina "
+        "[SIN EQUIPO ASIGNADO -- agregue los roles de gestión y los líderes de disciplina "
         "en la pestaña Equipo y Recursos, luego vuelva a descargar este PowerPoint]"
     ),
     "pptx_program_title": "Programa de ejecución",
@@ -348,12 +501,153 @@ _ES: dict[str, str] = {
     "pptx_program_legend_scheduled": "Actividad programada",
     "pptx_program_legend_milestone": "Hito / punto de espera",
     "pptx_program_empty_note": (
-        "[NO SE HA INGRESADO EL PROGRAMA -- construya el programa de ejecución en la pestaña "
+        "[SIN PROGRAMA INGRESADO -- construya el programa de ejecución en la pestaña "
         "Estimación de Honorarios, luego vuelva a descargar este PowerPoint]"
     ),
     "pptx_methodology_title": "Nuestra metodología propuesta",
     "pptx_wvr_statement": "Todos los entregables de diseño se emitirán con Registros de Verificación de Trabajo (WVR) completos",
     "pptx_wvr_confirm_placeholder": "[CONFIRMAR DECLARACIÓN DE WVR / CALIDAD PARA ESTA EMPRESA]",
+
+    # -- Round 3, Part 1a/4a -- see the matching English keys' comments above. --
+    "export_methodology_table_placeholder": (
+        "[INSERTAR TABLA DE METODOLOGÍA -- genérela en la aplicación y pegue aquí la tabla de "
+        "PowerPoint terminada]"
+    ),
+    "export_no_draft_generated_section": "[SIN BORRADOR GENERADO AÚN -- ejecute Redactar Respuestas para esta sección]",
+    "export_no_draft_body": "[SIN CUERPO DE BORRADOR -- genere un borrador para esta sección]",
+    "export_insert_key_personnel_name": "[INSERTAR NOMBRE DEL PERSONAL CLAVE]",
+    "export_insert_qualification": "[INSERTAR CUALIFICACIÓN]",
+    "export_confirm_registration_status": "[CONFIRMAR EL ESTADO Y NÚMERO DE REGISTRO]",
+    "export_insert_years_experience": "[INSERTAR LOS AÑOS DE EXPERIENCIA PARA EL CV ADJUNTO]",
+    "export_insert_project_specific_detail": "[INSERTAR DETALLE ESPECÍFICO DEL PROYECTO]",
+    "export_enter_fee": "[INGRESAR HONORARIO]",
+    "export_not_assigned": "[SIN ASIGNAR]",
+    "export_not_provided": "[SIN PROPORCIONAR]",
+    "export_no_description_drafted": "[SIN DESCRIPCIÓN REDACTADA -- redacte o revise este proyecto de referencia en Cargar Documentos]",
+    "export_insert_relevance_to_tender": "[INSERTAR RELEVANCIA PARA ESTA LICITACIÓN]",
+    "export_confirm_personnel_worked_on_project": "[CONFIRMAR QUÉ PERSONAL CLAVE TRABAJÓ EN ESTE PROYECTO]",
+    "export_no_personnel_assigned_yet": "[SIN PERSONAL ASIGNADO AÚN -- asigne nombres en la pestaña Equipo y Recursos]",
+    "export_no_personnel_ticked": (
+        "[SIN PERSONAL CLAVE MARCADO PARA INCLUSIÓN -- marque al menos el liderazgo del proyecto "
+        "(Director/Gerente de Proyecto/Gerente de Diseño) en la pestaña Equipo y Recursos]"
+    ),
+    "export_confirm_contractual_arrangements": (
+        "[CONFIRMAR EL PANEL / CONTRATO Y LAS TARIFAS EN QUE SE BASA ESTE HONORARIO, Y CUALQUIER "
+        "ACUERDO DE SUBCONSULTOR (P. EJ., MEMORANDO DE ENTENDIMIENTO / ACUERDOS DE SUBCONSULTORÍA)]"
+    ),
+    "export_evaluation_weighting_dashboard_placeholder": "[MARCADOR DEL PANEL DE PONDERACIÓN DE EVALUACIÓN]",
+    "export_graphic_placeholder": "[MARCADOR DE {title}]",
+    "export_no_fee_buildup_entered": (
+        "[SIN DESGLOSE DE HONORARIOS INGRESADO -- calcule la tabla de honorarios por disciplina en "
+        "la pestaña Honorarios y Programa]"
+    ),
+    "export_no_fee_buildup_entered_tab": (
+        "[SIN DESGLOSE DE HONORARIOS INGRESADO -- calcule la tabla de honorarios por disciplina en "
+        "la pestaña Estimación de Honorarios]"
+    ),
+    "export_label_qualification": "Cualificación",
+    "export_label_experience": "Experiencia",
+    "export_label_on_project_will": "En este proyecto, {name} se encargará de",
+    "export_label_relevant_experience": "Experiencia relevante en proyectos:",
+    "export_label_local_experience": "Experiencia en el distrito local:",
+    "export_label_rpeq_status": "RPEQ / estado de registro",
+    "export_label_years_experience": "Años de experiencia",
+    "export_label_relevance_to_project": "Relevancia para el proyecto: ",
+    "export_label_personnel_involved": "Personal involucrado: ",
+    "export_heading_graphics_for_section": "Gráficos de esta sección",
+    "export_table_header_discipline": "Disciplina",
+    "export_table_header_discipline_stage": "Disciplina / etapa",
+    "export_table_header_fee_excl_gst": "Honorario (sin IVA)",
+    "export_table_header_total": "Total",
+    "export_table_header_id": "ID",
+    "export_table_header_description": "Descripción",
+    "export_table_header_type": "Tipo",
+    "export_table_header_mapped_section": "Sección asignada",
+    "export_table_header_priority": "Prioridad",
+    "export_table_header_status": "Estado",
+    "export_table_header_action_required": "Acción requerida",
+    "export_table_header_risk": "Riesgo",
+    "export_table_header_issue": "Problema",
+    "export_table_header_impact": "Impacto",
+    "export_table_header_recommended_action": "Acción recomendada",
+    "export_compliance_matrix_intro": (
+        "Cada requisito identificado en el brief, asignado a una sección de la propuesta y un "
+        "estado. Los elementos 'Faltante' necesitan la intervención del usuario antes de que este "
+        "paquete sea utilizable."
+    ),
+    "export_gap_analysis_intro": (
+        "Riesgos y brechas que este paquete puede identificar automáticamente -- nada aquí está "
+        "inventado."
+    ),
+    "export_no_scope_item_fees_entered": (
+        "[SIN HONORARIOS DE PARTIDAS DE ALCANCE INGRESADOS -- calcule la tabla de partidas de "
+        "alcance en la pestaña Estimación de Honorarios]"
+    ),
+    "export_untitled_scope_item": "[PARTIDA DE ALCANCE SIN TÍTULO]",
+    "export_table_header_scope_item": "Partida de alcance",
+    "export_table_header_notes": "Notas",
+    "export_note_selected_past_projects": (
+        "Proyectos anteriores seleccionados más relevantes para el alcance de este brief, "
+        "extraídos de la biblioteca de proyectos de referencia de la empresa."
+    ),
+    "export_no_relevance_drafted": "[SIN RELEVANCIA REDACTADA -- redacte o revise este proyecto de referencia en Cargar Documentos]",
+    "export_table_header_scope_item_cap": "Partida de alcance",
+    "export_table_header_commence": "Inicio",
+    "export_table_header_complete": "Finalización",
+    "export_table_header_duration": "Duración",
+    "export_program_anchored_note": (
+        "El programa está anclado a un inicio previsto el {start_date} -- las fechas cambian "
+        "según la fecha real de adjudicación."
+    ),
+    "export_table_header_risk_cap": "Riesgo",
+    "export_table_header_impact_cap": "Impacto",
+    "export_table_header_mitigation": "Mitigación",
+    "export_risk_register_firstpass_note": (
+        "[PRIMERA VERSIÓN DEL REGISTRO -- cada mitigación es un compromiso que asumirá esta "
+        "empresa. Confirme cada una y reemplace cada TBC en rojo antes de presentar.]"
+    ),
+    "export_no_reference_projects_entered": (
+        "[SIN PROYECTOS DE REFERENCIA INGRESADOS -- agregue proyectos de referencia en Cargar "
+        "Documentos, luego redáctelos o revíselos allí antes de exportar]"
+    ),
+    "export_client_name_placeholder": "[NOMBRE DEL CLIENTE]",
+    "export_relationship_intro": (
+        "Nos enfocamos en los momentos que importan -- yendo más allá de la solución técnica "
+        "para fomentar una relación unida y profesional con {client}. Mediante el mantenimiento "
+        "de registros de comentarios en vivo y la priorización del cierre oportuno de las "
+        "revisiones, minimizamos el retrabajo y garantizamos que los aportes de las partes "
+        "interesadas se capturen y se atiendan. La participación proactiva y la comunicación "
+        "clara son fundamentales para nuestro enfoque de gestión de relaciones y sustentan "
+        "nuestra probada capacidad de entregar proyectos a tiempo."
+    ),
+    "export_label_leadership_oversight": "Supervisión del liderazgo. ",
+    "export_relationship_standard_text_note": (
+        "[TEXTO ESTÁNDAR -- confirme el personal y las oficinas locales reales, y adapte al "
+        "plan de participación real de este proyecto, antes de presentar]"
+    ),
+    "export_table_header_principles": "Principios",
+    "export_table_header_our_approach": "Nuestro enfoque",
+    "export_length_note_under_over": (
+        "[LONGITUD: este borrador tiene aproximadamente {words} palabras frente a las {target} "
+        "previstas para su asignación de {pages} páginas -- {verdict_text} el presupuesto (más "
+        "del {tolerance_pct}% de diferencia). {action_text}"
+    ),
+    "export_length_verdict_under": "muy por debajo de",
+    "export_length_verdict_over": "muy por encima de",
+    "export_length_action_under": "Amplíelo con detalle real, o vuelva a revisar la asignación.",
+    "export_length_action_over": "Redúzcalo, o vuelva a revisar la asignación.",
+
+    "export_indicative_fee_split_note": (
+        "REPARTO DE HONORARIOS INDICATIVO -- SOLO PLANIFICACIÓN INTERNA, NO PARA PRESENTAR. Esta "
+        "es una verificación aproximada para el equipo de licitación, no una oferta con precio. "
+        "Debe ser revisada y reevaluada por quien tenga la aprobación comercial antes de que "
+        "cualquier cifra aquí se use cerca de una presentación real."
+    ),
+    "export_table_header_fee_pct": "Honorario %",
+    "export_table_header_confidence": "Confianza",
+    "export_table_header_source": "Fuente",
+    "export_table_header_indicative_amount": "$ indicativo",
+    "export_fee_cap_anchored_note": "Anclado al tope de honorarios indicado en el brief: {fee_cap}",
 }
 
 _CATALOGS: dict[str, dict[str, str]] = {
@@ -425,6 +719,48 @@ def placeholder_marker(detail: str, language: str | None = None, kind: str = "tb
     prefix = prefixes.get(kind) or PLACEHOLDER_PREFIXES["en"].get(kind, "[TO BE COMPLETED")
     detail = (detail or "").strip()
     return f"{prefix}: {detail}]" if detail else f"{prefix}]"
+
+
+def canonical_marker_instruction(language: str | None) -> str:
+    """Round 3, Part 1c: the shared "use only the canonical Spanish
+    placeholder prefixes" instruction fragment, appended to an AI drafting
+    prompt whenever output_language is Spanish. Originally written once,
+    inline, in draft_generator.py (Audit Round 2, Part 4) -- factored out
+    here so every other AI-drafting module that can produce Spanish-output
+    free text (executive_summary.py, team_intro.py, experience_intro.py,
+    methodology_stages.py, team_bios.py, pitch_review.py) gets the
+    IDENTICAL instruction instead of each carrying its own copy that could
+    drift out of sync with PLACEHOLDER_PREFIXES. Without this, a model left
+    to its own judgement coins its own marker (e.g. "[EL USUARIO DEBE
+    INSERTAR...]"), which export_docx.collect_placeholders()'s fixed-prefix
+    sweep never matches -- a Spanish pack silently under-reports what still
+    needs a human.
+
+    Returns "" for anything other than "es" -- callers should simply
+    concatenate the result onto their existing prompt/instruction string,
+    so an English-output call is a harmless no-op.
+
+    risk_register.py deliberately does NOT call this: its two AI-written
+    fields (impact/mitigation) already use a single literal marker, "TBC",
+    kept unchanged in every language by its own prompt instruction -- a
+    structural placeholder the export sweep matches via a dedicated regex
+    (export_docx._TBC_RE), not the bracket-prefix family this instruction
+    governs. Adding this instruction there would just be a second,
+    conflicting placeholder convention for fields that already can't leak
+    English into a Spanish document."""
+    lang = (language or "").strip().lower()[:2]
+    if lang != "es":
+        return ""
+    _es = PLACEHOLDER_PREFIXES["es"]
+    return (
+        " Any bracketed placeholder you write for missing information MUST use exactly one of "
+        f"these Spanish markers -- never a free translation of your own: {_es['insert']} ...] for "
+        f"something to insert, {_es['confirm']} ...] for something to confirm, {_es['tbc']}: ...] "
+        f"for something to be completed, {_es['no']} ...] for something not supplied. For example, "
+        f"write {_es['insert']}: DETALLE ESPECÍFICO DEL PROYECTO] -- not a paraphrase of it -- so a "
+        "reviewer scanning the Spanish draft, and the app's own automated sweep for placeholders, "
+        "both reliably find every gap."
+    )
 
 
 def export_t(key: str, language: str | None, **fmt) -> str:

@@ -41,6 +41,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from modules.ai_interface import call_ai_json
+from modules.export_i18n import canonical_marker_instruction
 
 # The literal a cell carries when the inputs don't support it. Rendered red
 # by both the PPTX and the DOCX image, same convention as every other
@@ -315,6 +316,12 @@ def draft_methodology_stages(
         default_stages=", ".join(DEFAULT_STAGE_NAMES),
     )
     if output_language == "es":
+        # Round 3, Part 1c: canonical-marker instruction shared via
+        # export_i18n.canonical_marker_instruction() -- see its docstring.
+        # The existing "keep TBC as TBC" sentence stays -- that is a
+        # SEPARATE, deliberately language-invariant marker (same convention
+        # as risk_register.py), not part of the bracket-prefix family the
+        # shared helper governs.
         prompt += (
             "\n\nWrite the narrative/prose string VALUES in your JSON response (\"name\", the "
             "entries of \"key_tasks\", \"engagement_activities\", \"outcome\", and the entries of "
@@ -323,6 +330,7 @@ def draft_methodology_stages(
             "translate it, it is a structural placeholder the rest of the app matches on. "
             "Translate only the language, not the substance -- do not invent, omit, or alter any "
             "task, deliverable, date, or fact because of this instruction."
+            + canonical_marker_instruction(output_language)
         )
 
     data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=4000)

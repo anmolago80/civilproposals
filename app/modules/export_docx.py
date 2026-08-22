@@ -381,7 +381,7 @@ def build_letter_docx(
     # a reviewed register they become a real risk / impact / mitigation table.
     if getattr(risk_register, "entries", None):
         doc.add_heading(export_i18n.export_t("heading_risks_mitigation", output_language), level=2)
-        _build_risk_table(doc, risk_register, theme)
+        _build_risk_table(doc, risk_register, theme, output_language)
     elif analysis.risks:
         doc.add_heading(export_i18n.export_t("heading_risks_noted_in_brief", output_language), level=2)
         _add_bullets(doc, analysis.risks)
@@ -527,7 +527,11 @@ def _build_letter_team(doc: Document, resource_plan: list, personnel_photos: dic
         name_p = text_cell.paragraphs[0]
         if left_indent:
             name_p.paragraph_format.left_indent = left_indent
-        name_run = name_p.add_run(("↳ " if indent else "") + (name or "[NOT ASSIGNED]") + f" | {entry['role_label']}")
+        name_run = name_p.add_run(
+            ("↳ " if indent else "")
+            + (name or export_i18n.export_t("export_not_assigned", output_language))
+            + f" | {entry['role_label']}"
+        )
         name_run.bold = True
         name_run.font.color.rgb = theme["heading"] if name else RED
         if not name:
@@ -535,9 +539,11 @@ def _build_letter_team(doc: Document, resource_plan: list, personnel_photos: dic
 
         value_to_project = _strip_value_prefix(entry["value_to_project"], name)
         for label, value in [
-            ("Qualification", entry["qualification"]),
-            ("Experience", ", ".join(x for x in (entry["years_experience"], entry["rpeq_status"]) if x)),
-            (f"On this project, {name or '[name]'} will", value_to_project),
+            (export_i18n.export_t("export_label_qualification", output_language), entry["qualification"]),
+            (export_i18n.export_t("export_label_experience", output_language),
+             ", ".join(x for x in (entry["years_experience"], entry["rpeq_status"]) if x)),
+            (export_i18n.export_t("export_label_on_project_will", output_language, name=name or "[name]"),
+             value_to_project),
         ]:
             p = text_cell.add_paragraph()
             if left_indent:
@@ -547,7 +553,7 @@ def _build_letter_team(doc: Document, resource_plan: list, personnel_photos: dic
             if value:
                 p.add_run(value)
             else:
-                r2 = p.add_run("[NOT PROVIDED]")
+                r2 = p.add_run(export_i18n.export_t("export_not_provided", output_language))
                 r2.font.color.rgb = RED
                 r2.italic = True
 
@@ -555,7 +561,7 @@ def _build_letter_team(doc: Document, resource_plan: list, personnel_photos: dic
             rp = text_cell.add_paragraph()
             if left_indent:
                 rp.paragraph_format.left_indent = left_indent
-            rp.add_run("Relevant project experience:").bold = True
+            rp.add_run(export_i18n.export_t("export_label_relevant_experience", output_language)).bold = True
             for item in entry["relevant_projects"]:
                 bp = text_cell.add_paragraph(style="List Bullet")
                 if left_indent:
@@ -576,17 +582,19 @@ def _build_letter_fee_buildup(doc: Document, discipline_fee_lines: list, theme: 
     lines = discipline_fee_lines or []
     if not lines:
         _add_placeholder_paragraph(
-            doc, "[NO FEE BUILD-UP ENTERED -- price the discipline fee table in the Fees & Program tab]",
+            doc, export_i18n.export_t("export_no_fee_buildup_entered", output_language),
         )
         return
-    headers = ["Discipline", "Fee (excl. GST)"]
+    headers = [export_i18n.export_t("export_table_header_discipline", output_language),
+               export_i18n.export_t("export_table_header_fee_excl_gst", output_language)]
     total = 0.0
     rows = []
     for line in lines:
         amount = getattr(line, "fee_amount", 0.0) or 0.0
         total += amount
-        rows.append([line.discipline, f"${amount:,.0f}" if amount else "[ENTER FEE]"])
-    rows.append(["Total", f"${total:,.0f}"])
+        rows.append([line.discipline,
+                     f"${amount:,.0f}" if amount else export_i18n.export_t("export_enter_fee", output_language)])
+    rows.append([export_i18n.export_t("export_table_header_total", output_language), f"${total:,.0f}"])
     table = _add_table(doc, headers, rows, theme=theme)
     total_row = table.rows[-1]
     for cell in total_row.cells:
@@ -637,14 +645,15 @@ def _build_letter_fee_split(doc: Document, fee_estimates: list, theme: dict,
     Program tab's "Discipline fee split" section is where the user edits this
     percentage breakdown (seeded either from that $ build-up or from the
     benchmark/AI buttons) before it's exported."""
-    from modules.fee_estimation_engine import INDICATIVE_NOTE
     doc.add_heading(export_i18n.export_t("heading_fee_split_by_discipline", output_language), level=2)
     warn = doc.add_paragraph()
-    run = warn.add_run(INDICATIVE_NOTE)
+    run = warn.add_run(export_i18n.export_t("export_indicative_fee_split_note", output_language))
     run.font.bold = True
     run.font.color.rgb = RED
 
-    headers = ["Discipline", "Fee %", "Confidence", "Source"]
+    headers = [export_i18n.export_t(k, output_language) for k in (
+        "export_table_header_discipline", "export_table_header_fee_pct",
+        "export_table_header_confidence", "export_table_header_source")]
     printed = format_fee_percentages([e.fee_percentage for e in fee_estimates])
     rows = [[e.discipline, pct, e.confidence, e.source]
             for e, pct in zip(fee_estimates, printed)]
@@ -675,7 +684,7 @@ def _letter_program_week_grid(doc: Document, program_schedule: dict, week_labels
                 _shade_cell(table.rows[row_index].cells[col_index], str(theme["accent"]))
 
 
-def _letter_program_native_table(doc: Document, model, theme: dict):
+def _letter_program_native_table(doc: Document, model, theme: dict, output_language: str = "en"):
     """The formal-table style as a REAL Word table rather than a picture.
 
     The whole appeal of the formal-table option is that it is conservative
@@ -689,16 +698,20 @@ def _letter_program_native_table(doc: Document, model, theme: dict):
         return f"{label} - {date_text}" if date_text else label
 
     rows = [
-        [item.label or "[UNTITLED SCOPE ITEM]", _week_text(item.start_week),
+        [item.label or export_i18n.export_t("export_untitled_scope_item", output_language),
+         _week_text(item.start_week),
          _week_text(item.end_week), f"{item.weeks} week{'s' if item.weeks != 1 else ''}"]
         for item in model.items
     ]
-    _add_table(doc, ["Scope Item", "Commence", "Complete", "Duration"], rows, theme=theme)
+    headers = [export_i18n.export_t(k, output_language) for k in (
+        "export_table_header_scope_item_cap", "export_table_header_commence",
+        "export_table_header_complete", "export_table_header_duration")]
+    _add_table(doc, headers, rows, theme=theme)
     if model.start_date_text:
         note = doc.add_paragraph()
         run = note.add_run(
-            f"Program anchored to an anticipated commencement of {model.start_date_text} "
-            f"-- dates shift with the actual award date."
+            export_i18n.export_t("export_program_anchored_note", output_language,
+                                 start_date=model.start_date_text)
         )
         run.italic = True
         run.font.size = Pt(8.5)
@@ -729,7 +742,7 @@ def _build_letter_program(doc: Document, program_schedule: dict, week_labels: li
         resolved = program_render.effective_style(
             model, style or program_render.DEFAULT_STYLE)
         if resolved == "table":
-            _letter_program_native_table(doc, model, theme)
+            _letter_program_native_table(doc, model, theme, output_language)
             return
         png = program_render.render_png(model, resolved, f"#{theme['accent']}")
         if png:
@@ -741,7 +754,7 @@ def _build_letter_program(doc: Document, program_schedule: dict, week_labels: li
     _letter_program_week_grid(doc, program_schedule, week_labels, theme)
 
 
-def _build_risk_table(doc: Document, register, theme: dict | None):
+def _build_risk_table(doc: Document, register, theme: dict | None, output_language: str = "en"):
     """Risk / impact / mitigation, with TBC cells kept red.
 
     A "TBC" mitigation is the correct output for a brief that doesn't
@@ -750,7 +763,9 @@ def _build_risk_table(doc: Document, register, theme: dict | None):
     theme = theme or _theme_colours(None)
     entries = getattr(register, "entries", None) or []
     rows = [[e.risk, e.impact, e.mitigation] for e in entries]
-    table = _add_table(doc, ["Risk", "Impact", "Mitigation"], rows, theme=theme)
+    headers = [export_i18n.export_t(k, output_language) for k in (
+        "export_table_header_risk_cap", "export_table_header_impact_cap", "export_table_header_mitigation")]
+    table = _add_table(doc, headers, rows, theme=theme)
     for row_index, entry in enumerate(entries, start=1):
         for col_index, value in enumerate((entry.risk, entry.impact, entry.mitigation)):
             if str(value).strip().upper() != "TBC":
@@ -760,10 +775,7 @@ def _build_risk_table(doc: Document, register, theme: dict | None):
                 run.font.color.rgb = RED
                 run.italic = True
     note = doc.add_paragraph()
-    run = note.add_run(
-        "[FIRST-PASS REGISTER -- every mitigation is a commitment this firm will be held to. "
-        "Confirm each one, and replace every red TBC, before submission.]"
-    )
+    run = note.add_run(export_i18n.export_t("export_risk_register_firstpass_note", output_language))
     run.font.color.rgb = RED
     run.italic = True
 
@@ -1028,7 +1040,8 @@ def _build_tender_summary(doc: Document, analysis, weighting_chart_png: bytes | 
         try:
             doc.add_picture(io.BytesIO(weighting_chart_png), width=Cm(15))
         except Exception:
-            _add_placeholder_paragraph(doc, "[EVALUATION WEIGHTING DASHBOARD PLACEHOLDER]")
+            _add_placeholder_paragraph(
+                doc, export_i18n.export_t("export_evaluation_weighting_dashboard_placeholder", output_language))
 
     if analysis.analysis_warnings:
         doc.add_heading(export_i18n.export_t("heading_extraction_warnings", output_language), level=2)
@@ -1037,11 +1050,12 @@ def _build_tender_summary(doc: Document, analysis, weighting_chart_png: bytes | 
 
 def _build_compliance_matrix(doc: Document, compliance_items: list, theme: dict, output_language: str = "en"):
     doc.add_heading(export_i18n.export_t("heading_compliance_matrix", output_language), level=1)
-    doc.add_paragraph(
-        "Every requirement identified in the brief, mapped to a proposal section and a status. "
-        "'Missing' items need user input before this pack is usable."
-    )
-    headers = ["ID", "Description", "Type", "Mapped Section", "Priority", "Status", "Action Required"]
+    doc.add_paragraph(export_i18n.export_t("export_compliance_matrix_intro", output_language))
+    headers = [export_i18n.export_t(k, output_language) for k in (
+        "export_table_header_id", "export_table_header_description", "export_table_header_type",
+        "export_table_header_mapped_section", "export_table_header_priority", "export_table_header_status",
+        "export_table_header_action_required",
+    )]
     rows = [
         [i.requirement_id, i.description, i.requirement_type, i.mapped_section or "-",
          i.priority, i.status, i.user_action_required or "-"]
@@ -1052,8 +1066,11 @@ def _build_compliance_matrix(doc: Document, compliance_items: list, theme: dict,
 
 def _build_gap_analysis(doc: Document, gap_items: list, theme: dict, output_language: str = "en"):
     doc.add_heading(export_i18n.export_t("heading_gap_analysis", output_language), level=1)
-    doc.add_paragraph("Risks and gaps this pack could identify automatically -- nothing here is invented.")
-    headers = ["Risk", "Issue", "Impact", "Recommended Action", "Mapped Section"]
+    doc.add_paragraph(export_i18n.export_t("export_gap_analysis_intro", output_language))
+    headers = [export_i18n.export_t(k, output_language) for k in (
+        "export_table_header_risk", "export_table_header_issue", "export_table_header_impact",
+        "export_table_header_recommended_action", "export_table_header_mapped_section",
+    )]
     rows = [[g.risk_level, g.issue, g.impact, g.recommended_action, g.mapped_section or "-"] for g in gap_items]
     _add_status_table(doc, headers, rows, status_col_index=0, theme=theme)
 
@@ -1113,7 +1130,7 @@ def _build_scope_item_fees(doc: Document, scope_item_fees: list | None, theme: d
     rows_in = scope_item_fees or []
     if not rows_in:
         _add_placeholder_paragraph(
-            doc, "[NO SCOPE ITEM FEES ENTERED -- price the scope item table in the Fee Estimate tab]",
+            doc, export_i18n.export_t("export_no_scope_item_fees_entered", output_language),
         )
         return
     total = 0.0
@@ -1122,12 +1139,14 @@ def _build_scope_item_fees(doc: Document, scope_item_fees: list | None, theme: d
         amount = getattr(item, "fee_amount", 0.0) or 0.0
         total += amount
         rows.append([
-            getattr(item, "item_title", "") or "[UNTITLED SCOPE ITEM]",
-            f"${amount:,.0f}" if amount else "[ENTER FEE]",
+            getattr(item, "item_title", "") or export_i18n.export_t("export_untitled_scope_item", output_language),
+            f"${amount:,.0f}" if amount else export_i18n.export_t("export_enter_fee", output_language),
             getattr(item, "notes", "") or "",
         ])
-    rows.append(["Total", f"${total:,.0f}", ""])
-    table = _add_table(doc, ["Scope item", "Fee (excl. GST)", "Notes"], rows, theme=theme)
+    rows.append([export_i18n.export_t("export_table_header_total", output_language), f"${total:,.0f}", ""])
+    headers = [export_i18n.export_t(k, output_language) for k in (
+        "export_table_header_scope_item", "export_table_header_fee_excl_gst", "export_table_header_notes")]
+    table = _add_table(doc, headers, rows, theme=theme)
     for cell in table.rows[-1].cells:
         _shade_cell(cell, str(theme["accent"]))
         if cell.paragraphs[0].runs:
@@ -1148,15 +1167,17 @@ def _build_fee_estimate(
     brief's stated fee cap. Without this, that manual total never reached the
     export, so this table showed "-" for every discipline even though the app's
     own Fee Estimate tab was showing real dollar figures."""
-    from modules.fee_estimation_engine import INDICATIVE_NOTE
     doc.add_heading(export_i18n.export_t("heading_fee_estimate_by_discipline", output_language), level=1)
     warn = doc.add_paragraph()
-    run = warn.add_run(INDICATIVE_NOTE)
+    run = warn.add_run(export_i18n.export_t("export_indicative_fee_split_note", output_language))
     run.font.bold = True
     run.font.color.rgb = RED
     if fee_cap_text:
-        doc.add_paragraph(f"Anchored to the brief's stated fee cap: {fee_cap_text}")
-    headers = ["Discipline", "Fee %", "Indicative $", "Confidence", "Source"]
+        doc.add_paragraph(export_i18n.export_t("export_fee_cap_anchored_note", output_language, fee_cap=fee_cap_text))
+    headers = [export_i18n.export_t(k, output_language) for k in (
+        "export_table_header_discipline", "export_table_header_fee_pct",
+        "export_table_header_indicative_amount", "export_table_header_confidence",
+        "export_table_header_source")]
     indicative_amounts = indicative_amounts or {}
 
     rows = []
@@ -1294,7 +1315,7 @@ def _build_proposal_response(
         # its allocation reads as thin to an evaluator scoring it, and a draft
         # well over won't fit -- neither is visible without counting words by
         # hand, so the guidance note says it.
-        _add_length_note(doc, section, (drafts or {}).get(section.title))
+        _add_length_note(doc, section, (drafts or {}).get(section.title), output_language)
 
         draft = drafts.get(section.title)
 
@@ -1368,7 +1389,7 @@ def _build_proposal_response(
                 for para_text in body:
                     _add_draft_paragraph(doc, para_text, theme)
             else:
-                doc.add_paragraph("[NO DRAFT BODY -- generate a draft for this section]")
+                doc.add_paragraph(export_i18n.export_t("export_no_draft_body", output_language))
             _end_columns(doc)
         else:
             # .italic on a Paragraph is a silent no-op -- python-docx only
@@ -1376,14 +1397,15 @@ def _build_proposal_response(
             # document rendering as ordinary black body text, indistinguishable
             # from real drafted content at a glance.
             _add_placeholder_paragraph(
-                doc, "[NO DRAFT GENERATED YET -- run Draft Responses for this section]")
+                doc, export_i18n.export_t("export_no_draft_generated_section", output_language))
 
         # 5b. The sales pitch, pinned to the very end of the Methodology
         # section's content (after the table and the AI draft body, not
         # alongside them) -- same "pure upside copy, render whenever present"
         # treatment as the differentiator in _build_executive_summary.
         if _is_methodology_section(section.title):
-            _add_pull_quote_box(doc, sales_pitch_text, theme, eyebrow="Why choose us")
+            _add_pull_quote_box(doc, sales_pitch_text, theme,
+                                eyebrow=export_i18n.export_t("export_eyebrow_why_choose_us", output_language))
 
         # 6. Remaining graphic placeholders (full width).
         section_graphics = graphics_by_section.get(section.title, [])
@@ -1395,14 +1417,19 @@ def _build_proposal_response(
         if is_personnel:
             section_graphics = [g for g in section_graphics if "org" not in g.graphic_title.lower()]
         if section_graphics:
-            # TODO A3 i18n: minor level-3 sub-heading, out of scope for this
-            # pass (major top-level/level-2 structural headings only).
-            doc.add_heading("Graphics for this section", level=3)
+            # Round 3, Part 4a: was TODO'd out of Round 2's scope ("minor
+            # level-3 sub-heading") -- now translated along with everything
+            # else in this section.
+            doc.add_heading(export_i18n.export_t("export_heading_graphics_for_section", output_language), level=3)
             for g in section_graphics:
                 p = doc.add_paragraph(style="List Bullet")
                 p.add_run(f"{g.graphic_title} ({g.graphic_type}) -- {g.purpose} ").italic = False
                 if g.status != "Generated":
-                    p.add_run(g.placeholder_text or f"[{g.graphic_title.upper()} PLACEHOLDER]").font.color.rgb = RED
+                    p.add_run(
+                        g.placeholder_text
+                        or export_i18n.export_t("export_graphic_placeholder", output_language,
+                                                 title=g.graphic_title.upper())
+                    ).font.color.rgb = RED
 
 
 _BOLD_MARKDOWN_RE = re.compile(r"\*\*(.+?)\*\*")
@@ -1671,7 +1698,8 @@ def _build_personnel_profiles(
     personnel_photos = personnel_photos or {}
     all_people = personnel_profiles_deduped(resource_plan or [])
     if not all_people:
-        _add_placeholder_paragraph(doc, "[NO PERSONNEL ASSIGNED YET -- assign names in the Team & Resourcing tab]")
+        _add_placeholder_paragraph(
+            doc, export_i18n.export_t("export_no_personnel_assigned_yet", output_language))
         return
 
     # Only ticked profiles make the cut -- see ResourceAssignment.include_in_proposal
@@ -1684,10 +1712,7 @@ def _build_personnel_profiles(
     people = [e for e in all_people if getattr(e["assignment"], "include_in_proposal", True)]
     if not people:
         _add_placeholder_paragraph(
-            doc,
-            "[NO KEY PERSONNEL ARE TICKED FOR INCLUSION -- tick at least the project "
-            "leadership (Project Director/Manager/Design Manager) in the Team & "
-            "Resourcing tab]",
+            doc, export_i18n.export_t("export_no_personnel_ticked", output_language),
         )
         return
 
@@ -1718,22 +1743,26 @@ def _build_personnel_profiles(
             _add_photo_placeholder_box(photo_cell, output_language)
 
         name_p = text_cell.paragraphs[0]
-        name_run = name_p.add_run(name or "[INSERT KEY PERSONNEL NAME]")
+        name_run = name_p.add_run(name or export_i18n.export_t("export_insert_key_personnel_name", output_language))
         name_run.bold = True
         name_run.font.size = Pt(11.5)
         if not name:
             name_run.font.color.rgb = RED
             name_run.italic = True
 
-        _add_personnel_field_line(text_cell, "Qualification", entry.get("qualification", ""),
-                                   "[INSERT QUALIFICATION]")
-        _add_personnel_field_line(text_cell, "RPEQ / registration status", entry.get("rpeq_status", ""),
-                                   "[CONFIRM REGISTRATION STATUS AND NUMBER]")
-        _add_personnel_field_line(text_cell, "Years of experience", entry.get("years_experience", ""),
-                                   "[INSERT YEARS OF EXPERIENCE FOR CV ATTACHMENT]")
+        _add_personnel_field_line(text_cell, export_i18n.export_t("export_label_qualification", output_language),
+                                   entry.get("qualification", ""),
+                                   export_i18n.export_t("export_insert_qualification", output_language))
+        _add_personnel_field_line(text_cell, export_i18n.export_t("export_label_rpeq_status", output_language),
+                                   entry.get("rpeq_status", ""),
+                                   export_i18n.export_t("export_confirm_registration_status", output_language))
+        _add_personnel_field_line(text_cell, export_i18n.export_t("export_label_years_experience", output_language),
+                                   entry.get("years_experience", ""),
+                                   export_i18n.export_t("export_insert_years_experience", output_language))
 
         value_p = text_cell.add_paragraph()
-        vr = value_p.add_run(f"On this project, {name or '[name]'} will: ")
+        vr = value_p.add_run(
+            export_i18n.export_t("export_label_on_project_will", output_language, name=name or "[name]") + ": ")
         vr.bold = True
         # Strip a duplicated "On this project, <name> will" opening at RENDER time -- the
         # last line of defence, catching it regardless of whether the value came from the
@@ -1743,14 +1772,14 @@ def _build_personnel_profiles(
         if value_to_project:
             value_p.add_run(value_to_project)
         else:
-            r = value_p.add_run("[INSERT PROJECT-SPECIFIC DETAIL]")
+            r = value_p.add_run(export_i18n.export_t("export_insert_project_specific_detail", output_language))
             r.font.color.rgb = RED
             r.italic = True
 
         relevant_projects = entry.get("relevant_projects") or []
         if relevant_projects:
             rpp = text_cell.add_paragraph()
-            rpp.add_run("Relevant project experience:").bold = True
+            rpp.add_run(export_i18n.export_t("export_label_relevant_experience", output_language)).bold = True
             for item in relevant_projects:
                 bp = text_cell.add_paragraph(style="List Bullet")
                 bp.add_run(str(item))
@@ -1758,7 +1787,7 @@ def _build_personnel_profiles(
         local_experience = entry.get("local_experience") or []
         if local_experience:
             lp = text_cell.add_paragraph()
-            lp.add_run("Local district experience:").bold = True
+            lp.add_run(export_i18n.export_t("export_label_local_experience", output_language)).bold = True
             for item in local_experience:
                 bp = text_cell.add_paragraph(style="List Bullet")
                 bp.add_run(str(item))
@@ -1801,12 +1830,6 @@ def _add_photo_placeholder_box(cell, output_language: str = "en") -> None:
     r2.italic = True
 
 
-METHODOLOGY_PLACEHOLDER_NOTE = (
-    "[INSERT METHODOLOGY TABLE -- generate it in the app and paste the finished "
-    "PowerPoint table here]"
-)
-
-
 def _build_methodology_table(doc: Document, analysis, theme: dict | None, output_language: str = "en"):
     """Deliberately NOT auto-building a one-column-per-scope-item methodology table
     here, and -- as of this revision -- deliberately NOT embedding a first-pass
@@ -1816,10 +1839,15 @@ def _build_methodology_table(doc: Document, analysis, theme: dict | None, output
     exported alongside this document from the Export tab -- four presentation
     styles, all built from the same reviewed stage grid the preview shows) and
     is pasted in by hand once finished. This function now does exactly one
-    thing: leave the single red placeholder note marking where it goes."""
+    thing: leave the single red placeholder note marking where it goes.
+
+    Round 3, Part 1a: the note used to be a module-level English constant
+    (METHODOLOGY_PLACEHOLDER_NOTE) written regardless of output_language --
+    it now resolves from export_i18n like every other placeholder here."""
     theme = theme or _theme_colours(None)
     doc.add_heading(export_i18n.export_t("heading_methodology_summary", output_language), level=2)
-    _add_placeholder_paragraph(doc, METHODOLOGY_PLACEHOLDER_NOTE)
+    _add_placeholder_paragraph(
+        doc, export_i18n.export_t("export_methodology_table_placeholder", output_language))
 
 
 def _build_experience_intro(doc: Document, experience_intro, theme: dict | None):
@@ -1867,8 +1895,7 @@ def _build_sc1_project_experience_compact(
     if not _build_experience_intro(doc, experience_intro, theme):
         note = doc.add_paragraph()
         note.add_run(
-            "Selected past projects most relevant to this brief's scope, drawn from the "
-            "firm's project reference library."
+            export_i18n.export_t("export_note_selected_past_projects", output_language)
         ).italic = True
 
     for project in reference_projects:
@@ -1900,25 +1927,21 @@ def _build_sc1_project_experience_compact(
         if description:
             desc_p.add_run(description).font.size = Pt(11)
         else:
-            r = desc_p.add_run(
-                "[NO DESCRIPTION DRAFTED -- draft/review this reference project in Upload Docs]"
-            )
+            r = desc_p.add_run(export_i18n.export_t("export_no_description_drafted", output_language))
             r.font.color.rgb = RED
             r.italic = True
             r.font.size = Pt(11)
 
         rel_p = text_cell.add_paragraph()
         rel_p.paragraph_format.space_before = Pt(6)
-        rel_label = rel_p.add_run("Relevance to project: ")
+        rel_label = rel_p.add_run(export_i18n.export_t("export_label_relevance_to_project", output_language))
         rel_label.bold = True
         rel_label.font.size = Pt(11)
         relevance = (project.relevance_text or "").strip()
         if relevance:
             rel_p.add_run(relevance).font.size = Pt(11)
         else:
-            r = rel_p.add_run(
-                "[NO RELEVANCE DRAFTED -- draft/review this reference project in Upload Docs]"
-            )
+            r = rel_p.add_run(export_i18n.export_t("export_no_relevance_drafted", output_language))
             r.font.color.rgb = RED
             r.italic = True
             r.font.size = Pt(11)
@@ -1943,8 +1966,7 @@ def _build_reference_experience(
     theme = theme or _theme_colours(None)
     if not reference_projects:
         _add_placeholder_paragraph(
-            doc, "[NO REFERENCE PROJECTS ENTERED -- add project references in Upload Docs, "
-                 "then draft/review them there before export]",
+            doc, export_i18n.export_t("export_no_reference_projects_entered", output_language),
         )
         return
 
@@ -2015,26 +2037,26 @@ def _fill_reference_project_cell(cell, project, photos: dict[str, bytes], theme:
     if description:
         desc_p.add_run(description)
     else:
-        r = desc_p.add_run("[NO DESCRIPTION DRAFTED -- draft/review this reference project in Upload Docs]")
+        r = desc_p.add_run(export_i18n.export_t("export_no_description_drafted", output_language))
         r.font.color.rgb = RED
         r.italic = True
 
     rel_p = cell.add_paragraph()
-    rel_p.add_run("Relevance to project: ").bold = True
+    rel_p.add_run(export_i18n.export_t("export_label_relevance_to_project", output_language)).bold = True
     relevance = (project.relevance_text or "").strip()
     if relevance:
         rel_p.add_run(relevance)
     else:
-        r = rel_p.add_run("[INSERT RELEVANCE TO THIS TENDER]")
+        r = rel_p.add_run(export_i18n.export_t("export_insert_relevance_to_tender", output_language))
         r.font.color.rgb = RED
         r.italic = True
 
     pers_p = cell.add_paragraph()
-    pers_p.add_run("Personnel involved: ").bold = True
+    pers_p.add_run(export_i18n.export_t("export_label_personnel_involved", output_language)).bold = True
     if project.personnel_involved:
         pers_p.add_run(", ".join(project.personnel_involved))
     else:
-        r = pers_p.add_run("[CONFIRM WHICH KEY PERSONNEL WORKED ON THIS PROJECT]")
+        r = pers_p.add_run(export_i18n.export_t("export_confirm_personnel_worked_on_project", output_language))
         r.font.color.rgb = RED
         r.italic = True
 
@@ -2157,18 +2179,12 @@ def _build_relationship_management(doc: Document, project_info: dict | None, the
     verify (real local staff/offices, this project's actual engagement plan)
     before submission, same discipline as every other placeholder in the tool."""
     theme = theme or _theme_colours(None)
-    client = (project_info or {}).get("client_name") or "[CLIENT NAME]"
+    client = (project_info or {}).get("client_name") or export_i18n.export_t(
+        "export_client_name_placeholder", output_language)
 
     doc.add_heading(export_i18n.export_t("heading_relationship_management", output_language), level=2)
     intro = doc.add_paragraph()
-    intro.add_run(
-        f"We focus on the moments that matter -- looking beyond the technical solution to foster "
-        f"a united, professional relationship with {client}. By maintaining live comment "
-        f"registers and prioritising timely review closure, we minimise rework and ensure "
-        f"stakeholder input is captured and actioned. Proactive engagement and clear "
-        f"communication are central to our relationship management approach and underpin our "
-        f"proven ability to deliver projects on time."
-    )
+    intro.add_run(export_i18n.export_t("export_relationship_intro", output_language, client=client))
     firm = firm or {}
     leadership = (firm.get("leadership_text") or "").strip()
     if leadership:
@@ -2176,17 +2192,15 @@ def _build_relationship_management(doc: Document, project_info: dict | None, the
         # so say who they are instead of shipping the same anonymous paragraph
         # to every client.
         lead_p = doc.add_paragraph()
-        lead_p.add_run("Leadership oversight. ").bold = True
+        lead_p.add_run(export_i18n.export_t("export_label_leadership_oversight", output_language)).bold = True
         lead_p.add_run(leadership)
     note = doc.add_paragraph()
-    r = note.add_run(
-        "[STANDARD TEXT -- confirm real local staff/offices, and tailor to this project's actual "
-        "engagement plan, before submission]"
-    )
+    r = note.add_run(export_i18n.export_t("export_relationship_standard_text_note", output_language))
     r.italic = True
     r.font.color.rgb = RED
 
-    headers = ["Principles", "Our approach"]
+    headers = [export_i18n.export_t("export_table_header_principles", output_language),
+               export_i18n.export_t("export_table_header_our_approach", output_language)]
     rows = [[p, a] for p, a in _STANDARD_RELATIONSHIP_TABLE]
     _add_table(doc, headers, rows, theme=theme)
     doc.add_paragraph()
@@ -2229,17 +2243,19 @@ def _build_commercial_section(doc: Document, discipline_fee_lines: list | None, 
     lines = discipline_fee_lines or []
     if not lines:
         _add_placeholder_paragraph(
-            doc, "[NO FEE BUILD-UP ENTERED -- price the discipline fee table in the Fee Estimate tab]",
+            doc, export_i18n.export_t("export_no_fee_buildup_entered_tab", output_language),
         )
     else:
-        headers = ["Discipline / stage", "Fee (excl. GST)"]
+        headers = [export_i18n.export_t("export_table_header_discipline_stage", output_language),
+                   export_i18n.export_t("export_table_header_fee_excl_gst", output_language)]
         total = 0.0
         rows = []
         for line in lines:
             amount = getattr(line, "fee_amount", 0.0) or 0.0
             total += amount
-            rows.append([line.discipline, f"${amount:,.0f}" if amount else "[ENTER FEE]"])
-        rows.append(["Total", f"${total:,.0f}"])
+            rows.append([line.discipline,
+                         f"${amount:,.0f}" if amount else export_i18n.export_t("export_enter_fee", output_language)])
+        rows.append([export_i18n.export_t("export_table_header_total", output_language), f"${total:,.0f}"])
         table = _add_table(doc, headers, rows, theme=theme)
         total_row = table.rows[-1]
         for cell in total_row.cells:
@@ -2257,10 +2273,7 @@ def _build_commercial_section(doc: Document, discipline_fee_lines: list | None, 
 def _build_contractual_arrangements(doc: Document, output_language: str = "en") -> None:
     doc.add_heading(export_i18n.export_t("heading_contractual_arrangements", output_language), level=3)
     p = doc.add_paragraph()
-    r = p.add_run(
-        "[CONFIRM THE PANEL / CONTRACT AND RATES THIS FEE IS BASED ON, AND ANY SUBCONSULTANT "
-        "ARRANGEMENTS (E.G. MEMORANDUM OF UNDERSTANDING / SUBCONSULTANCY AGREEMENTS)]"
-    )
+    r = p.add_run(export_i18n.export_t("export_confirm_contractual_arrangements", output_language))
     r.font.color.rgb = RED
     doc.add_paragraph()
 
@@ -2757,7 +2770,7 @@ def _add_placeholder_paragraph(doc: Document, text: str):
     run.font.italic = True
 
 
-def _add_length_note(doc: Document, section, draft) -> None:
+def _add_length_note(doc: Document, section, draft, output_language: str = "en") -> None:
     """Flags a draft that is well under or over its page allocation."""
     if draft is None:
         return
@@ -2769,14 +2782,17 @@ def _add_length_note(doc: Document, section, draft) -> None:
     words = len((draft.draft_text or "").split())
     target = target_words(section)
     pages = getattr(section, "allocated_pages", 1)
+    verdict_text = export_i18n.export_t(
+        "export_length_verdict_under" if verdict == "under" else "export_length_verdict_over", output_language)
+    action_text = export_i18n.export_t(
+        "export_length_action_under" if verdict == "under" else "export_length_action_over", output_language)
     p = doc.add_paragraph()
     run = p.add_run(
-        f"[LENGTH: this draft is about {words} words against roughly {target} for its "
-        f"{pages}-page allocation -- {'well under' if verdict == 'under' else 'well over'} "
-        f"budget (more than {int(LENGTH_TOLERANCE * 100)}% out). "
-        + ("Expand it with real detail, or re-check the allocation."
-           if verdict == "under" else
-           "Cut it back, or re-check the allocation.")
+        export_i18n.export_t(
+            "export_length_note_under_over", output_language,
+            words=words, target=target, pages=pages, verdict_text=verdict_text,
+            tolerance_pct=int(LENGTH_TOLERANCE * 100), action_text=action_text,
+        )
     )
     run.font.color.rgb = RED
     run.italic = True

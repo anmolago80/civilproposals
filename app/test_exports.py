@@ -543,7 +543,10 @@ def check_methodology_stages(failures: list[str], files: dict) -> None:
     large = docx_text(files["Proposal_LargeScope.docx"])
     if "FIRST-PASS TABLE ABOVE" in large:
         failures.append("[2d] the old methodology grid image note is still in the DOCX")
-    if export_docx.METHODOLOGY_PLACEHOLDER_NOTE not in large:
+    # Round 3, Part 1a: the note is now resolved from export_i18n rather than
+    # a module-level English constant (removed).
+    from modules import export_i18n
+    if export_i18n.export_t("export_methodology_table_placeholder", "en") not in large:
         failures.append("[2d] the methodology red placeholder note is missing from the DOCX")
 
     # Overflow: a stage with many long tasks must stay inside the slide.
@@ -817,7 +820,7 @@ def check_spanish_pptx(failures: list[str]) -> None:
         style="bands", output_language="es"))
     if "Organización del proyecto" not in org_es:
         failures.append(f"[Part5] org_chart_pptx (style=bands) title didn't localise to Spanish: {org_es[:120]!r}")
-    if "NO SE HA ASIGNADO EQUIPO" not in org_es:
+    if "SIN EQUIPO ASIGNADO" not in org_es:
         failures.append("[Part5] org_chart_pptx empty-team note didn't localise to Spanish")
 
     for style in ("gantt", "swimlanes", "table", "timeline"):

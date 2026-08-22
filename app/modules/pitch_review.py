@@ -29,6 +29,7 @@ import re
 from pydantic import BaseModel
 
 from modules.ai_interface import call_ai_json
+from modules.export_i18n import canonical_marker_instruction
 
 SYSTEM_MESSAGE = """You are reviewing a proposal writer's own hand-drafted "differentiator" and \
 "sales pitch" text for an engineering/infrastructure tender proposal, before it goes into the \
@@ -237,12 +238,15 @@ def review_pitch(
         sales_pitch_followup=_format_followup(sales_pitch_qa),
     )
     if output_language == "es":
+        # Round 3, Part 1c: canonical-marker instruction shared via
+        # export_i18n.canonical_marker_instruction() -- see its docstring.
         prompt += (
             "\n\nWrite \"differentiator_comment\", \"differentiator_refined\", "
             "\"sales_pitch_comment\", and \"sales_pitch_refined\" all in Spanish (Español). Keep "
             "the JSON field names above exactly as given, in English. Translate only the "
             "language, not the substance -- do not invent, omit, or alter any claim, number, or "
             "fact because of this instruction."
+            + canonical_marker_instruction(output_language)
         )
 
     data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=1500)
@@ -283,11 +287,14 @@ def generate_pitch_questions(
         sales_pitch=(sales_pitch or "").strip() or "(not supplied)",
     )
     if output_language == "es":
+        # Round 3, Part 1c: canonical-marker instruction shared via
+        # export_i18n.canonical_marker_instruction() -- see its docstring.
         prompt += (
             "\n\nWrite every question in \"differentiator_questions\" and "
             "\"sales_pitch_questions\" in Spanish (Español). Keep the JSON field names above "
             "exactly as given, in English. Translate only the language, not the substance -- do "
             "not invent, omit, or alter what is being asked because of this instruction."
+            + canonical_marker_instruction(output_language)
         )
 
     data = call_ai_json(prompt, system_message=QUESTIONS_SYSTEM_MESSAGE, config=config, max_tokens=700)
