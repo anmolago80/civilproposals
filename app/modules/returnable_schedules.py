@@ -34,12 +34,18 @@ import io
 import re
 from dataclasses import dataclass, field
 
-PLACEHOLDER_PREFIX = "[TO BE COMPLETED"
+from modules import export_i18n
+
+# Kept as an alias to the canonical English prefix (modules/export_i18n.py)
+# for anything that still imports it directly; make_placeholder() itself now
+# goes through export_i18n.placeholder_marker() so the marker matches the
+# project's output_language (Audit Round 2, Part 4).
+PLACEHOLDER_PREFIX = export_i18n.PLACEHOLDER_PREFIXES["en"]["tbc"]
 
 
-def make_placeholder(label: str) -> str:
+def make_placeholder(label: str, language: str | None = None) -> str:
     label = re.sub(r"\s+", " ", (label or "").strip().strip(":*")).strip()
-    return f"{PLACEHOLDER_PREFIX}: {label}]" if label else f"{PLACEHOLDER_PREFIX}]"
+    return export_i18n.placeholder_marker(label, language)
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +160,11 @@ def build_fill_data(state, firm_data: dict | None = None) -> dict:
         return (state.get(key) or "").strip() if isinstance(state.get(key), str) else ""
 
     data = {
+        # Not a fillable field itself -- read by make_placeholder() call
+        # sites below via fill_data.get("output_language") so a Spanish
+        # project's returnable schedules get "[POR COMPLETAR: ...]", not
+        # the English marker (Audit Round 2, Part 4).
+        "output_language": (state.get("output_language") or "en") if isinstance(state.get("output_language"), str) else "en",
         "company_name": _s("bidder_name"),
         "project_name": _s("project_name"),
         "client_name": _s("client_name"),
@@ -363,7 +374,7 @@ def _fill_label_value_row(row, fill_data: dict, where: str, result: FillResult) 
         _write_into_cell(row.cells[target_index], value)
         result.filled.append({"where": where, "label": label, "value": value})
     else:
-        placeholder = make_placeholder(label)
+        placeholder = make_placeholder(label, fill_data.get("output_language"))
         _write_into_cell(row.cells[target_index], placeholder)
         result.placeholdered.append({"where": where, "label": label})
 
@@ -384,8 +395,19 @@ def _map_header_columns(header_texts: list[str], column_synonyms: dict) -> dict[
     return mapping
 
 
+# App-authored (not client-form-derived) label text for the roster tables'
+# "one more spare row" placeholder, in both output languages -- everything
+# else placeholdered in this table uses the CLIENT's own header text as-is
+# (never translated: it's their document).
+_FURTHER_LABEL_ES = {
+    "personnel": "más personal si es necesario",
+    "reference projects": "más proyectos de referencia si es necesario",
+}
+
+
 def _fill_roster_table(table, items: list[dict], column_synonyms: dict,
-                       where: str, result: FillResult, label_for_empty: str) -> bool:
+                       where: str, result: FillResult, label_for_empty: str,
+                       language: str | None = None) -> bool:
     """Fills a header-row + empty-body table (key personnel, reference
     projects) from a list of dicts. Returns True if this table matched."""
     if len(table.rows) < 2:
@@ -411,13 +433,18 @@ def _fill_roster_table(table, items: list[dict], column_synonyms: dict,
                     result.filled.append({"where": f"{where} row {row_index + 2}",
                                           "label": header[col] or attr, "value": value})
                 else:
-                    _write_into_cell(row.cells[col], make_placeholder(header[col] or attr))
+                    _write_into_cell(row.cells[col], make_placeholder(header[col] or attr, language))
                     result.placeholdered.append({"where": f"{where} row {row_index + 2}",
                                                  "label": header[col] or attr})
         elif row_index == len(items):
             # First spare row: one clear placeholder, not a wall of them.
+            further_label = (
+                _FURTHER_LABEL_ES.get(label_for_empty, f"further {label_for_empty} if required")
+                if (language or "en").strip().lower()[:2] == "es"
+                else f"further {label_for_empty} if required"
+            )
             _write_into_cell(row.cells[list(mapping.keys())[0]],
-                             make_placeholder(f"further {label_for_empty} if required"))
+                             make_placeholder(further_label, language))
             result.placeholdered.append({"where": f"{where} row {row_index + 2}",
                                          "label": f"further {label_for_empty}"})
             break
@@ -426,7 +453,7 @@ def _fill_roster_table(table, items: list[dict], column_synonyms: dict,
         # the schedule visibly says what's missing.
         row = body_rows[0]
         for col, attr in mapping.items():
-            _write_into_cell(row.cells[col], make_placeholder(header[col] or attr))
+            _write_into_cell(row.cells[col], make_placeholder(header[col] or attr, language))
             result.placeholdered.append({"where": f"{where} row 2", "label": header[col] or attr})
     return True
 
@@ -444,7 +471,7 @@ def _fill_paragraph_blanks(paragraph, fill_data: dict, where: str, result: FillR
     if not _looks_like_label(label + ":"):
         return
     field_key, value = match_label(label, fill_data)
-    new_tail = value if value else make_placeholder(label)
+    new_tail = value if value else make_placeholder(label, fill_data.get("output_language"))
     # Replace the run(s) containing the blank; keep the label's runs intact.
     blank_pattern = re.compile(r"_{3,}|\.{4,}")
     replaced = False
@@ -483,10 +510,12 @@ def fill_docx_schedule(filename: str, file_bytes: bytes, fill_data: dict) -> Fil
             # Roster-style tables first (they'd otherwise look like many
             # label rows); personnel, then reference projects.
             if _fill_roster_table(table, fill_data.get("personnel") or [], ROSTER_COLUMNS,
-                                  where, result, "personnel"):
+                                  where, result, "personnel",
+                                  language=fill_data.get("output_language")):
                 continue
             if _fill_roster_table(table, fill_data.get("references") or [], REFERENCE_COLUMNS,
-                                  where, result, "reference projects"):
+                                  where, result, "reference projects",
+                                  language=fill_data.get("output_language")):
                 continue
             for row in table.rows:
                 _fill_label_value_row(row, fill_data, where, result)
@@ -554,7 +583,7 @@ def fill_xlsx_schedule(filename: str, file_bytes: bytes, fill_data: dict) -> Fil
                         # cells are left alone (a spreadsheet is full of text
                         # that isn't a form field).
                         if placeholders_here < XLSX_MAX_PLACEHOLDERS_PER_SHEET:
-                            target.value = make_placeholder(label)
+                            target.value = make_placeholder(label, fill_data.get("output_language"))
                             result.placeholdered.append({"where": where, "label": label})
                             placeholders_here += 1
 

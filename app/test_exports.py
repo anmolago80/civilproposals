@@ -728,6 +728,70 @@ def check_program_overflow(failures: list[str]) -> None:
                 f"{(lowest - prs.slide_height) / 914400:.2f} in")
 
 
+def check_spanish_placeholders(failures: list[str]) -> None:
+    """Audit Round 2, Part 4: a Spanish-output project's placeholders must
+    use the canonical Spanish markers (never a free translation), and
+    collect_placeholders()'s sweep must find BOTH Spanish and English
+    markers in the same document -- a pack can mix the two, since the
+    returnable-schedule filler already respects output_language but the
+    exporters' own hardcoded scaffolding strings are Part 5's job, not
+    Part 4's."""
+    from docx import Document
+
+    from modules import export_docx, returnable_schedules
+
+    es_marker = returnable_schedules.make_placeholder("ABN", "es")
+    if "POR COMPLETAR" not in es_marker:
+        failures.append(f"[Part4] make_placeholder(..., 'es') isn't using the canonical Spanish marker: {es_marker!r}")
+    en_marker = returnable_schedules.make_placeholder("ABN", "en")
+    if "TO BE COMPLETED" not in en_marker:
+        failures.append(f"[Part4] make_placeholder(..., 'en') regressed the English marker: {en_marker!r}")
+    default_marker = returnable_schedules.make_placeholder("ABN")
+    if "TO BE COMPLETED" not in default_marker:
+        failures.append(f"[Part4] make_placeholder() with no language argument should default to English: {default_marker!r}")
+
+    doc = Document()
+    doc.add_paragraph(es_marker)
+    doc.add_paragraph(en_marker)
+    doc.add_paragraph("[NO FEES ENTERED -- price the discipline fee build-up, or generate one]")
+    found = export_docx.collect_placeholders(doc)
+    if not any("POR COMPLETAR" in f for f in found):
+        failures.append("[Part4] collect_placeholders() missed a Spanish [POR COMPLETAR ...] marker")
+    if not any("TO BE COMPLETED" in f for f in found):
+        failures.append("[Part4] collect_placeholders() missed an English [TO BE COMPLETED ...] marker")
+    if not any("NO FEES ENTERED" in f for f in found):
+        failures.append("[Part4] collect_placeholders() missed an existing English [NO ...] marker")
+
+    # A Spanish-output returnable schedule (a real fill, not just the
+    # marker builder in isolation) must itself carry only canonical
+    # Spanish placeholders for anything it couldn't fill.
+    fill_data = returnable_schedules.build_fill_data(
+        {"bidder_name": "Acme Consulting", "output_language": "es"})
+    if fill_data.get("output_language") != "es":
+        failures.append(
+            f"[Part4] build_fill_data() didn't carry output_language through: {fill_data.get('output_language')!r}")
+    schedule_placeholder = returnable_schedules.make_placeholder(
+        "ABN/ACN", fill_data.get("output_language"))
+    if "POR COMPLETAR" not in schedule_placeholder:
+        failures.append(
+            f"[Part4] a Spanish-project returnable schedule wrote a non-Spanish placeholder: {schedule_placeholder!r}")
+
+    # A generated Spanish pack must itself sweep non-empty: the placeholder
+    # checklist must never silently report nothing when placeholders exist.
+    project = build_sample_project()
+    es_blob = export_docx.build_letter_docx(
+        project_info=project["project_info"], sender=project["sender"], analysis=project["analysis"],
+        understanding_text="", methodology_text="", resource_plan=[], personnel_photos={},
+        program_schedule={}, program_week_labels=[], terms_of_engagement_text="",
+        fee_estimates=None, discipline_fee_lines=None, output_language="es",
+    ).getvalue()
+    from docx import Document as _Document
+    es_doc = _Document(io.BytesIO(es_blob))
+    es_found = export_docx.collect_placeholders(es_doc)
+    if not es_found:
+        failures.append("[Part4] a Spanish-output pack with unfilled sections swept to an empty placeholder list")
+
+
 def main() -> int:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     out_dir = None
@@ -750,6 +814,7 @@ def main() -> int:
     check_methodology_stages(failures, files)
     check_methodology_styles(failures, files)
     check_empty_letter_sections(failures)
+    check_spanish_placeholders(failures)
 
     if failures:
         print("EXPORT TESTS FAILED:")

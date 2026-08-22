@@ -544,7 +544,12 @@ with tabs[9]:
     st.markdown(i18n.t("export_schedules_heading"))
     if _project_is_free_tier():
         st.caption(i18n.t("free_tier_paid_only_caption"))
-    st.caption(i18n.t("export_schedules_caption", placeholder_prefix=returnable_schedules.PLACEHOLDER_PREFIX))
+    # The prefix shown here must match what make_placeholder() will actually
+    # write for THIS project's output_language (Audit Round 2, Part 4) --
+    # not always the English default.
+    _sched_lang = (st.session_state.get("output_language") or "en")
+    _sched_prefix = export_i18n.PLACEHOLDER_PREFIXES.get(_sched_lang, export_i18n.PLACEHOLDER_PREFIXES["en"])["tbc"]
+    st.caption(i18n.t("export_schedules_caption", placeholder_prefix=_sched_prefix))
     _extra_scheds = st.file_uploader(
         i18n.t("export_add_schedules_label"), type=["docx", "xlsx", "xlsm"],
         accept_multiple_files=True, key="_returnable_sched_uploader",

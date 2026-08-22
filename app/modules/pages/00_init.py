@@ -96,6 +96,7 @@ from modules import (
     fee_estimation_engine,
     fee_history,
     export_docx,
+    export_i18n,
     divider_designer,
     team_bios,
     program_schedule,

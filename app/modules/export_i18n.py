@@ -135,6 +135,71 @@ _CATALOGS: dict[str, dict[str, str]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Canonical placeholder markers (Audit Round 2, Part 4).
+#
+# Every red bracketed placeholder written by a DETERMINISTIC code path
+# (returnable_schedules.py's make_placeholder(), the DOCX/PPTX exporters,
+# draft_generator's own prompt instructions) must use exactly one of these
+# prefixes -- never a free translation coined on the spot -- so that
+# export_docx.collect_placeholders()'s sweep (which matches on these literal
+# prefixes, see ALL_PLACEHOLDER_PREFIXES below) never silently misses what a
+# Spanish pack actually contains. The Spanish UI already promises
+# "[POR COMPLETAR: ...]" (modules/translations/es.py) -- this is what
+# actually makes that promise true.
+#
+# Keyed by a short logical "kind" so callers ask for what they mean
+# ("tbc" == to-be-completed, the common case) rather than repeating literal
+# bracket text everywhere.
+PLACEHOLDER_PREFIXES: dict[str, dict[str, str]] = {
+    "en": {
+        "tbc": "[TO BE COMPLETED",
+        "insert": "[INSERT",
+        "confirm": "[CONFIRM",
+        "no": "[NO",
+        "describe": "[DESCRIBE",
+        "enter": "[ENTER",
+        "reference": "[REFERENCE",
+        "first_pass": "[FIRST-PASS",
+        "standard_text": "[STANDARD TEXT",
+        "length": "[LENGTH:",
+    },
+    "es": {
+        "tbc": "[POR COMPLETAR",
+        "insert": "[INSERTAR",
+        "confirm": "[CONFIRMAR",
+        "no": "[SIN",
+        "describe": "[DESCRIBIR",
+        "enter": "[INGRESAR",
+        "reference": "[REFERENCIA",
+        "first_pass": "[PRIMERA VERSIÓN",
+        "standard_text": "[TEXTO ESTÁNDAR",
+        "length": "[LONGITUD:",
+    },
+}
+
+# Flattened across every language -- what collect_placeholders() sweeps a
+# generated document for, so a pack that mixes languages (e.g. after a
+# mid-project output-language switch) still gets every placeholder listed,
+# not just the ones matching whatever language the project is in right now.
+ALL_PLACEHOLDER_PREFIXES: tuple[str, ...] = tuple(
+    prefix for lang_map in PLACEHOLDER_PREFIXES.values() for prefix in lang_map.values()
+)
+
+
+def placeholder_marker(detail: str, language: str | None = None, kind: str = "tbc") -> str:
+    """Builds one canonical red placeholder in the project's output language,
+    e.g. placeholder_marker("ABN", "es") -> "[POR COMPLETAR: ABN]". `kind`
+    selects which prefix family (default "tbc", the to-be-completed marker
+    make_placeholder() uses); falls back to English for an unrecognised
+    language or kind, same fallback behaviour as export_t()."""
+    lang = (language or "").strip().lower()[:2]
+    prefixes = PLACEHOLDER_PREFIXES.get(lang, PLACEHOLDER_PREFIXES["en"])
+    prefix = prefixes.get(kind) or PLACEHOLDER_PREFIXES["en"].get(kind, "[TO BE COMPLETED")
+    detail = (detail or "").strip()
+    return f"{prefix}: {detail}]" if detail else f"{prefix}]"
+
+
 def export_t(key: str, language: str | None, **fmt) -> str:
     """Looks up `key` in `language`'s export catalog, falling back to English,
     then to a visibly-broken `[[key]]` marker if the key exists in neither --

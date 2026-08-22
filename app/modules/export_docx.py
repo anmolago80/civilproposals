@@ -2435,10 +2435,14 @@ def _build_review_checklist(doc: Document, sections: list, output_language: str 
 
 # Every placeholder marker the exporters actually write. Used to sweep the
 # generated document itself for anything the compliance/draft lists don't
-# already know about (see _build_user_input_list).
-PLACEHOLDER_MARKERS = ("[INSERT ", "[CONFIRM ", "[TO BE COMPLETED", "[NO ", "[DESCRIBE ",
-                       "[ENTER ", "[REFERENCE ", "[FIRST-PASS", "[STANDARD TEXT",
-                       "[LENGTH:")
+# already know about (see _build_user_input_list). Sourced from
+# export_i18n.ALL_PLACEHOLDER_PREFIXES (Audit Round 2, Part 4) so BOTH
+# English and Spanish markers are always matched, regardless of the
+# project's current output_language -- a pack can contain a mix of the two
+# after a mid-project language switch, and this sweep must never silently
+# under-report a Spanish placeholder just because it isn't spelled in
+# English.
+PLACEHOLDER_MARKERS = export_i18n.ALL_PLACEHOLDER_PREFIXES
 # Matched separately, on a word boundary: a bare substring test would catch
 # "TBC" inside an ordinary word.
 _TBC_RE = re.compile(r"\bTBC\b")
