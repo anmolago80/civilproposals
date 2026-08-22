@@ -122,6 +122,7 @@ from modules import (
     branding,
     job_queue,
     limits,
+    i18n,
 )
 
 AUTOSAVE_INTERVAL_SECONDS = 20

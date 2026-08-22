@@ -22,14 +22,14 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 
 _stepper_steps = [
-    {"label": "Project Setup", "done": bool(_project_identifier())},
-    {"label": "Upload Docs", "done": st.session_state.tender_extracted is not None},
-    {"label": "Tender Analysis", "done": st.session_state.analysis is not None},
-    {"label": "Structure", "done": st.session_state.sections is not None},
-    {"label": "Page Allocation", "done": st.session_state.allocations is not None},
-    {"label": "Draft Responses", "done": bool(st.session_state.drafts)},
-    {"label": "Graphics & Design", "done": bool(st.session_state.divider_images) or bool(st.session_state.cover_hero_png)},
-    {"label": "Team & Resourcing", "done": any(
+    {"label": i18n.t("nav_project_setup"), "done": bool(_project_identifier())},
+    {"label": i18n.t("nav_upload_docs"), "done": st.session_state.tender_extracted is not None},
+    {"label": i18n.t("nav_tender_analysis"), "done": st.session_state.analysis is not None},
+    {"label": i18n.t("nav_structure"), "done": st.session_state.sections is not None},
+    {"label": i18n.t("nav_page_allocation"), "done": st.session_state.allocations is not None},
+    {"label": i18n.t("nav_draft_responses"), "done": bool(st.session_state.drafts)},
+    {"label": i18n.t("nav_graphics_design"), "done": bool(st.session_state.divider_images) or bool(st.session_state.cover_hero_png)},
+    {"label": i18n.t("nav_team_resourcing"), "done": any(
         # Not a plain truthiness check on purpose: as soon as Tender Analysis
         # runs, the Team & Resourcing tab's own code (which also runs every
         # rerun regardless of which tab is visually open) auto-populates
@@ -39,7 +39,7 @@ _stepper_steps = [
         # really been staffed.
         (getattr(a, "person_name", "") or "").strip() for a in (st.session_state.resource_plan or [])
     )},
-    {"label": "Fee Estimate", "done": (
+    {"label": i18n.t("nav_fee_estimate"), "done": (
         # Not a plain truthiness check on purpose: the Fee Estimate tab's own
         # reconcile-on-every-rerun logic (see _reconcile_estimates() further
         # down) always leaves fee_estimates as a non-empty list of zero-value
@@ -53,7 +53,7 @@ _stepper_steps = [
         or any((getattr(l, "fee_amount", 0) or 0) > 0 for l in (st.session_state.discipline_fee_lines or []))
         or any((getattr(f, "fee_amount", 0) or 0) > 0 for f in (st.session_state.scope_item_fees or []))
     )},
-    {"label": "Export Pack", "done": bool(st.session_state.docx_buffer)},
+    {"label": i18n.t("nav_export_pack"), "done": bool(st.session_state.docx_buffer)},
 ]
 
 
@@ -76,46 +76,52 @@ with st.sidebar:
                 unsafe_allow_html=True)
 
     if IS_SAAS_MODE and current_user:
-        st.caption(f"Signed in as **{current_user.email}**")
+        i18n.language_picker(key="_sidebar_lang_picker", persist_for_user=current_user)
+        st.caption(i18n.t("sidebar_signed_in_as", email=current_user.email))
         if _access.get("unlimited"):
             # UNLIMITED_ACCOUNTS (see auth.get_access_status) -- never
             # blocked, never shown a trial/upgrade banner at all.
-            st.success("Unlimited access")
+            st.success(i18n.t("sidebar_unlimited_access"))
         elif _access["past_due"]:
-            st.warning("Payment past due -- update your card to keep access.")
+            st.warning(i18n.t("sidebar_past_due"))
         elif _access["subscribed"]:
             # Active subscription -- capped at SUBSCRIPTION_MONTHLY_BID_LIMIT
-            # (3) bids per real Stripe billing period, not fully unlimited
-            # (see auth.get_access_status); bid_credits still work on top of
+            # (see auth.SUBSCRIPTION_MONTHLY_BID_LIMIT) bids per real Stripe
+            # billing period, not fully unlimited (see
+            # auth.get_access_status); bid_credits still work on top of
             # that quota once it runs out, same as for a non-subscriber.
             if _access["subscription_bids_remaining"] > 0:
-                st.success(
-                    f"Plan: Active subscription -- {_access['subscription_bids_remaining']} of "
-                    f"{_access['subscription_bid_limit']} bid(s) left this cycle"
-                )
+                st.success(i18n.t(
+                    "sidebar_sub_active_remaining",
+                    remaining=_access["subscription_bids_remaining"],
+                    limit=_access["subscription_bid_limit"],
+                ))
             elif _access.get("bid_credits", 0) > 0:
-                st.info(f"Monthly bids used -- {_access['bid_credits']} pay-as-you-go credit(s) available")
+                st.info(i18n.t("sidebar_sub_used_has_credits", credits=_access["bid_credits"]))
             else:
                 st.markdown(
                     '<div style="background:#FFF3E0;color:#B8600A;border:1px solid #F3D9AE;'
-                    'border-radius:8px;padding:10px 14px;font-size:.9rem;font-weight:600;">'
-                    'Monthly bids used -- buy a bid to keep going, or wait for renewal.</div>',
+                    f'border-radius:8px;padding:10px 14px;font-size:.9rem;font-weight:600;">'
+                    f'{i18n.t("sidebar_sub_used_no_credits")}</div>',
                     unsafe_allow_html=True,
                 )
         elif _access["limit_reached"]:
             st.markdown(
                 '<div style="background:#FFF3E0;color:#B8600A;border:1px solid #F3D9AE;'
-                'border-radius:8px;padding:10px 14px;font-size:.9rem;font-weight:600;">'
-                'Maximum number of free bids reached -- upgrade to keep going.</div>',
+                f'border-radius:8px;padding:10px 14px;font-size:.9rem;font-weight:600;">'
+                f'{i18n.t("sidebar_limit_reached")}</div>',
                 unsafe_allow_html=True,
             )
         elif _access["trial_remaining"] <= 0 and _access.get("bid_credits", 0) > 0:
             # Free trial used up, but they've bought pay-as-you-go bid(s)
             # (see billing.create_bid_checkout_session) -- not the same as
             # limit_reached, so a different, non-alarming message.
-            st.info(f"Pay-as-you-go: {_access['bid_credits']} bid credit(s) available")
+            st.info(i18n.t("sidebar_trial_used_has_credits", credits=_access["bid_credits"]))
         else:
-            st.info(f"Free trial: {_access['trial_remaining']} of {_access['trial_limit']} bid(s) left")
+            st.info(i18n.t(
+                "sidebar_trial_remaining",
+                remaining=_access["trial_remaining"], limit=_access["trial_limit"],
+            ))
 
     # Vertical progress list -- the sidebar's main focus (see
     # branding.vertical_steps_component_html()). It's also the app's real
@@ -144,10 +150,7 @@ with st.sidebar:
     # the moment a subscriber is deciding this is worth $120/mo. A short
     # reminder + a link to the same full text keeps it one click away
     # without following the user around on every tab.
-    st.caption(
-        "AI-generated content -- review before submitting. "
-        "[Full Terms of Service](https://civilproposals.com/terms-of-service.html)"
-    )
+    st.caption(i18n.t("sidebar_ai_disclaimer"))
 
     # Admin panel entry -- a real button (not just an expander) that opens a
     # full-screen stats dialog. Rendered ONLY for admin accounts (the DB
@@ -889,11 +892,11 @@ def _render_project_reference_library_popover_body() -> None:
 # popovers are always available; only Upgrade/Manage billing and Log out
 # stay gated to signed-in SaaS accounts.
 with st.container(key="_topright_actions"):
-    with st.popover("📁 My Proposals", width="content"):
+    with st.popover(i18n.t("btn_my_proposals"), width="content"):
         _render_my_projects_popover_body()
-    with st.popover("📁 Proposal Library", width="content"):
+    with st.popover(i18n.t("btn_proposal_library"), width="content"):
         _render_proposal_library_popover_body()
-    with st.popover("📁 Project Reference Library", width="content"):
+    with st.popover(i18n.t("btn_project_reference_library"), width="content"):
         _render_project_reference_library_popover_body()
     if IS_SAAS_MODE and current_user:
         if _access["subscribed"] or _access["past_due"]:
@@ -923,11 +926,11 @@ with st.container(key="_topright_actions"):
                 st.session_state["_portal_url_ts"] = _now_ts
             portal_url = st.session_state.get("_portal_url_cache")
             if portal_url:
-                st.link_button("Manage", portal_url, type="primary")
+                st.link_button(i18n.t("btn_manage"), portal_url, type="primary")
         else:
-            with st.popover("Upgrade", width="content"):
+            with st.popover(i18n.t("btn_upgrade"), width="content"):
                 _render_upgrade_buttons(current_user, key_prefix="_topright")
-        if st.button("Log out", key="_topright_logout_btn"):
+        if st.button(i18n.t("btn_log_out"), key="_topright_logout_btn"):
             auth.log_out()
             st.rerun()
 st.markdown(
@@ -985,10 +988,10 @@ st.markdown(
 )
 
 tabs = st.tabs([
-    "1 · Project Setup", "2 · Upload Documents",
-    "3 · Tender Analysis", "4 · Proposal Structure", "5 · Page Allocation",
-    "6 · Draft Responses", "7 · Graphics & Design", "8 · Team & Resourcing",
-    "9 · Fee Estimate", "10 · Export Pack",
+    f"1 · {i18n.t('nav_project_setup')}", f"2 · {i18n.t('tab_upload_documents')}",
+    f"3 · {i18n.t('nav_tender_analysis')}", f"4 · {i18n.t('tab_proposal_structure')}", f"5 · {i18n.t('nav_page_allocation')}",
+    f"6 · {i18n.t('nav_draft_responses')}", f"7 · {i18n.t('nav_graphics_design')}", f"8 · {i18n.t('nav_team_resourcing')}",
+    f"9 · {i18n.t('nav_fee_estimate')}", f"10 · {i18n.t('nav_export_pack')}",
 ])
 
 

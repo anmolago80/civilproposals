@@ -52,7 +52,7 @@ import streamlit.components.v1 as components
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from sqlalchemy.exc import IntegrityError
 
-from modules import db, email_utils
+from modules import db, email_utils, i18n
 
 APP_SECRET_KEY = os.environ.get("APP_SECRET_KEY", "").strip()
 if not APP_SECRET_KEY:
@@ -685,15 +685,16 @@ def _render_terms_gate(user: db.User) -> None:
     ever returning normally."""
     from modules import branding
 
+    _picker_col, _ = st.columns([1, 4])
+    with _picker_col:
+        i18n.language_picker(key="_terms_gate_lang_picker", persist_for_user=user)
+
     st.markdown(
         branding.brand_html(logo_size=44, wordmark_size="1.5rem", show_beta=True, href="https://civilproposals.com"),
         unsafe_allow_html=True,
     )
-    st.markdown("### Before you continue")
-    st.write(
-        "Please review and accept the terms below -- this only takes a second, and you "
-        "won't be asked again."
-    )
+    st.markdown(i18n.t("terms_gate_title"))
+    st.write(i18n.t("terms_gate_intro"))
     st.markdown(
         f'<div style="margin-top:6px;padding:16px 18px;background:#F8FAFC;border:1px solid #E2E8F0;'
         f'border-radius:10px;font-size:.92rem;color:#334155;line-height:1.6;max-width:640px;">{TERMS_TEXT} '
@@ -702,14 +703,14 @@ def _render_terms_gate(user: db.User) -> None:
         f'which governs your use of CivilProposals in full.</div>',
         unsafe_allow_html=True,
     )
-    accepted = st.checkbox("I have read and accept these terms and the Terms of Service.", key="_terms_gate_checkbox")
+    accepted = st.checkbox(i18n.t("terms_gate_checkbox"), key="_terms_gate_checkbox")
     gate_col1, gate_col2 = st.columns([1, 4])
     with gate_col1:
-        if st.button("Accept and continue", type="primary", disabled=not accepted, key="_terms_gate_accept_btn"):
+        if st.button(i18n.t("terms_gate_accept"), type="primary", disabled=not accepted, key="_terms_gate_accept_btn"):
             accept_terms(user)
             st.rerun()
     with gate_col2:
-        if st.button("Log out instead", key="_terms_gate_logout_btn"):
+        if st.button(i18n.t("terms_gate_logout"), key="_terms_gate_logout_btn"):
             log_out()
             st.rerun()
     st.stop()
@@ -754,6 +755,10 @@ def require_login() -> db.User:
         unsafe_allow_html=True,
     )
 
+    _top_picker_col, _ = st.columns([1, 4])
+    with _top_picker_col:
+        i18n.language_picker(key="_login_lang_picker")
+
     left, right = st.columns([1.15, 1], gap="large")
 
     with left:
@@ -761,16 +766,11 @@ def require_login() -> db.User:
         # the comment in branding.brand_html() about st.markdown() treating
         # indented multi-line blocks as literal Markdown code blocks even
         # with unsafe_allow_html=True.
+        import html as _html_module
         headline_html = (
             branding.brand_html(logo_size=52, wordmark_size="1.9rem", show_beta=True, href="https://civilproposals.com")
-            + '<div style="margin-top:22px;font-size:2rem;font-weight:800;letter-spacing:-0.02em;color:#0F172A;line-height:1.2;">Built by Civil Engineers, for Civil Engineers</div>'
-            + '<div style="margin-top:12px;color:#5A6B7A;font-size:1.02rem;line-height:1.6;max-width:560px;">'
-            + 'We know the challenges you face every day because we face them too. Whether it&#39;s a small '
-            + 'project with a simple scope, a brief buried in an email, a client who isn&#39;t quite sure what '
-            + 'they want, or a major tender that takes days to read and weeks to prepare, CivilProposals is '
-            + 'designed to help. Built by civil engineers, for civil engineers, the platform assists you in '
-            + 'creating professional, well structured proposals faster, allowing you to focus on understanding '
-            + 'client needs and developing winning solutions.</div>'
+            + f'<div style="margin-top:22px;font-size:2rem;font-weight:800;letter-spacing:-0.02em;color:#0F172A;line-height:1.2;">{_html_module.escape(i18n.t("auth_headline"))}</div>'
+            + f'<div style="margin-top:12px;color:#5A6B7A;font-size:1.02rem;line-height:1.6;max-width:560px;">{_html_module.escape(i18n.t("auth_subhead"))}</div>'
         )
         st.markdown(headline_html, unsafe_allow_html=True)
 
@@ -788,13 +788,13 @@ def require_login() -> db.User:
         # moment in the whole product.
 
     with right:
-        tab_login, tab_signup = st.tabs(["Log in", "Create account"])
+        tab_login, tab_signup = st.tabs([i18n.t("auth_tab_login"), i18n.t("auth_tab_signup")])
 
         with tab_login:
             with st.form("login_form"):
-                email = st.text_input("Email")
-                password = st.text_input("Password", type="password")
-                submitted = st.form_submit_button("Log in", type="primary", use_container_width=True)
+                email = st.text_input(i18n.t("auth_email"))
+                password = st.text_input(i18n.t("auth_password"), type="password")
+                submitted = st.form_submit_button(i18n.t("auth_login_submit"), type="primary", use_container_width=True)
             if submitted:
                 lockout_seconds = login_lockout_remaining(email)
                 if lockout_seconds > 0:
@@ -827,34 +827,30 @@ def require_login() -> db.User:
                                 f"is paused for {LOGIN_LOCKOUT_SECONDS // 60} minutes."
                             )
                         else:
-                            st.error("Incorrect email or password.")
+                            st.error(i18n.t("auth_error_bad_login"))
 
-            with st.popover("Forgot password?"):
-                st.caption("Enter your account email and we'll send a link to reset your password.")
+            with st.popover(i18n.t("auth_forgot_password")):
+                st.caption(i18n.t("auth_forgot_caption"))
                 with st.form("forgot_password_form"):
-                    forgot_email = st.text_input("Email", key="_forgot_pw_email")
-                    forgot_submitted = st.form_submit_button("Send reset link")
+                    forgot_email = st.text_input(i18n.t("auth_email"), key="_forgot_pw_email")
+                    forgot_submitted = st.form_submit_button(i18n.t("auth_forgot_submit"))
                 if forgot_submitted:
                     status = request_password_reset(forgot_email)
                     if status == "not_configured":
-                        st.error("Password reset isn't set up yet -- contact support directly for now.")
+                        st.error(i18n.t("auth_reset_not_configured"))
                     else:
-                        st.success(
-                            "If an account exists for that email, we've sent a reset link -- check your inbox "
-                            "(and spam folder). It's valid for 1 hour."
-                        )
+                        st.success(i18n.t("auth_reset_sent"))
 
         with tab_signup:
             with st.form("signup_form"):
-                name = st.text_input("Your name")
-                firm_name = st.text_input("Firm name")
-                email = st.text_input("Work email", key="signup_email")
-                password = st.text_input("Password", type="password", key="signup_password",
-                                          help="At least 8 characters.")
-                confirm_password = st.text_input("Confirm password", type="password", key="signup_confirm_password")
-                st.caption(f"Free trial: {DEFAULT_TRIAL_LIMIT} full bid, no card required. "
-                           f"Then pay per bid, or subscribe monthly -- see pricing on the homepage.")
-                with st.expander("Terms you're agreeing to"):
+                name = st.text_input(i18n.t("auth_signup_name"))
+                firm_name = st.text_input(i18n.t("auth_signup_firm"))
+                email = st.text_input(i18n.t("auth_signup_email"), key="signup_email")
+                password = st.text_input(i18n.t("auth_password"), type="password", key="signup_password",
+                                          help=i18n.t("auth_signup_password_help"))
+                confirm_password = st.text_input(i18n.t("auth_signup_confirm_password"), type="password", key="signup_confirm_password")
+                st.caption(i18n.t("auth_signup_trial_caption", limit=DEFAULT_TRIAL_LIMIT))
+                with st.expander(i18n.t("auth_signup_terms_expander")):
                     st.markdown(
                         f'<div style="font-size:.85rem;color:#475569;line-height:1.6;">{TERMS_TEXT} '
                         f'This is a summary of the AI-output disclaimer in our '
@@ -862,13 +858,13 @@ def require_login() -> db.User:
                         f'which governs your use of CivilProposals in full.</div>',
                         unsafe_allow_html=True,
                     )
-                agreed_terms = st.checkbox("I have read and accept the terms above and the Terms of Service.", key="signup_terms_checkbox")
-                submitted = st.form_submit_button("Create account", type="primary", use_container_width=True)
+                agreed_terms = st.checkbox(i18n.t("auth_signup_terms_checkbox"), key="signup_terms_checkbox")
+                submitted = st.form_submit_button(i18n.t("auth_signup_submit"), type="primary", use_container_width=True)
             if submitted:
                 if password != confirm_password:
-                    st.error("Passwords don't match -- please re-enter them.")
+                    st.error(i18n.t("auth_error_passwords_no_match"))
                 elif not agreed_terms:
-                    st.error("Please accept the terms above to create an account.")
+                    st.error(i18n.t("auth_error_must_accept_terms"))
                 else:
                     try:
                         user = create_user(email, password, name, firm_name)
@@ -898,6 +894,10 @@ def render_password_reset_screen(token: str) -> None:
     Always st.stop()s, same contract as require_login()."""
     from modules import branding
 
+    _reset_picker_col, _ = st.columns([1, 4])
+    with _reset_picker_col:
+        i18n.language_picker(key="_reset_lang_picker")
+
     st.markdown(
         branding.brand_html(logo_size=44, wordmark_size="1.5rem", show_beta=True, href="https://civilproposals.com"),
         unsafe_allow_html=True,
@@ -912,8 +912,8 @@ def render_password_reset_screen(token: str) -> None:
     # success screen render without ever re-checking the now-intentionally-
     # invalidated token.
     if st.session_state.get("_password_reset_done"):
-        st.success("Password updated -- you can log in with your new password now.")
-        if st.button("Continue to log in", type="primary"):
+        st.success(i18n.t("pw_reset_success"))
+        if st.button(i18n.t("pw_reset_continue"), type="primary"):
             st.session_state.pop("_password_reset_done", None)
             st.query_params.clear()
             st.rerun()

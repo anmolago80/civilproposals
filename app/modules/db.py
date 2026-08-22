@@ -120,6 +120,17 @@ class User(Base):
     # "hasn't accepted" -- see auth.require_login() and auth.TERMS_TEXT.
     accepted_terms_at = Column(DateTime, nullable=True)
 
+    # Part A0 of the EN/ES dual-language brief -- the account's remembered
+    # UI language, one of modules/i18n.LANGUAGES' keys ("en"/"es"). Adopted
+    # into st.session_state the first time modules/i18n.current_language()
+    # sees this user each session; NULL means "never explicitly chosen yet"
+    # (falls back to the browser's Accept-Language header, then English --
+    # see modules/i18n.py). Deliberately NOT used to pick the language a
+    # generated proposal/tender-summary/org-chart comes out in -- that's
+    # the separate, per-PROJECT `output_language` field in session_state
+    # (see modules/pages/10_state_helpers.py's PLAIN_KEYS / Part A3).
+    preferred_language = Column(String, nullable=True)
+
     library_entries = relationship("LibraryEntry", back_populates="user", cascade="all, delete-orphan")
     reference_library_entries = relationship(
         "ReferenceLibraryEntry", back_populates="user", cascade="all, delete-orphan",
@@ -722,6 +733,9 @@ def _run_light_migrations() -> None:
     if "subscription_period_end" not in existing_columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE users ADD COLUMN subscription_period_end TIMESTAMP"))
+    if "preferred_language" not in existing_columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN preferred_language VARCHAR"))
 
     # Retrofit the (user_id, project_key) unique constraint onto
     # proposal_usage -- see ProposalUsage's docstring for why this exists
