@@ -54,9 +54,11 @@ _ROW_BAND = RGBColor(0xF7, 0xF9, 0xFC)
 _TRACK_GREY = RGBColor(0xED, 0xEF, 0xF2)
 _MILESTONE_ORANGE = RGBColor(0xF9, 0x73, 0x16)
 
-# A4 landscape -- same slide size as org_chart_pptx.py / methodology_pptx.py
-_SLIDE_W = Inches(11.6929)
-_SLIDE_H = Inches(8.2677)
+# A3 landscape (420mm x 297mm) -- the program deck needs the extra width a
+# multi-week delivery schedule wants; org_chart_pptx.py / methodology_pptx.py
+# stay on A4 landscape, which is still the right page size for those.
+_SLIDE_W = Inches(16.5354)
+_SLIDE_H = Inches(11.6929)
 _M = Inches(0.3)
 
 # Superseded by export_i18n's "pptx_program_empty_note" key (Audit Round 2,
@@ -257,7 +259,7 @@ def _heading(slide, model, language: str = "en") -> int:
 
 def _grow(prs, needed_height: float) -> None:
     """A defensive last resort only -- see org_chart_pptx._grow(). Every
-    style below sizes itself to the fixed A4 slide via _fit_height()'s
+    style below sizes itself to the fixed A3 slide via _fit_height()'s
     scale-to-fill search first; this only fires if that search's own
     MIN_SCALE floor still wasn't enough (an extreme scope-item/week count),
     growing the slide rather than leaving shapes silently positioned past
@@ -273,7 +275,7 @@ def _grow(prs, needed_height: float) -> None:
 # _grow, above) only once that fixed sizing overflowed it -- so a short
 # program's deck was a small grid pasted at the top of an otherwise-empty
 # A4 slide, and _grow() never fired to fix that because nothing overflowed.
-# The slide is now the fixed A4 landscape page every export in this pack
+# The slide is now the fixed A3 landscape page every export in this pack
 # uses (_SLIDE_W / _SLIDE_H); each style instead measures its content at a
 # reference scale, picks ONE scale factor from how much of that fixed page
 # it needs, and derives row height, bar thickness, gridline weight,
@@ -967,7 +969,7 @@ def populate_program(
     output_language: str = "en",
 ) -> bytes:
     """
-    Builds a fresh A4-landscape .pptx (returned as bytes) of the delivery
+    Builds a fresh A3-landscape .pptx (returned as bytes) of the delivery
     program, in the user's chosen presentation style.
 
     `style` is one of program_render.STYLES; anything else (including None)

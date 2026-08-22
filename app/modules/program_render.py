@@ -267,8 +267,8 @@ def _parse_date(text: str):
 # ----------------------------------
 # This used to render every row/lane at a fixed size and then grow (or crop)
 # the canvas to whatever that produced -- so a 4-item program drew four small
-# rows at the top of a mostly-empty page. The page is now the fixed A4
-# landscape sheet every export in this pack uses (see PAGE_W_IN/PAGE_H_IN
+# rows at the top of a mostly-empty page. The page is now the fixed A3
+# landscape sheet program_pptx.py's companion export uses (see PAGE_W_IN/PAGE_H_IN
 # below); each style instead measures its content at a reference scale,
 # picks ONE scale factor from how much of the fixed page it needs to fill,
 # and derives row height, bar thickness, gridline weight, milestone size and
@@ -287,15 +287,16 @@ def _parse_date(text: str):
 EMPTY_NOTE = ("[NO PROGRAM ENTERED -- build the delivery program in the Fees & Program tab, "
               "then re-generate this]")
 
-# Same precise A4 landscape page (297mm x 210mm) as every other generated
-# artefact in this pack (org_chart_render.py, program_pptx.py,
-# methodology_pptx.py). Coordinates for every style below are real inches on
-# this page, not axes-fractions: the axes limits are set to (0, PAGE_W_IN)
-# and (0, total_height_in), so 1 data unit == 1 inch on BOTH axes and a
-# patch's width/height come out physically equal without the aspect
-# correction org_chart_render.py needs for its avatar circles.
-PAGE_W_IN = 11.6929
-PAGE_H_IN = 8.2677
+# Same precise A3 landscape page (420mm x 297mm) as program_pptx.py's
+# companion PowerPoint export -- org_chart_render.py and methodology_pptx.py
+# stay on A4 landscape, which is still the right page size for those.
+# Coordinates for every style below are real inches on this page, not
+# axes-fractions: the axes limits are set to (0, PAGE_W_IN) and
+# (0, total_height_in), so 1 data unit == 1 inch on BOTH axes and a patch's
+# width/height come out physically equal without the aspect correction
+# org_chart_render.py needs for its avatar circles.
+PAGE_W_IN = 16.5354
+PAGE_H_IN = 11.6929
 _MARGIN_IN = 0.35
 _TITLE_BAND_IN = 0.62
 
