@@ -1,0 +1,494 @@
+<title>CivilProposals — 30s storyboard</title>
+<meta charset="utf-8">
+<script src="beats.en.js"></script>
+<script src="beats.es.js"></script>
+<style>
+  @font-face{
+    font-family:'Plus Jakarta Sans'; font-style:normal; font-weight:500;
+    src:url('fonts/PlusJakartaSans-500.woff2') format('woff2'); font-display:block;
+  }
+  @font-face{
+    font-family:'Plus Jakarta Sans'; font-style:normal; font-weight:600;
+    src:url('fonts/PlusJakartaSans-600.woff2') format('woff2'); font-display:block;
+  }
+  @font-face{
+    font-family:'Plus Jakarta Sans'; font-style:normal; font-weight:700;
+    src:url('fonts/PlusJakartaSans-700.woff2') format('woff2'); font-display:block;
+  }
+  @font-face{
+    font-family:'Plus Jakarta Sans'; font-style:normal; font-weight:800;
+    src:url('fonts/PlusJakartaSans-800.woff2') format('woff2'); font-display:block;
+  }
+
+  :root{
+    --ink:#111827; --blue:#1D4ED8; --blue-dark:#1E3A8A; --blue-tint:#EFF4FF;
+    --accent:#F97316; --surface:#F6F6F4; --border:#E4E4E0; --text-muted:#5B6472;
+    --placeholder-red:#C00000; --white:#FFFFFF;
+  }
+
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{width:1080px;height:1080px;overflow:hidden;background:#000;}
+  body{font-family:'Plus Jakarta Sans',sans-serif;}
+
+  #stage{position:relative;width:1080px;height:1080px;overflow:hidden;background:var(--ink);}
+
+  .scene{position:absolute;left:0;top:0;width:1080px;height:1080px;}
+  .bg-ink{background:var(--ink);}
+  .bg-white{background:var(--white);}
+
+  /* Statement beats (1, 2, 7, 9): centered typographic content */
+  .statement{
+    position:absolute;left:64px;right:64px;top:0;bottom:0;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    text-align:center;
+  }
+  .statement .line{
+    font-weight:800;line-height:1.18;white-space:nowrap;will-change:opacity,transform;
+  }
+
+  /* Image beats (3, 4, 5, 6, 8): screenshot up top, caption below on clean field */
+  .image-box{
+    position:absolute;left:64px;top:140px;width:952px;height:560px;
+    display:flex;align-items:center;justify-content:center;overflow:visible;
+  }
+  .image-box img{
+    max-width:100%;max-height:100%;object-fit:contain;
+    filter:drop-shadow(0 18px 40px rgba(17,24,39,0.16));
+    will-change:opacity,transform;
+  }
+  .caption-box{
+    position:absolute;left:64px;right:64px;top:760px;bottom:64px;
+    display:flex;flex-direction:column;justify-content:flex-start;
+  }
+  .caption-box .line{
+    font-weight:700;line-height:1.28;color:var(--ink);will-change:opacity,transform;
+  }
+
+  /* Beat 7: red placeholder chips */
+  .placeholder-stack{
+    position:absolute;left:64px;right:64px;top:520px;bottom:220px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:36px;
+  }
+  .placeholder-chip{
+    font-weight:800;color:var(--placeholder-red);letter-spacing:0.02em;
+    border:3px solid var(--placeholder-red);border-radius:14px;
+    padding:18px 32px;white-space:nowrap;will-change:opacity,transform;
+  }
+  .beat7-caption{
+    position:absolute;left:64px;right:64px;top:120px;
+    display:flex;flex-direction:column;align-items:center;text-align:center;
+  }
+  .beat7-caption .line{font-weight:700;line-height:1.3;color:var(--ink);will-change:opacity,transform;}
+
+  /* Beat 8: pulled-back screenshot + word icon */
+  .pullback-row{
+    position:absolute;left:64px;right:64px;top:170px;height:460px;
+    display:flex;align-items:center;justify-content:center;gap:56px;
+  }
+  .pullback-row img{
+    max-width:620px;max-height:100%;object-fit:contain;
+    filter:drop-shadow(0 14px 32px rgba(17,24,39,0.14));
+    will-change:opacity,transform;
+  }
+  .word-icon{will-change:opacity,transform;}
+
+  /* Beat 9: end card */
+  .endcard{
+    position:absolute;left:64px;right:64px;top:0;bottom:0;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;
+  }
+  .endcard img{width:96px;height:96px;will-change:opacity,transform;}
+  .endcard .wordmark{font-weight:800;color:var(--white);will-change:opacity,transform;}
+  .endcard .sub{font-weight:700;color:var(--white);opacity:0.92;will-change:opacity,transform;}
+  .endcard .url{font-weight:700;color:var(--accent);will-change:opacity,transform;}
+</style>
+<body>
+<div id="stage"></div>
+
+<script>
+"use strict";
+
+/* ---------------------------------------------------------------------
+ * Language + beat table resolution
+ * ------------------------------------------------------------------- */
+const LANG = (new URLSearchParams(location.search).get("lang")) || window.LANG || "en";
+const BEATS = (LANG === "es" ? BEATS_ES : BEATS_EN).beats;
+
+/* ---------------------------------------------------------------------
+ * Small deterministic-motion helpers -- every value here is a pure
+ * function of frame numbers, never wall-clock time.
+ * ------------------------------------------------------------------- */
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+function easeOutCubic(t) { t = clamp(t, 0, 1); return 1 - Math.pow(1 - t, 3); }
+function easeInOutCubic(t) {
+  t = clamp(t, 0, 1);
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+/* Fades an element up from `distance`px below and 0 opacity, finishing at
+ * (startFrame + dur). Returns {opacity, translateY}. */
+function fadeUp(localFrame, startFrame, dur, distance) {
+  dur = dur || 14; distance = distance === undefined ? 12 : distance;
+  const t = (localFrame - startFrame) / dur;
+  const e = easeOutCubic(t);
+  return { opacity: clamp(e, 0, 1), translateY: distance * (1 - clamp(e, 0, 1)) };
+}
+function applyFade(el, fade, extraTransform) {
+  el.style.opacity = String(fade.opacity);
+  const t = "translateY(" + fade.translateY.toFixed(3) + "px)" + (extraTransform || "");
+  el.style.transform = t;
+}
+/* Slow push/pan over [spanStart, spanEnd] (inclusive), scale + x drift in px. */
+function slowPush(localFrame, spanStart, spanEnd, fromScale, toScale, fromX, toX) {
+  fromX = fromX || 0; toX = toX === undefined ? fromX : toX;
+  const t = spanEnd > spanStart ? clamp((localFrame - spanStart) / (spanEnd - spanStart), 0, 1) : 1;
+  const scale = fromScale + (toScale - fromScale) * t;
+  const x = fromX + (toX - fromX) * t;
+  return "translateX(" + x.toFixed(3) + "px) scale(" + scale.toFixed(4) + ")";
+}
+function crossfadeProgress(localFrame, wStart, wEnd) {
+  if (localFrame <= wStart) return 0;
+  if (localFrame >= wEnd) return 1;
+  return easeInOutCubic((localFrame - wStart) / (wEnd - wStart));
+}
+
+/* ---------------------------------------------------------------------
+ * Text fitting -- measured with a canvas, never CSS auto-wrap, so a
+ * caption's rendered width is known and controlled deterministically.
+ * Copy is authored with explicit \n line breaks (verbatim beat table);
+ * this only SHRINKS a line that doesn't fit, it never re-wraps text the
+ * copy didn't already break, except as an ES-only last resort (see
+ * fitLinesAllowWrap below), matching the brief's "shrink before wrap"
+ * order for the longer Spanish captions.
+ * ------------------------------------------------------------------- */
+const _measureCanvas = document.createElement("canvas");
+const _measureCtx = _measureCanvas.getContext("2d");
+function measureWidth(text, weight, sizePx) {
+  _measureCtx.font = weight + " " + sizePx + "px 'Plus Jakarta Sans'";
+  return _measureCtx.measureText(text).width;
+}
+function fitFontSize(lines, weight, startSizePx, maxWidthPx, minSizePx) {
+  minSizePx = minSizePx || 28;
+  let size = startSizePx;
+  while (size > minSizePx) {
+    let widest = 0;
+    for (const l of lines) widest = Math.max(widest, measureWidth(l, weight, size));
+    if (widest <= maxWidthPx) break;
+    size -= 1;
+  }
+  return size;
+}
+/* Greedy word-wrap of one logical line into <=maxLines physical lines at
+ * `sizePx`, used only when shrinking alone still doesn't fit (long ES
+ * captions). Always makes progress: a single word wider than maxWidthPx
+ * on its own still becomes its own line. */
+function wrapLine(text, weight, sizePx, maxWidthPx) {
+  const words = text.split(" ");
+  if (!words.length) return [text];
+  const out = [];
+  let current = words[0];
+  for (let i = 1; i < words.length; i++) {
+    const candidate = current + " " + words[i];
+    if (measureWidth(candidate, weight, sizePx) <= maxWidthPx) {
+      current = candidate;
+    } else {
+      out.push(current);
+      current = words[i];
+    }
+  }
+  out.push(current);
+  return out;
+}
+/* Full fit: shrink first; if any logical line still won't fit at the
+ * floor size, wrap that line -- capped at `maxTotalLines` physical
+ * lines total (the brief's "at most three lines" rule for ES). */
+function fitLinesAllowWrap(logicalLines, weight, startSizePx, maxWidthPx, minSizePx, maxTotalLines) {
+  let size = fitFontSize(logicalLines, weight, startSizePx, maxWidthPx, minSizePx);
+  let physical = logicalLines.slice();
+  const stillTooWide = logicalLines.some(l => measureWidth(l, weight, size) > maxWidthPx);
+  if (stillTooWide) {
+    physical = [];
+    for (const l of logicalLines) {
+      if (measureWidth(l, weight, size) > maxWidthPx) {
+        physical.push(...wrapLine(l, weight, size, maxWidthPx));
+      } else {
+        physical.push(l);
+      }
+    }
+    while (physical.length > maxTotalLines && size > minSizePx) {
+      size -= 1;
+      physical = [];
+      for (const l of logicalLines) {
+        if (measureWidth(l, weight, size) > maxWidthPx) {
+          physical.push(...wrapLine(l, weight, size, maxWidthPx));
+        } else {
+          physical.push(l);
+        }
+      }
+    }
+  }
+  return { size, lines: physical };
+}
+
+/* ---------------------------------------------------------------------
+ * Stage construction -- built ONCE at load. renderFrame() only ever
+ * updates style/text on these persistent nodes, so every image/font is
+ * decoded a single time and every frame call is a pure function of `n`.
+ * ------------------------------------------------------------------- */
+const stage = document.getElementById("stage");
+const scenes = [];
+
+function makeScene(className) {
+  const el = document.createElement("div");
+  el.className = "scene " + className;
+  el.style.visibility = "hidden";
+  el.style.opacity = "0";
+  stage.appendChild(el);
+  return el;
+}
+function makeLine(parent, sizePx, weight, color) {
+  const el = document.createElement("div");
+  el.className = "line";
+  el.style.fontSize = sizePx + "px";
+  el.style.fontWeight = String(weight);
+  if (color) el.style.color = color;
+  parent.appendChild(el);
+  return el;
+}
+function makeImg(parent, src) {
+  const img = document.createElement("img");
+  img.src = src;
+  parent.appendChild(img);
+  return img;
+}
+
+/* Beat 0 + 1 share one continuous dark field -- see beats.*.js: two
+ * statement scenes, both bg-ink, so the cut between them is invisible. */
+const scene0 = makeScene("bg-ink");
+const s0wrap = document.createElement("div"); s0wrap.className = "statement"; scene0.appendChild(s0wrap);
+const s0line1 = makeLine(s0wrap, 62, 800, "#FFFFFF");
+const s0line2 = makeLine(s0wrap, 62, 800, "#FFFFFF");
+s0line2.style.marginTop = "18px";
+
+const scene1 = makeScene("bg-ink");
+const s1wrap = document.createElement("div"); s1wrap.className = "statement"; scene1.appendChild(s1wrap);
+const s1line1 = makeLine(s1wrap, 62, 800, "#FFFFFF");
+
+/* Beat 2: white cut, workspace screenshot slides up, single caption line. */
+const scene2 = makeScene("bg-white");
+const s2box = document.createElement("div"); s2box.className = "image-box"; scene2.appendChild(s2box);
+const s2img = makeImg(s2box, "assets/app_screenshot_workspace.jpg");
+const s2cap = document.createElement("div"); s2cap.className = "caption-box"; scene2.appendChild(s2cap);
+const s2line1 = makeLine(s2cap, 48, 700);
+
+/* Beat 3: gap analysis, panning, two-line caption. */
+const scene3 = makeScene("bg-white");
+const s3box = document.createElement("div"); s3box.className = "image-box"; scene3.appendChild(s3box);
+const s3img = makeImg(s3box, "assets/feature_gap_analysis.jpg");
+const s3cap = document.createElement("div"); s3cap.className = "caption-box"; scene3.appendChild(s3cap);
+const s3line1 = makeLine(s3cap, 46, 700);
+const s3line2 = makeLine(s3cap, 46, 700);
+
+/* Beat 4: methodology -> org chart crossfade, one caption for both. */
+const scene4 = makeScene("bg-white");
+const s4box = document.createElement("div"); s4box.className = "image-box"; scene4.appendChild(s4box);
+const s4imgA = makeImg(s4box, "assets/feature_methodology.jpg");
+const s4imgB = makeImg(s4box, "assets/feature_org_chart.jpg");
+s4imgB.style.position = "absolute";
+const s4cap = document.createElement("div"); s4cap.className = "caption-box"; scene4.appendChild(s4cap);
+const s4line1 = makeLine(s4cap, 42, 700);
+const s4line2 = makeLine(s4cap, 42, 700);
+
+/* Beat 5: fee benchmarks, single-line caption. */
+const scene5 = makeScene("bg-white");
+const s5box = document.createElement("div"); s5box.className = "image-box"; scene5.appendChild(s5box);
+const s5img = makeImg(s5box, "assets/feature_fee_benchmarks.jpg");
+const s5cap = document.createElement("div"); s5cap.className = "caption-box"; scene5.appendChild(s5cap);
+const s5line1 = makeLine(s5cap, 48, 700);
+
+/* Beat 6: white, caption up top, two red placeholder chips centered. */
+const scene6 = makeScene("bg-white");
+const s6cap = document.createElement("div"); s6cap.className = "beat7-caption"; scene6.appendChild(s6cap);
+const s6line1 = makeLine(s6cap, 42, 700);
+const s6line2 = makeLine(s6cap, 42, 700);
+const s6stack = document.createElement("div"); s6stack.className = "placeholder-stack"; scene6.appendChild(s6stack);
+const s6chip1 = document.createElement("div"); s6chip1.className = "placeholder-chip"; s6chip1.style.fontSize = "40px";
+s6chip1.textContent = LANG === "es" ? "[CONFIRMAR N.º DE MATRÍCULA]" : "[CONFIRM REGISTRATION NUMBER]";
+s6stack.appendChild(s6chip1);
+const s6chip2 = document.createElement("div"); s6chip2.className = "placeholder-chip"; s6chip2.style.fontSize = "40px";
+s6chip2.textContent = LANG === "es" ? "[INSERTAR NOMBRE DEL PERSONAL CLAVE]" : "[INSERT KEY PERSONNEL NAME]";
+s6stack.appendChild(s6chip2);
+
+/* Beat 7: workspace screenshot pulled back + a generic Word-doc glyph
+ * (built from scratch as brand-blue vector shapes -- not a screenshot,
+ * so it carries no claim about the product's own UI). */
+const scene7 = makeScene("bg-white");
+const s7row = document.createElement("div"); s7row.className = "pullback-row"; scene7.appendChild(s7row);
+const s7img = makeImg(s7row, "assets/app_screenshot_workspace.jpg");
+const s7icon = document.createElement("div"); s7icon.className = "word-icon";
+s7icon.innerHTML =
+  '<svg width="132" height="160" viewBox="0 0 132 160" xmlns="http://www.w3.org/2000/svg">' +
+  '<path d="M14 0 H92 L118 26 V148 A12 12 0 0 1 106 160 H14 A12 12 0 0 1 2 148 V12 A12 12 0 0 1 14 0 Z" fill="#1D4ED8"/>' +
+  '<path d="M92 0 L118 26 H98 A6 6 0 0 1 92 20 Z" fill="#1E3A8A"/>' +
+  '<text x="60" y="118" font-family="Plus Jakarta Sans, sans-serif" font-weight="800" font-size="46" fill="#FFFFFF" text-anchor="middle">W</text>' +
+  '</svg>';
+s7row.appendChild(s7icon);
+const s7cap = document.createElement("div"); s7cap.className = "caption-box"; scene7.appendChild(s7cap);
+const s7line1 = makeLine(s7cap, 48, 700);
+
+/* Beat 8: end card. */
+const scene8 = makeScene("bg-ink");
+const s8card = document.createElement("div"); s8card.className = "endcard"; scene8.appendChild(s8card);
+const s8logo = makeImg(s8card, "assets/logo_mark.png");
+const s8word = document.createElement("div"); s8word.className = "wordmark"; s8word.style.fontSize = "58px"; s8card.appendChild(s8word);
+const s8sub = document.createElement("div"); s8sub.className = "sub"; s8sub.style.fontSize = "40px"; s8card.appendChild(s8sub);
+const s8url = document.createElement("div"); s8url.className = "url"; s8url.style.fontSize = "40px"; s8card.appendChild(s8url);
+
+scenes.push(scene0, scene1, scene2, scene3, scene4, scene5, scene6, scene7, scene8);
+
+/* ---------------------------------------------------------------------
+ * Per-beat paint functions -- each fully specifies the active scene's
+ * state from (localFrame, duration, captionText) alone.
+ * ------------------------------------------------------------------- */
+const CAPTION_MAX_W = 952;
+
+function setCaptionLines(el, lineEls, text, weight, startSizePx, maxLines) {
+  const logical = text.split("\n");
+  const fit = fitLinesAllowWrap(logical, weight, startSizePx, CAPTION_MAX_W, 28, maxLines || 3);
+  // Reuse existing line elements where possible; hide extras.
+  for (let i = 0; i < lineEls.length; i++) {
+    const l = lineEls[i];
+    if (i < fit.lines.length) {
+      l.textContent = fit.lines[i];
+      l.style.fontSize = fit.size + "px";
+      l.style.display = "";
+    } else {
+      l.style.display = "none";
+    }
+  }
+  return fit;
+}
+
+function paintBeat0(local, dur, caption) {
+  const parts = caption.split("\n");
+  setCaptionLines(scene0, [s0line1, s0line2], caption, 800, 62, 3);
+  applyFade(s0line1, fadeUp(local, 0, 16, 14));
+  applyFade(s0line2, fadeUp(local, 30, 16, 14));
+}
+
+function paintBeat1(local, dur, caption) {
+  setCaptionLines(scene1, [s1line1], caption, 800, 62, 3);
+  applyFade(s1line1, fadeUp(local, 0, 16, 14));
+}
+
+function paintBeat2(local, dur, caption) {
+  const slide = fadeUp(local, 0, 26, 40);
+  s2img.style.opacity = String(slide.opacity);
+  s2img.style.transform = "translateY(" + slide.translateY.toFixed(3) + "px)";
+  setCaptionLines(scene2, [s2line1], caption, 700, 48, 2);
+  applyFade(s2line1, fadeUp(local, 20, 16, 12));
+}
+
+function paintBeat3(local, dur, caption) {
+  s3img.style.opacity = "1";
+  s3img.style.transform = slowPush(local, 0, dur - 1, 1.0, 1.035, -14, 14);
+  setCaptionLines(scene3, [s3line1, s3line2], caption, 700, 46, 2);
+  applyFade(s3line1, fadeUp(local, 0, 16, 12));
+  applyFade(s3line2, fadeUp(local, 0, 16, 12));
+}
+
+function paintBeat4(local, dur, caption) {
+  const wStart = 50, wEnd = 59;
+  const p = crossfadeProgress(local, wStart, wEnd);
+  s4imgA.style.opacity = String(1 - p);
+  s4imgA.style.transform = slowPush(local, 0, wEnd, 1.0, 1.03, -8, 8);
+  s4imgB.style.opacity = String(p);
+  s4imgB.style.transform = slowPush(local, wStart, dur - 1, 1.0, 1.03, -8, 8);
+  setCaptionLines(scene4, [s4line1, s4line2], caption, 700, 42, 2);
+  applyFade(s4line1, fadeUp(local, 0, 16, 12));
+  applyFade(s4line2, fadeUp(local, 0, 16, 12));
+}
+
+function paintBeat5(local, dur, caption) {
+  s5img.style.opacity = "1";
+  s5img.style.transform = slowPush(local, 0, dur - 1, 1.0, 1.03, 0, 0);
+  setCaptionLines(scene5, [s5line1], caption, 700, 48, 2);
+  applyFade(s5line1, fadeUp(local, 0, 16, 12));
+}
+
+function paintBeat6(local, dur, caption) {
+  setCaptionLines(scene6, [s6line1, s6line2], caption, 700, 42, 2);
+  applyFade(s6line1, fadeUp(local, 0, 16, 12));
+  applyFade(s6line2, fadeUp(local, 0, 16, 12));
+  applyFade(s6chip1, fadeUp(local, 22, 16, 14));
+  applyFade(s6chip2, fadeUp(local, 48, 16, 14));
+}
+
+function paintBeat7(local, dur, caption) {
+  const pull = fadeUp(local, 0, 20, 20);
+  s7img.style.opacity = String(pull.opacity);
+  s7img.style.transform = "translateY(" + pull.translateY.toFixed(3) + "px)";
+  applyFade(s7icon, fadeUp(local, 12, 20, 24));
+  setCaptionLines(scene7, [s7line1], caption, 700, 48, 2);
+  applyFade(s7line1, fadeUp(local, 16, 16, 12));
+}
+
+function paintBeat8(local, dur, caption) {
+  const parts = caption.split("\n");
+  s8word.textContent = parts[0] || "";
+  s8sub.textContent = parts[1] || "";
+  s8url.textContent = parts[2] || "";
+  const logoFade = fadeUp(local, 0, 16, 14);
+  s8logo.style.opacity = String(logoFade.opacity);
+  s8logo.style.transform = "translateY(" + logoFade.translateY.toFixed(3) + "px)";
+  applyFade(s8word, fadeUp(local, 0, 16, 14));
+  applyFade(s8sub, fadeUp(local, 14, 16, 12));
+  applyFade(s8url, fadeUp(local, 14, 16, 12));
+}
+
+const PAINTERS = [
+  paintBeat0, paintBeat1, paintBeat2, paintBeat3, paintBeat4,
+  paintBeat5, paintBeat6, paintBeat7, paintBeat8
+];
+
+function findBeatIndex(n) {
+  for (let i = 0; i < BEATS.length; i++) {
+    const [s, e] = BEATS[i].frames;
+    if (n >= s && n <= e) return i;
+  }
+  return BEATS.length - 1;
+}
+
+window.renderFrame = function (n) {
+  n = clamp(Math.round(n), 0, 899);
+  const idx = findBeatIndex(n);
+  for (let i = 0; i < scenes.length; i++) {
+    if (i === idx) {
+      scenes[i].style.visibility = "visible";
+      scenes[i].style.opacity = "1";
+    } else {
+      scenes[i].style.visibility = "hidden";
+      scenes[i].style.opacity = "0";
+    }
+  }
+  const [s, e] = BEATS[idx].frames;
+  PAINTERS[idx](n - s, e - s + 1, BEATS[idx].caption);
+};
+
+/* Force every weight to actually decode before any frame is captured --
+ * document.fonts.ready alone only covers faces already requested by
+ * painted text, which on the very first frame may not include every
+ * weight this page uses. */
+window.__fontsReady = false;
+Promise.all([
+  document.fonts.load("500 40px 'Plus Jakarta Sans'"),
+  document.fonts.load("600 40px 'Plus Jakarta Sans'"),
+  document.fonts.load("700 40px 'Plus Jakarta Sans'"),
+  document.fonts.load("800 40px 'Plus Jakarta Sans'"),
+]).then(function () {
+  return document.fonts.ready;
+}).then(function () {
+  window.__fontsReady = true;
+  window.renderFrame(0);
+});
+</script>
+</body>
