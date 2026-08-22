@@ -809,6 +809,98 @@ def check_spanish_placeholders(failures: list[str]) -> None:
             f"ES-only prefix -- every match may have been an English-prefix accident: {es_found[:5]!r}")
 
 
+# Round 4, Part 1: the eight hardcoded-English strings found surviving in a
+# generated Spanish pack after Round 3's Part 4a. Each entry is (English
+# fragment that must NOT appear, which document(s) it was found in).
+_ROUND4_PART1_ENGLISH_LEAKS = [
+    ("Right-click here and choose", ("Proposal_LargeScope.docx", "Tender_Summary.docx")),
+    ("Page Limit Source", ("Proposal_LargeScope.docx",)),
+    ("Allocated Pages", ("Proposal_LargeScope.docx",)),
+    ("Cross-reference of which nominated key personnel", ("Proposal_LargeScope.docx",)),
+    ("Indicative only, derived from your fee build-up", ("Proposal_LargeScope.docx",)),
+    ("Cumulative", ("Proposal_LargeScope.docx",)),
+]
+
+
+def check_spanish_docx_scaffolding(failures: list[str]) -> None:
+    """Audit Round 4, Part 1: generate a Spanish Large Scope pack AND a
+    Spanish Tender Summary, sweep both for the eight hardcoded-English
+    strings a real Spanish pack was found carrying after Round 3's Part 4a
+    (export_i18n covered most of export_docx.py's scaffolding, not all of
+    it) -- the TOC "Update Field" note (in both documents), the
+    page-allocation table headers, the personnel cross-reference note, and
+    the cash-flow note + table headers (all Large Scope pack only, since
+    Tender Summary never builds either section). Regressing any of these
+    back to English must fail this check."""
+    from modules import export_docx
+
+    project = build_sample_project()
+    info = project["project_info"]
+
+    large_scope_es = export_docx.build_docx(
+        project_info=info,
+        analysis=project["analysis"],
+        weighted_criteria=[],
+        allocations=[],
+        sections=project["sections"],
+        guidance_notes={},
+        drafts=project["drafts"],
+        compliance_items=[],
+        gap_items=[],
+        graphics=[],
+        fee_estimates=project["fee_estimates"],
+        resource_plan=project["resource_plan"],
+        org_chart_png=None,
+        reference_projects=project["reference_projects"],
+        discipline_fee_lines=project["discipline_fee_lines"],
+        program_schedule=project["program_schedule"],
+        program_week_labels=project["program_week_labels"],
+        output_language="es",
+    ).getvalue()
+
+    tender_summary_es = export_docx.build_tender_summary_docx(
+        project_info=info,
+        analysis=project["analysis"],
+        weighting_chart_png=None,
+        compliance_items=[],
+        gap_items=[],
+        sections=project["sections"],
+        drafts=project["drafts"],
+        output_language="es",
+    ).getvalue()
+
+    texts = {
+        "Proposal_LargeScope.docx": docx_text(large_scope_es),
+        "Tender_Summary.docx": docx_text(tender_summary_es),
+    }
+
+    for fragment, expected_docs in _ROUND4_PART1_ENGLISH_LEAKS:
+        for doc_name in expected_docs:
+            if fragment in texts[doc_name]:
+                failures.append(
+                    f"[Round4-Part1] {doc_name} (output_language='es') still carries the English "
+                    f"string {fragment!r} -- it should have resolved through export_i18n")
+
+    # The Spanish translations themselves must actually be present, not just
+    # the English absence -- catches an export_t() call resolving to the
+    # wrong key (which would also make the English-absence checks above
+    # pass vacuously).
+    es_expectations = {
+        "Proposal_LargeScope.docx": [
+            "índice", "Sección", "Ponderación", "Motivo",
+            "Referencia cruzada del personal clave",
+            "Solo indicativo", "Periodo", "Acumulado",
+        ],
+        "Tender_Summary.docx": ["índice"],
+    }
+    for doc_name, expected_fragments in es_expectations.items():
+        for fragment in expected_fragments:
+            if fragment not in texts[doc_name]:
+                failures.append(
+                    f"[Round4-Part1] {doc_name} (output_language='es') is missing the expected "
+                    f"Spanish text {fragment!r}")
+
+
 def check_spanish_pptx(failures: list[str]) -> None:
     """Audit Round 2, Part 5 + Round 3, Part 2/5b: the three PPTX companions
     (org chart, methodology, delivery program) ignored export_i18n entirely
@@ -1192,6 +1284,7 @@ def main() -> int:
     check_methodology_styles(failures, files)
     check_empty_letter_sections(failures)
     check_spanish_placeholders(failures)
+    check_spanish_docx_scaffolding(failures)
     check_spanish_pptx(failures)
     check_spanish_png_previews(failures)
     check_spanish_hold_point_detection(failures)

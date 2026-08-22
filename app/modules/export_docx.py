@@ -925,8 +925,7 @@ def _add_toc(doc: Document, output_language: str = "en"):
     doc.add_heading(export_i18n.export_t("heading_toc", output_language), level=1)
     p = doc.add_paragraph()
     p.add_run(
-        "Right-click here and choose 'Update Field' (or Update Table) to generate the "
-        "table of contents once the document is finalised."
+        export_i18n.export_t("export_toc_update_field_note", output_language)
     ).font.italic = True
 
     run = p.add_run()
@@ -1086,7 +1085,13 @@ _PAGE_LIMIT_REASONS = {
 
 def _build_page_allocation_plan(doc: Document, sections: list, theme: dict, output_language: str = "en"):
     doc.add_heading(export_i18n.export_t("heading_page_allocation_plan", output_language), level=1)
-    headers = ["Section", "Weighting", "Page Limit Source", "Allocated Pages", "Reason"]
+    headers = [
+        export_i18n.export_t("export_table_header_section", output_language),
+        export_i18n.export_t("export_table_header_weighting", output_language),
+        export_i18n.export_t("export_table_header_page_limit_source", output_language),
+        export_i18n.export_t("export_table_header_allocated_pages", output_language),
+        export_i18n.export_t("export_table_header_reason", output_language),
+    ]
     rows = [
         [s.title, f"{s.weighting:.0f}%", _friendly_source(s.page_limit_source),
          str(s.allocated_pages),
@@ -2084,7 +2089,9 @@ def _build_personnel_project_matrix(doc: Document, resource_plan: list, referenc
 
     doc.add_heading(export_i18n.export_t("heading_personnel_experience_matrix", output_language), level=2)
     note = doc.add_paragraph()
-    note.add_run("Cross-reference of which nominated key personnel worked on each reference project below.").italic = True
+    note.add_run(
+        export_i18n.export_t("export_key_personnel_xref_note", output_language)
+    ).italic = True
 
     headers = ["Reference project"] + [e["name"] for e in people]
     rows = []
@@ -2357,9 +2364,7 @@ def _build_cash_flow(doc: Document, discipline_fee_lines: list | None,
 
     note = doc.add_paragraph()
     run = note.add_run(
-        "Indicative only, derived from your fee build-up and program by spreading the total "
-        "evenly across the weeks with work programmed -- refine to your real invoicing "
-        "profile before submission."
+        export_i18n.export_t("export_cash_flow_indicative_note", output_language)
     )
     run.font.bold = True
     run.font.color.rgb = RED
@@ -2367,12 +2372,17 @@ def _build_cash_flow(doc: Document, discipline_fee_lines: list | None,
     total = rows[-1][2]
     table = _add_table(
         doc,
-        ["Period", "Fee (excl. GST)", "Cumulative"],
+        [
+            export_i18n.export_t("export_table_header_period", output_language),
+            export_i18n.export_t("export_table_header_fee_excl_gst", output_language),
+            export_i18n.export_t("export_table_header_cumulative", output_language),
+        ],
         [[label, f"${amount:,.0f}", f"${cumulative:,.0f}"] for label, amount, cumulative in rows],
         theme=theme,
     )
     total_row = table.add_row()
-    for cell, text in zip(total_row.cells, ["Total", f"${total:,.0f}", f"${total:,.0f}"]):
+    total_label = export_i18n.export_t("export_table_header_total", output_language)
+    for cell, text in zip(total_row.cells, [total_label, f"${total:,.0f}", f"${total:,.0f}"]):
         cell.text = text
         _shade_cell(cell, str(theme["accent"]))
         cell_run = cell.paragraphs[0].runs[0]

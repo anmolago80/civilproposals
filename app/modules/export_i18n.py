@@ -434,6 +434,29 @@ _EN: dict[str, str] = {
     "export_table_header_source": "Source",
     "export_table_header_indicative_amount": "Indicative $",
     "export_fee_cap_anchored_note": "Anchored to the brief's stated fee cap: {fee_cap}",
+
+    # -- Round 4, Part 1: the last eight hardcoded-English strings found in a
+    # generated Spanish pack (TOC note, page-allocation headers, personnel x
+    # reference note, cash-flow note + headers). --
+    "export_toc_update_field_note": (
+        "Right-click here and choose 'Update Field' (or Update Table) to generate the "
+        "table of contents once the document is finalised."
+    ),
+    "export_table_header_section": "Section",
+    "export_table_header_weighting": "Weighting",
+    "export_table_header_page_limit_source": "Page Limit Source",
+    "export_table_header_allocated_pages": "Allocated Pages",
+    "export_table_header_reason": "Reason",
+    "export_key_personnel_xref_note": (
+        "Cross-reference of which nominated key personnel worked on each reference project below."
+    ),
+    "export_cash_flow_indicative_note": (
+        "Indicative only, derived from your fee build-up and program by spreading the total "
+        "evenly across the weeks with work programmed -- refine to your real invoicing "
+        "profile before submission."
+    ),
+    "export_table_header_period": "Period",
+    "export_table_header_cumulative": "Cumulative",
 }
 
 # Spanish overrides -- only keys that differ from English need an entry here;
@@ -828,6 +851,28 @@ _ES: dict[str, str] = {
     "export_table_header_source": "Fuente",
     "export_table_header_indicative_amount": "$ indicativo",
     "export_fee_cap_anchored_note": "Anclado al tope de honorarios indicado en el brief: {fee_cap}",
+
+    # -- Round 4, Part 1 --
+    "export_toc_update_field_note": (
+        "Haz clic derecho aquí y elige «Actualizar campo» (o Actualizar tabla) para generar el "
+        "índice una vez finalizado el documento."
+    ),
+    "export_table_header_section": "Sección",
+    "export_table_header_weighting": "Ponderación",
+    "export_table_header_page_limit_source": "Origen del límite de páginas",
+    "export_table_header_allocated_pages": "Páginas asignadas",
+    "export_table_header_reason": "Motivo",
+    "export_key_personnel_xref_note": (
+        "Referencia cruzada del personal clave propuesto que trabajó en cada proyecto de "
+        "referencia a continuación."
+    ),
+    "export_cash_flow_indicative_note": (
+        "Solo indicativo: se deriva de tu desglose de honorarios y del programa repartiendo el "
+        "total de forma uniforme entre las semanas con trabajo programado. Ajústalo a tu perfil "
+        "real de facturación antes de presentar."
+    ),
+    "export_table_header_period": "Periodo",
+    "export_table_header_cumulative": "Acumulado",
 }
 
 _CATALOGS: dict[str, dict[str, str]] = {
