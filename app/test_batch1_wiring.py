@@ -688,16 +688,30 @@ def test_org_chart_styles(failures: list[str]) -> None:
         if not org_chart_render.render_png(model, style, "#1D4ED8"):
             failures.append(f"[9] the {style} style didn't render")
 
-    # A project with no reviewer must render with no assurance element at all
-    # -- an empty ASSURANCE band reads as a missing answer, not an absent role.
+    # A project with no DEDICATED reviewer (no "Independent Review" slot
+    # filled) must not have one invented -- has_assurance stays False, and
+    # model.assurance stays empty. That is a separate question from whether
+    # the ASSURANCE band renders at all: org_chart_render.py:1360-1364 makes
+    # that band ALWAYS carry a Peer Review chip per discipline, red TBC
+    # until a reviewer is entered, so it appears whenever there is at least
+    # one discipline -- owner-confirmed deliberate behaviour, since a
+    # missing reviewer name should read as a visible placeholder, not
+    # disappear along with the whole band. So for this fixture (three
+    # disciplines, no dedicated reviewer) the band DOES appear, and every
+    # row in it is a TBC peer-review row -- nothing invented, nothing
+    # silently hidden.
     lean_plan = [a for a in plan if a.slot != "Independent Review"]
     if org_chart_render.build_model(lean_plan, "C", "P", "T").has_assurance:
         failures.append("[9] a reviewer was invented for a project that has none")
     bands = Presentation(_io.BytesIO(org_chart_pptx.populate_org_chart(
         lean_plan, style="bands")))
-    band_text = " ".join(sh.text_frame.text for sh in bands.slides[0].shapes if sh.has_text_frame)
-    if "ASSURANCE" in band_text:
-        failures.append("[9] the bands deck shows an assurance band with nobody in it")
+    band_shapes = [sh.text_frame.text for sh in bands.slides[0].shapes if sh.has_text_frame]
+    if "ASSURANCE" not in band_shapes:
+        failures.append("[9] the bands deck lost its assurance band even though disciplines exist")
+    assurance_rows = [t for t in band_shapes if "Peer review — " in t]
+    expected_rows = [f"TBC\nPeer review — {d}" for d in ("Structural", "Hydraulics", "Survey")]
+    if assurance_rows != expected_rows:
+        failures.append(f"[9] the assurance band's peer-review rows are wrong: {assurance_rows!r}")
 
     # An empty plan keeps its placeholder rather than exporting a bare chart.
     empty_model = org_chart_render.build_model([], "", "", "")
