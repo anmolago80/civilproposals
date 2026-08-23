@@ -410,7 +410,7 @@ if IS_SAAS_MODE:
 
     if _MISSING_SERVER_AI_KEY:
         # See _MISSING_SERVER_AI_KEY's definition above for the stderr side
-        # of this -- that's for Andrew; this is for whoever's actually
+        # of this -- that's for the owner; this is for whoever's actually
         # logged in right now, since "every AI button is just silently
         # disabled" with no on-screen explanation is its own broken
         # experience even once the server-side log exists.
@@ -562,7 +562,7 @@ def _render_upgrade_buttons(user, key_prefix: str, already_subscribed: bool = Fa
             st.link_button(_bid_label, bid_url, key=f"{key_prefix}_bid_btn", type="primary")
         except Exception as exc:
             # debug_key_info() used to be shown here via st.caption() --
-            # useful while Andrew was first wiring up Stripe, but it's
+            # useful while the owner was first wiring up Stripe, but it's
             # internal setup diagnostics (masked key/price-ID info), not
             # something a customer hitting a checkout error should ever
             # see. Logged server-side instead; see debug_key_info()'s own

@@ -976,7 +976,7 @@ SUBSCRIPTION_MONTHLY_BID_LIMIT = 4
 # decision. Lowercased/stripped to match how emails are stored (see
 # create_user()).
 #
-# Includes both of Andrew's addresses on purpose: anmolago@hotmail.com is
+# Includes both of the owner's addresses on purpose: anmolago@hotmail.com is
 # the one actually used to log into the live production account (this only
 # had the icloud address before, which meant testing on the real account
 # was quietly burning real paid bids/trial limit). Keeping icloud too in
