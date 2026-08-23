@@ -714,12 +714,12 @@ def _footer_html() -> str:
       <div class="footer-links">
         <a href="{SITE_ORIGIN}/">Home</a>
         <a href="/blog/">Blog</a>
-        <a href="{SITE_ORIGIN}/about.html">About</a>
-        <a href="{SITE_ORIGIN}/why-we-built-civilproposals.html">Why we built CivilProposals</a>
-        <a href="{SITE_ORIGIN}/security.html">Security &amp; Data Handling</a>
-        <a href="{SITE_ORIGIN}/privacy-policy.html">Privacy Policy</a>
-        <a href="{SITE_ORIGIN}/terms-of-service.html">Terms of Service</a>
-        <a href="{SITE_ORIGIN}/contact.html">Contact</a>
+        <a href="{SITE_ORIGIN}/about">About</a>
+        <a href="{SITE_ORIGIN}/why-we-built-civilproposals">Why we built CivilProposals</a>
+        <a href="{SITE_ORIGIN}/security">Security &amp; Data Handling</a>
+        <a href="{SITE_ORIGIN}/privacy-policy">Privacy Policy</a>
+        <a href="{SITE_ORIGIN}/terms-of-service">Terms of Service</a>
+        <a href="{SITE_ORIGIN}/contact">Contact</a>
       </div>
       <div>Copyright &copy; {year} CivilProposals. All rights reserved.</div>
     </div>
@@ -984,7 +984,7 @@ def render_sitemap_xml(posts: list["db.BlogPost"]) -> str:
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>{SITE_ORIGIN}/security.html</loc>
+    <loc>{SITE_ORIGIN}/security</loc>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>
   </url>
@@ -994,45 +994,45 @@ def render_sitemap_xml(posts: list["db.BlogPost"]) -> str:
     <priority>0.5</priority>
   </url>
   <url>
-    <loc>{SITE_ORIGIN}/about.html</loc>
+    <loc>{SITE_ORIGIN}/about</loc>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/about.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+    <xhtml:link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/about" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
     <xhtml:link rel="alternate" hreflang="es" href="{SITE_ORIGIN}/es/about.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
   </url>
   <url>
     <loc>{SITE_ORIGIN}/es/about.html</loc>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/about.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+    <xhtml:link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/about" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
     <xhtml:link rel="alternate" hreflang="es" href="{SITE_ORIGIN}/es/about.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
   </url>
   <url>
-    <loc>{SITE_ORIGIN}/why-we-built-civilproposals.html</loc>
+    <loc>{SITE_ORIGIN}/why-we-built-civilproposals</loc>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/why-we-built-civilproposals.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+    <xhtml:link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/why-we-built-civilproposals" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
     <xhtml:link rel="alternate" hreflang="es" href="{SITE_ORIGIN}/es/why-we-built-civilproposals.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
   </url>
   <url>
     <loc>{SITE_ORIGIN}/es/why-we-built-civilproposals.html</loc>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/why-we-built-civilproposals.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+    <xhtml:link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/why-we-built-civilproposals" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
     <xhtml:link rel="alternate" hreflang="es" href="{SITE_ORIGIN}/es/why-we-built-civilproposals.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
   </url>
   <url>
-    <loc>{SITE_ORIGIN}/contact.html</loc>
+    <loc>{SITE_ORIGIN}/contact</loc>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/contact.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+    <xhtml:link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/contact" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
     <xhtml:link rel="alternate" hreflang="es" href="{SITE_ORIGIN}/es/contact.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
   </url>
   <url>
     <loc>{SITE_ORIGIN}/es/contact.html</loc>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/contact.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
+    <xhtml:link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/contact" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
     <xhtml:link rel="alternate" hreflang="es" href="{SITE_ORIGIN}/es/contact.html" xmlns:xhtml="http://www.w3.org/1999/xhtml"/>
   </url>"""
     ]
