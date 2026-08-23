@@ -792,6 +792,12 @@ def main() -> int:
 
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     os.environ.setdefault("SAAS_MODE", "true")
+    # Part 3 (BRIEF_ISOLATION_AND_PRIVACY.md): db.py/auth.py now refuse to
+    # start when SAAS_MODE is on and DATABASE_URL/APP_SECRET_KEY aren't
+    # set -- this suite runs with SAAS_MODE=true, so it needs both, same
+    # as verify_isolation.py already sets for itself.
+    os.environ.setdefault("DATABASE_URL", "sqlite:////tmp/billing_i18n_test.db")
+    os.environ.setdefault("APP_SECRET_KEY", "test-billing-i18n-key")
 
     from modules import db
     db.init_db()

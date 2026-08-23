@@ -22,6 +22,7 @@ logged-in user) belongs in st.session_state, in app.py / auth.py, not here.
 from __future__ import annotations
 
 import os
+import sys
 import time
 import uuid
 from datetime import datetime, timezone
@@ -32,9 +33,31 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
+# Computed independently here rather than imported from 00_init.py's
+# IS_SAAS_MODE -- db.py is imported directly by test scripts and other
+# modules without app.py/00_init.py ever running, so it can't depend on
+# that module's import-time state. Same env var, same default, same
+# normalisation as 00_init.py's IS_SAAS_MODE, deliberately duplicated.
+_SAAS_MODE_ON = os.environ.get("SAAS_MODE", "true").strip().lower() != "false"
+
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 if not DATABASE_URL:
-    # Local dev fallback -- a file next to this module, gitignored.
+    if _SAAS_MODE_ON:
+        # Part 3 (BRIEF_ISOLATION_AND_PRIVACY.md): the SQLite fallback
+        # below means a hosted deploy that starts without DATABASE_URL set
+        # comes up against an empty, throwaway local database -- nobody's
+        # account exists in it, and the first person to register an
+        # ADMIN_ACCOUNTS email becomes an admin of a database nobody else
+        # can see. Refuse to start instead of doing that silently.
+        sys.exit(
+            "FATAL: DATABASE_URL is not set. SAAS_MODE is on, and without a "
+            "real database a hosted deploy would start against an empty "
+            "local SQLite file instead of the shared production database. "
+            "Set DATABASE_URL (e.g. attach Railway's Postgres plugin) and "
+            "redeploy."
+        )
+    # Local dev fallback -- a file next to this module, gitignored. This is
+    # what the fallback exists for; do not remove it.
     _local_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "civilproposals_local.db")
     DATABASE_URL = f"sqlite:///{_local_path}"
 

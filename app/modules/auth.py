@@ -55,11 +55,33 @@ from sqlalchemy.exc import IntegrityError
 
 from modules import db, email_utils, i18n
 
+# Computed independently here rather than imported from 00_init.py's
+# IS_SAAS_MODE -- that would make this module's import order depend on
+# app.py's page-exec order, and auth.py is imported by test scripts and
+# other modules directly, without 00_init.py ever running. Same env var,
+# same default, same normalisation, deliberately duplicated (see
+# APP_BASE_URL above for the same call).
+_SAAS_MODE_ON = os.environ.get("SAAS_MODE", "true").strip().lower() != "false"
+
 APP_SECRET_KEY = os.environ.get("APP_SECRET_KEY", "").strip()
 if not APP_SECRET_KEY:
-    # Fine for local dev (sessions just won't survive a process restart);
-    # Railway deployment MUST set a real APP_SECRET_KEY env var, or every
-    # deploy invalidates every logged-in user's cookie.
+    if _SAAS_MODE_ON:
+        # Part 3 (BRIEF_ISOLATION_AND_PRIVACY.md): this key signs both the
+        # session cookie (_serializer below) and password-reset tokens
+        # (_reset_serializer below). The fallback string beneath this
+        # branch is a real, public string sitting in this repo -- a hosted
+        # deploy that starts without APP_SECRET_KEY set would silently
+        # issue forgeable sessions to every visitor, with nothing in the
+        # logs to say so. Refuse to start instead of doing that silently.
+        sys.exit(
+            "FATAL: APP_SECRET_KEY is not set. SAAS_MODE is on, and this key "
+            "signs session cookies and password-reset tokens -- starting "
+            "without it would silently issue forgeable sessions. Set "
+            "APP_SECRET_KEY (e.g. in Railway's Variables tab) and redeploy."
+        )
+    # Local/desktop prototype (SAAS_MODE=false): fine to fall back --
+    # sessions just won't survive a process restart. This is what the
+    # fallback exists for; do not remove it.
     APP_SECRET_KEY = "dev-only-insecure-secret-change-me"
 
 # Same default/behaviour as billing.APP_BASE_URL -- duplicated rather than

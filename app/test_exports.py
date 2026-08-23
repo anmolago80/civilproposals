@@ -1414,6 +1414,13 @@ def check_methodology_label_containment(failures: list[str]) -> None:
 
 def main() -> int:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    # Part 3 (BRIEF_ISOLATION_AND_PRIVACY.md): db.py now refuses to start
+    # when SAAS_MODE is on (the default) and DATABASE_URL isn't set. This
+    # suite never touches multi-tenant concerns -- it just needs *a*
+    # database for whatever export path transitively imports db.py -- so
+    # give it a throwaway local one rather than letting it default into
+    # SAAS_MODE's production expectations.
+    os.environ.setdefault("SAAS_MODE", "false")
     out_dir = None
     if "--out" in sys.argv:
         out_dir = sys.argv[sys.argv.index("--out") + 1]

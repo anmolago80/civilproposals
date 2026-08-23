@@ -899,6 +899,12 @@ def test_fee_prepopulation(failures: list[str]) -> None:
 
 def main() -> int:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    # Part 3 (BRIEF_ISOLATION_AND_PRIVACY.md): db.py now refuses to start
+    # when SAAS_MODE is on (the default) and DATABASE_URL isn't set. This
+    # suite tests resourcing/export wiring, not multi-tenant SaaS
+    # concerns, so give it the local-mode fallback rather than SAAS_MODE's
+    # production expectations.
+    os.environ.setdefault("SAAS_MODE", "false")
     failures: list[str] = []
 
     test_schedule_filler_reads_real_quals(failures)
