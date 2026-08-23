@@ -8,6 +8,7 @@
 
 # One-off fix bundles and scratch notes -- keep these out of the deployed repo.
 *.zip
+*.bak
 push_commands*.txt
 
 # Local scratch/recycle area (files awaiting manual deletion on Windows).

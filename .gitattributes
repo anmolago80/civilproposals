@@ -1,0 +1,35 @@
+# Normalise line endings so every text file is stored as LF in the repo
+# and converted on checkout according to each machine's own git config --
+# without this, files added/edited from different OSes (this repo is
+# worked on from both Windows and Linux environments) drift between CRLF
+# and LF with nothing to reconcile them, and `git status`/`git diff` fill
+# up with pure whitespace noise that hides real changes.
+* text=auto
+
+# Binary assets -- never run through line-ending conversion, and diffed
+# as opaque blobs rather than (meaninglessly) as text.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.eot   binary
+*.mp4   binary
+*.mp3   binary
+*.wav   binary
+*.pdf   binary
+*.zip   binary
+*.docx  binary
+*.pptx  binary
+*.xlsx  binary
+*.doc   binary
+*.ppt   binary
+*.xls   binary
+*.sqlite     binary
+*.sqlite-wal binary
+*.sqlite-shm binary
