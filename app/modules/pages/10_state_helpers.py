@@ -1495,7 +1495,7 @@ def _ensure_photo_ids() -> None:
     any photo currently filed under their name.
 
     Both photo dicts were keyed by a name the user can edit, so fixing a
-    typo in "Mat Willliams" orphaned his headshot: it stayed in the dict
+    typo in "John Carrter" orphaned his headshot: it stayed in the dict
     under the old spelling and just stopped appearing, with nothing to
     explain why. Ids are minted here on first sight -- including for
     projects loaded from a file saved before this existed -- and the photo
@@ -2045,8 +2045,8 @@ def _render_resource_rows(kind: str, known_names: list) -> None:
     in place.
 
     For 'discipline' rows only, a lead can also carry any number of support
-    members underneath it (e.g. "Ryan Swagemakers" added under the "Structural"
-    lead, "Mat Williams") -- each with their own free-text title for this
+    members underneath it (e.g. "Peter Jones" added under the "Structural"
+    lead, "John Carter") -- each with their own free-text title for this
     project (e.g. "Bridge Engineer"), since a support member's title is rarely
     just the discipline name. Support rows always render immediately after
     their lead (see resourcing.normalize_plan_disciplines, which keeps the plan

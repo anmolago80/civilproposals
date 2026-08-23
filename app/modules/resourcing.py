@@ -128,7 +128,7 @@ class ResourceAssignment(BaseModel):
     # A discipline can carry more than one person: exactly one lead
     # (is_lead=True) plus any number of support rows (is_lead=False) sharing
     # the same `slot`, added under that lead in the Team & Resourcing tab
-    # (e.g. "Ryan Swagemakers" added under the "Structural" lead). custom_title
+    # (e.g. "Peter Jones" added under the "Structural" lead). custom_title
     # is ONLY used for a support row -- the user's own free-text label for
     # that person's position on the job (e.g. "Bridge Engineer"), since a
     # support member's title is rarely just the discipline name. A lead's
@@ -468,8 +468,8 @@ def letter_team_entries(plan: list) -> list[dict]:
     same people and the same "include in proposal" filter as Large Scope's
     Key Personnel profiles (firm leadership, then discipline leads --
     personnel_profile_order), but with each discipline's support members
-    (ResourceAssignment.custom_title -- e.g. "Ryan Swagemakers" added under
-    the "Structural" lead, "Mat Williams") listed directly under their own
+    (ResourceAssignment.custom_title -- e.g. "Peter Jones" added under
+    the "Structural" lead, "John Carter") listed directly under their own
     lead ("indent": True) instead of flattened into one list. This is what
     makes the nesting show up as indented entries in the Small Scope pack's
     plain-text team list, without the pack needing an org chart image of its
@@ -716,7 +716,7 @@ def names_from_filenames(filenames: list[str] | None) -> list[str]:
     """
     Derive candidate person names from uploaded CV filenames -- an instant,
     no-AI way to populate the resourcing dropdowns, since CV files are almost
-    always named after the person (e.g. "Andres Moreno - Bridge CV.docx").
+    always named after the person (e.g. "John Doe - Bridge CV.docx").
 
     Many firms' CV filenames carry more than just the name -- a project name,
     a date, a version tag -- usually separated from "Firstname_Lastname" by a
@@ -725,7 +725,7 @@ def names_from_filenames(filenames: list[str] | None) -> list[str]:
     first two are used as the name and everything from the third segment
     onward is discarded -- otherwise a filename like that produces the name
     "David Law North Johnston" instead of "David Law". Filenames with no
-    underscore (e.g. "Andres Moreno - Bridge CV.docx") fall back to the
+    underscore (e.g. "John Doe - Bridge CV.docx") fall back to the
     previous word-based cleanup (strip noise words, cap at 4 words).
 
     Strips common noise words ("CV", "Resume", "Final", ...) and applies
@@ -796,7 +796,7 @@ def normalize_name_key(name: str) -> str:
     this app -- a filename-derived name (mechanically built from
     underscore-separated segments) vs. an AI-read name (reproducing however
     the CV itself writes it) frequently differ only in a hyphen vs. a space
-    (e.g. "Andres Moreno Lara" vs. "Andres Moreno-Lara") or in extra
+    (e.g. "John Doe Miller" vs. "John Doe-Miller") or in extra
     whitespace. Without normalising before comparing, those come out as two
     different "people" -- duplicated in every name dropdown, and (worse)
     silently splitting one real person's profile data across two identities
@@ -819,7 +819,7 @@ def dedupe_names(names: list[str]) -> list[str]:
     """
     Clean a merged pool of candidate names: de-duplication that's tolerant of
     hyphen/space/case variants of the same name (see normalize_name_key --
-    "Andres Moreno Lara" and "Andres Moreno-Lara" collapse to one entry, not
+    "John Doe Miller" and "John Doe-Miller" collapse to one entry, not
     two), then collapse a bare first-name into its fuller form when there's
     exactly one match (e.g. drop "David" when "David Smith" is also present,
     but keep a bare "David" if two "David ..." people exist, since it's then
