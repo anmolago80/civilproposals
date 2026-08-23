@@ -84,6 +84,13 @@ def _check_hostile(label: str, out: str, failures: list[str]) -> None:
 
 def main() -> int:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    # Part 3 (BRIEF_ISOLATION_AND_PRIVACY.md) / Round 6 Part 2: db.py now
+    # refuses to start when SAAS_MODE is on (the default) and DATABASE_URL
+    # isn't set. This suite tests HTML sanitisation, not multi-tenant SaaS
+    # concerns, so give it the local-mode fallback rather than SAAS_MODE's
+    # production expectations -- same fix already applied to
+    # test_exports.py and test_batch1_wiring.py.
+    os.environ.setdefault("SAAS_MODE", "false")
     from modules import blog
 
     failures: list[str] = []
