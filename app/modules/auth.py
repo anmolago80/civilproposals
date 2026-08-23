@@ -635,6 +635,38 @@ def current_user() -> db.User | None:
     return user
 
 
+# Session keys that must survive a wipe: auth/cookie bookkeeping (so the
+# write/clear the caller is about to do still lands) and the UI language
+# (_lang, modules/i18n.py) -- switching accounts, or logging out, should
+# not also reset someone back to English mid-session. Everything else is
+# either project content (tender_extracted, drafts, company_material_files,
+# returnable_schedule_files, project_photo_bytes, project_name, ...) or a
+# cache derived from the previous account (_firm_profile_cache,
+# _firm_rate_card_cache) -- all of it must go, or it silently becomes
+# visible to -- and in _maybe_autosave()'s case, gets WRITTEN under -- the
+# next person to use this browser tab. See BRIEF_ISOLATION_AND_PRIVACY.md
+# Part 2 for the concrete scenario this closes.
+_SESSION_KEYS_SURVIVING_ACCOUNT_SWITCH = frozenset({
+    "_auth_user_id", "_cookie_write_pending", "_cookie_clear_pending", "_lang",
+})
+
+
+def wipe_session_for_account_switch() -> None:
+    """Clear every st.session_state key except the ones above. Called from
+    log_in() (switching to a DIFFERENT account in the same browser tab) and
+    log_out() below, and as a defense-in-depth backstop from
+    10_state_helpers.py's _init_state() (re-checked on every rerun, in case
+    some other path ever sets _auth_user_id without going through log_in()).
+
+    Not exported as a private name (no leading underscore) because
+    _init_state() -- a different "module" only in the sense that app.py
+    execs it in the same shared namespace, per that file's own docstring --
+    calls this from outside auth.py."""
+    for key in list(st.session_state.keys()):
+        if key not in _SESSION_KEYS_SURVIVING_ACCOUNT_SWITCH:
+            del st.session_state[key]
+
+
 def log_in(user: db.User) -> None:
     # Deliberately NOT calling _set_cookie_token() here. log_in() is always
     # called from a form-submit handler that immediately follows with
@@ -650,7 +682,23 @@ def log_in(user: db.User) -> None:
     # never actually fixed anything: there was nothing to read. Setting a
     # flag here and writing the cookie on the *next* run (see
     # current_user() above) sidesteps the race instead of racing it.
+    #
+    # Part 2 (BRIEF_ISOLATION_AND_PRIVACY.md): if someone was already
+    # logged in as a DIFFERENT account in this same browser tab, wipe
+    # every trace of their session before adopting the new identity --
+    # otherwise the incoming account inherits the previous one's
+    # in-memory project data (and _maybe_autosave() would go on to write
+    # it under the new account's user_id on the very next tick). The
+    # normal flow already goes through log_out() first, which does the
+    # same wipe -- this is the belt-and-braces case where log_in() fires
+    # without an explicit prior log_out() in this session.
+    _prior_id = st.session_state.get("_auth_user_id")
+    if _prior_id is not None and _prior_id != user.id:
+        wipe_session_for_account_switch()
     st.session_state["_auth_user_id"] = user.id
+    # Stamped so _init_state()'s defense-in-depth check (10_state_helpers.py)
+    # has something correct to compare against from this run onward.
+    st.session_state["_state_owner_id"] = user.id
     st.session_state["_cookie_write_pending"] = True
     # A fresh, successful login always wins over a prior logout in this same
     # browser session -- clear the marker that makes current_user() distrust
@@ -664,6 +712,14 @@ def log_in(user: db.User) -> None:
 
 
 def log_out() -> None:
+    # Part 2 (BRIEF_ISOLATION_AND_PRIVACY.md): wipe every trace of this
+    # account's session the moment someone logs out, not only when the
+    # next person logs in -- the tab must already be clean if it just
+    # sits at the login screen for a while, or if whatever runs next
+    # never calls log_in() at all (e.g. someone abandons the login form).
+    # Done before the pops below so wipe_session_for_account_switch()'s
+    # own preserve-list doesn't need special-casing around them.
+    wipe_session_for_account_switch()
     st.session_state.pop("_auth_user_id", None)
     st.session_state.pop("_cookie_write_pending", None)
     # Same reasoning as log_in() above, in reverse: log_out() is always

@@ -17,6 +17,25 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 
 def _init_state():
+    # Part 2 (BRIEF_ISOLATION_AND_PRIVACY.md): defense in depth alongside
+    # auth.log_in()/log_out()'s own explicit wipes -- this runs on every
+    # single rerun (this whole function is called once per script
+    # execution, unconditionally, below), so if some future code path ever
+    # sets _auth_user_id without going through log_in()/log_out(), this is
+    # the backstop that stops one account's session data (and derived
+    # caches -- _firm_profile_cache, _firm_rate_card_cache) from silently
+    # staying visible to a different account in the same browser tab.
+    # Gated on current_user (see 00_init.py) being real: in local/desktop
+    # mode (SAAS_MODE off) current_user is always None and there is no
+    # multi-account concept at all, so this must never fire there --
+    # exactly the existing (IS_SAAS_MODE and current_user) pattern
+    # _firm_profile() below already uses for the same reason. In ordinary
+    # SaaS use current_user.id and _state_owner_id already agree (log_in()
+    # stamps the latter the moment it sets the former), so this comparison
+    # is a no-op on nearly every rerun -- it should not fire in ordinary use.
+    if current_user is not None and st.session_state.get("_state_owner_id") != current_user.id:  # noqa: F821
+        auth.wipe_session_for_account_switch()
+        st.session_state["_state_owner_id"] = current_user.id  # noqa: F821
     defaults = {
         "project_name": "", "client_name": "", "tender_name": "",
         "submission_date_input": "", "bidder_name": "", "proposal_theme": "Corporate",
