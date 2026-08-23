@@ -2307,11 +2307,27 @@ def _maybe_autosave() -> None:
             st.session_state._last_autosave_ts = now
             st.session_state._last_autosave_path = slug
             st.session_state._last_autosave_error = ""
-        else:
+        elif not IS_SAAS_MODE:
             path = local_project_store.save_local(project_id, blob)
             st.session_state._last_autosave_ts = now
             st.session_state._last_autosave_path = path
             st.session_state._last_autosave_error = ""
+        else:
+            # Part 4c (BRIEF_ISOLATION_AND_PRIVACY.md): IS_SAAS_MODE is on
+            # but there's no current_user -- unreachable today (every call
+            # site guards on the same condition, and require_login()
+            # st.stops before this can run without one), but the fallback
+            # this replaces silently wrote into local_project_store's
+            # shared server-disk folder -- exactly the cross-account leak
+            # cloud_project_store.py's docstring exists to prevent. Raising
+            # here lands in the except block below, which surfaces it as a
+            # normal (visible, retried-next-run) autosave error instead of
+            # a silent write into that shared bucket.
+            raise RuntimeError(
+                "_maybe_autosave(): SAAS_MODE is on but there is no "
+                "current_user -- refusing to fall back to the shared "
+                "local project store."
+            )
         st.session_state["_last_autosave_hash"] = content_hash
     except Exception as exc:
         # Auto-save is a convenience, not a step the user is waiting on -- a failure here

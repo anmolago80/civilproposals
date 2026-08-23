@@ -703,27 +703,39 @@ def admin_stats() -> dict:
     }
 
 
-def project_ai_cost(project_key: str) -> dict:
+def project_ai_cost(project_key: str, user_id: str | None = None) -> dict:
     """Cost rollup for ONE project -- used to show a per-bid cost figure.
     Returns {"calls", "cost_usd", "input_tokens", "output_tokens",
-    "unpriced_calls"}."""
+    "unpriced_calls"}.
+
+    Part 4a (BRIEF_ISOLATION_AND_PRIVACY.md): project_key alone is not
+    unique across accounts -- two accounts whose project name, tender
+    name, client name and brief hash all collide produce the same key.
+    Nothing leaks today because the only caller (ai_interface.py's
+    best-effort cost-logging path, never shown to a customer) always has a
+    user_id in its usage context and now always passes it -- but without
+    this filter, that collision would blend two accounts' AI spend
+    together in the figure. user_id is optional (not every AiCallLog row
+    has one -- see the column's own comment) so a caller that genuinely
+    wants the project-wide total across all attribution can still get it
+    by omitting it."""
     project_key = (project_key or "").strip()
+    user_id = (user_id or "").strip() or None
     with get_session() as s:
-        row = (
-            s.query(
-                func.count(AiCallLog.id),
-                func.coalesce(func.sum(AiCallLog.estimated_cost_usd), 0.0),
-                func.coalesce(func.sum(AiCallLog.input_tokens), 0),
-                func.coalesce(func.sum(AiCallLog.output_tokens), 0),
-            )
-            .filter(AiCallLog.project_key == project_key)
-            .first()
+        row_query = s.query(
+            func.count(AiCallLog.id),
+            func.coalesce(func.sum(AiCallLog.estimated_cost_usd), 0.0),
+            func.coalesce(func.sum(AiCallLog.input_tokens), 0),
+            func.coalesce(func.sum(AiCallLog.output_tokens), 0),
+        ).filter(AiCallLog.project_key == project_key)
+        unpriced_query = s.query(func.count(AiCallLog.id)).filter(
+            AiCallLog.project_key == project_key, AiCallLog.estimated_cost_usd.is_(None)
         )
-        unpriced = (
-            s.query(func.count(AiCallLog.id))
-            .filter(AiCallLog.project_key == project_key, AiCallLog.estimated_cost_usd.is_(None))
-            .scalar() or 0
-        )
+        if user_id is not None:
+            row_query = row_query.filter(AiCallLog.user_id == user_id)
+            unpriced_query = unpriced_query.filter(AiCallLog.user_id == user_id)
+        row = row_query.first()
+        unpriced = unpriced_query.scalar() or 0
     return {
         "calls": int(row[0] or 0),
         "cost_usd": float(row[1] or 0.0),

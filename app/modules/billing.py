@@ -231,6 +231,20 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
     if not user_id:
         return None, None
 
+    # Part 4b (BRIEF_ISOLATION_AND_PRIVACY.md): never hand back a User
+    # object that doesn't belong to whoever is actually making this
+    # request. Every branch below only ever ACTS on user_id -- money is
+    # always credited to client_reference_id, never to whoever happens to
+    # be looking at the response -- so nothing is stolen without this
+    # check. But returning a foreign account's ORM object into the
+    # caller's request is a hazard waiting for a future call site that
+    # (unlike 00_init.py today, which only does a truthiness check on it)
+    # does more with the return value.
+    from modules import auth
+    _current = auth.current_user()
+    if _current is None or _current.id != user_id:
+        return None, None
+
     with db.get_session() as s:
         already = s.query(db.ProcessedCheckoutSession).filter(
             db.ProcessedCheckoutSession.session_id == session_id,

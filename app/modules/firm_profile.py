@@ -28,6 +28,7 @@ or it is absent.
 from __future__ import annotations
 
 import json
+import os
 
 from modules import db
 
@@ -47,9 +48,29 @@ INSURANCE_FIELDS = ["type", "insurer", "policy_no", "cover", "expiry"]
 # one fixed key stands in for the account.
 LOCAL_USER_ID = "__local__"
 
+# Computed independently rather than imported from 00_init.py's
+# IS_SAAS_MODE -- same reasoning as auth.py/db.py's own copies of this
+# check (Part 3, BRIEF_ISOLATION_AND_PRIVACY.md): this module is imported
+# directly by test scripts without app.py ever running.
+_SAAS_MODE_ON = os.environ.get("SAAS_MODE", "true").strip().lower() != "false"
+
 
 def _key(user_id: str | None) -> str:
-    return (user_id or "").strip() or LOCAL_USER_ID
+    """Part 4c (BRIEF_ISOLATION_AND_PRIVACY.md): a falsy user_id used to
+    collapse to LOCAL_USER_ID unconditionally -- fine in local/desktop
+    mode (single account, single shared row, by design), but in SaaS mode
+    that would mean every account that somehow reached this with no
+    user_id shared ONE firm profile. Unreachable today (every call site
+    guards on IS_SAAS_MODE and current_user, and require_login() st.stops
+    first) -- raising instead of collapsing means a future refactor that
+    removes one of those guards fails loudly here instead of quietly
+    recreating the shared-bucket leak."""
+    key = (user_id or "").strip()
+    if key:
+        return key
+    if _SAAS_MODE_ON:
+        raise ValueError("firm_profile: no user_id given while SAAS_MODE is on")
+    return LOCAL_USER_ID
 
 
 def _loads(raw, fallback):

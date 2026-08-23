@@ -313,6 +313,19 @@ def run() -> int:
     check("B's account AI cost is 0 despite A's spend",
           db.account_ai_cost(b.id) == 0.0, repr(db.account_ai_cost(b.id)))
 
+    # Part 4a (BRIEF_ISOLATION_AND_PRIVACY.md): project_ai_cost() used to
+    # filter on project_key alone -- two accounts whose project_key
+    # collided would have their AI spend blended in this figure. A has
+    # real logged spend against A_PROJECT_KEY (seeded above); B has never
+    # touched that key at all.
+    check("[sanity] A's own project_ai_cost for A_PROJECT_KEY is nonzero",
+          db.project_ai_cost(A_PROJECT_KEY, a.id)["cost_usd"] > 0,
+          repr(db.project_ai_cost(A_PROJECT_KEY, a.id)))
+    check("B's project_ai_cost for A's exact project_key is 0",
+          db.project_ai_cost(A_PROJECT_KEY, b.id)
+          == {"calls": 0, "cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0, "unpriced_calls": 0},
+          repr(db.project_ai_cost(A_PROJECT_KEY, b.id)))
+
     # 8. Fee history (the firm's own pricing benchmarks)
     check("B has no fee snapshots", fee_history.snapshot_count(b.id) == 0)
     check("B gets no benchmark from A's 5 bids",
@@ -382,10 +395,12 @@ def run() -> int:
               cloud_project_store.list_cloud_projects(blank) == [])
         check(f"fee_history.snapshot_count({blank!r}) is 0",
               fee_history.snapshot_count(blank) == 0)
-    blank_profile = firm_profile.get_profile("")
-    check("firm_profile.get_profile('') is not A's profile",
-          blank_profile is None or blank_profile.user_id == firm_profile.LOCAL_USER_ID,
-          repr(getattr(blank_profile, "company_name", None)))
+    # Part 4c (BRIEF_ISOLATION_AND_PRIVACY.md): firm_profile._key() used to
+    # collapse a blank user_id to the shared LOCAL_USER_ID bucket even in
+    # SaaS mode -- it now refuses instead, since this test runs with
+    # SAAS_MODE=true (set at the top of this file).
+    check_raises("firm_profile.get_profile('') refuses rather than returning a shared profile",
+                 lambda: firm_profile.get_profile(""), ValueError)
 
     # 12. No user-scoped table leaks rows to B by any global read
     with db.get_session() as s:

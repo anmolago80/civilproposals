@@ -153,7 +153,7 @@ def _record_usage(provider: str, model: str,
         # succeeded).
         if _project_key:
             from modules import limits
-            _project_cost = db.project_ai_cost(_project_key)
+            _project_cost = db.project_ai_cost(_project_key, ctx.get("user_id"))
             limits.maybe_alert_admin_on_project_cost(
                 _project_key, ctx.get("project_name", ""), _project_cost.get("cost_usd", 0.0),
             )

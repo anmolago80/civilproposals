@@ -470,8 +470,20 @@ if IS_SAAS_MODE:
 def _lib_user_id() -> str:
     """User id to scope the Proposal Library / Project Reference Library to.
     'local' is a fixed placeholder used only when SAAS_MODE is off
-    (single-user prototype)."""
-    return current_user.id if IS_SAAS_MODE and current_user else "local"
+    (single-user prototype).
+
+    Part 4c (BRIEF_ISOLATION_AND_PRIVACY.md): raises instead of falling
+    back to 'local' when SAAS_MODE is on but there's no current_user.
+    Unreachable today -- require_login() st.stops before this is ever
+    called without one -- but a silent 'local' fallback here would put
+    every account that somehow reached this into the SAME shared library,
+    exactly the leak cloud_project_store.py's docstring exists to
+    prevent."""
+    if IS_SAAS_MODE:
+        if not current_user:
+            raise RuntimeError("_lib_user_id(): SAAS_MODE is on but there is no current_user")
+        return current_user.id
+    return "local"
 
 
 def _get_or_create_checkout_url(user, kind: str, topup_project_key: str | None = None) -> str:
