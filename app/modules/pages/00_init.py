@@ -355,12 +355,22 @@ if IS_SAAS_MODE:
         _checkout_session_id = _qp.get("session_id")
         _checkout_error = None
         try:
-            _checkout_user, _checkout_kind = billing.handle_checkout_redirect(_checkout_session_id)
+            _checkout_result = billing.handle_checkout_redirect(_checkout_session_id)
         except Exception as _exc:
-            _checkout_user, _checkout_kind = None, None
+            _checkout_result = billing.CheckoutRedirectResult()
             _checkout_error = str(_exc)
 
-        if _checkout_user is not None:
+        # Fix Brief Round 6, Part 1: `.applied` and `.user` are DELIBERATELY
+        # separate now -- `.applied` says whether the purchase actually
+        # landed in the database (true even when nobody, or the wrong
+        # somebody, is logged in in this browser tab); `.user` is only ever
+        # set when auth.current_user() is confirmed to be that exact
+        # account. The three outcomes below are NOT the same "was this
+        # session_id genuinely unpaid" branch collapsed into one -- clearing
+        # the query params is only ever safe when `.applied` is False, since
+        # that's the only case where there is nothing left to retry or
+        # resolve by reloading this same URL.
+        if _checkout_result.user is not None:
             st.query_params.clear()
             # Round 3, Part 7e: a project pass top-up gets its own specific
             # confirmation (passes_topup_success was defined in the i18n
@@ -368,7 +378,7 @@ if IS_SAAS_MODE:
             # generic "payment confirmed" toast every other purchase kind
             # still gets -- see billing.handle_checkout_redirect()'s
             # purchase_kind return value.
-            if _checkout_kind == "topup":
+            if _checkout_result.purchase_kind == "topup":
                 st.toast(i18n.t("passes_topup_success"), icon="✅")
             else:
                 st.toast(i18n.t("init_payment_confirmed_toast"), icon="✅")
@@ -378,11 +388,26 @@ if IS_SAAS_MODE:
             # retries, and tell the customer exactly what to do if it keeps
             # happening instead of leaving them with no signal at all.
             st.error(i18n.t("init_checkout_confirm_failed_error", session_id=_checkout_session_id))
+        elif _checkout_result.applied:
+            # The purchase WAS applied to client_reference_id -- Stripe was
+            # charged and the credit/subscription is already committed --
+            # but this browser tab isn't (or isn't yet, or isn't anymore)
+            # signed in as that account, so handle_checkout_redirect()
+            # correctly withheld the User object (see its docstring). This
+            # is money that moved, not a failed/unpaid session: the query
+            # params MUST survive so that once the right account is logged
+            # in, this same URL resolves it (off the now-idempotent
+            # ProcessedCheckoutSession row) instead of the retry path being
+            # lost. require_login() below will show the login/signup screen
+            # if nobody's logged in yet; this message covers both that case
+            # and "the wrong account happens to be logged in right now".
+            st.info(i18n.t("init_checkout_applied_unconfirmed_info"))
         else:
-            # handle_checkout_redirect() returned None without raising --
-            # e.g. the Checkout Session genuinely wasn't paid (someone
-            # revisiting a cancelled/expired checkout link). Nothing to
-            # apply, nothing to warn about -- just drop the query params.
+            # handle_checkout_redirect() returned applied=False without
+            # raising -- e.g. the Checkout Session genuinely wasn't paid
+            # (someone revisiting a cancelled/expired checkout link).
+            # Nothing was applied, nothing to warn about, nothing to retry
+            # -- safe to drop the query params.
             st.query_params.clear()
 
     # Stripe's cancel_url (see billing.create_checkout_session /

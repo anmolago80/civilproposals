@@ -209,6 +209,9 @@ STRINGS: dict[str, str] = {
         "fallando, escribe a hello@civilproposals.com con esta referencia para que podamos "
         "aplicarlo manualmente: `{session_id}`"
     ),
+    "init_checkout_applied_unconfirmed_info": (
+        "Tu pago se realizó correctamente. Inicia sesión con la cuenta con la que pagaste para verlo aplicado."
+    ),
     "init_checkout_cancelled_toast": "Pago cancelado -- no se realizó ningún cargo.",
     "init_ai_unavailable_error": (
         "Las funciones de IA no están disponibles temporalmente -- ya lo sabemos y lo estamos "

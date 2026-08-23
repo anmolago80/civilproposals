@@ -236,6 +236,15 @@ STRINGS: dict[str, str] = {
         "yet. If you were just charged, please refresh this page to retry. If it keeps failing, "
         "email hello@civilproposals.com with this reference so we can apply it manually: `{session_id}`"
     ),
+    # Fix Brief Round 6, Part 1: the payment WAS applied here (Stripe was
+    # charged and the credit/subscription is already in the database) --
+    # this is not an error and nothing needs retrying. It just means this
+    # browser tab isn't currently signed in as the account the payment
+    # belongs to, so it can't be shown yet. Log in as that account and
+    # this same page reload will resolve it.
+    "init_checkout_applied_unconfirmed_info": (
+        "Your payment went through. Log in with the account you paid with to see it applied."
+    ),
     "init_checkout_cancelled_toast": "Checkout cancelled -- no charge was made.",
     "init_ai_unavailable_error": (
         "AI features are temporarily unavailable -- we're aware and looking into it. Nothing "

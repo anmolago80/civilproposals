@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import os
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import stripe
@@ -174,7 +175,31 @@ def create_bid_checkout_session(user: db.User, topup_project_key: str | None = N
     return session.url
 
 
-def handle_checkout_redirect(session_id: str) -> db.User | None:
+@dataclass
+class CheckoutRedirectResult:
+    """Return value of handle_checkout_redirect().
+
+    `applied` is True whenever the purchase was actually applied to
+    client_reference_id in the database -- including a replay of an
+    already-applied session, and including the case where nobody (or the
+    wrong somebody) is logged in in THIS browser session. It says nothing
+    about who is looking at the result; it says whether the money moved.
+
+    `user`/`purchase_kind` are populated ONLY when auth.current_user() in
+    this same request is confirmed to be the exact account the purchase
+    was applied to -- see the Part 4b comment below for why. When
+    `applied` is True but `user` is None, the caller must NOT treat this
+    as "nothing happened": the purchase went through, there's just nobody
+    here it can be safely shown to. Keep the session_id in the URL in
+    that case (see 00_init.py) so the next matching-session load of this
+    same redirect resolves `user` for real, off the now-idempotent
+    ProcessedCheckoutSession row, instead of losing the retry path."""
+    user: "db.User | None" = None
+    purchase_kind: "str | None" = None
+    applied: bool = False
+
+
+def handle_checkout_redirect(session_id: str) -> CheckoutRedirectResult:
     """Call this when the app loads with ?checkout=success&session_id=...
     in the URL. Verifies the session with Stripe directly (never trust the
     query string alone) and updates the user's row. Handles BOTH checkout
@@ -190,12 +215,14 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
     silently re-running the subscription branch). A Stripe API error (network
     issue, Stripe outage) is allowed to raise here rather than being caught
     -- see app.py's caller, which distinguishes "genuinely wasn't paid"
-    (returns None, not an error) from "couldn't verify" (raises, shown to
-    the customer with a retry path) on purpose; swallowing errors in here
-    would make that distinction impossible for the caller to make.
+    (CheckoutRedirectResult(applied=False), not an error) from "couldn't
+    verify" (raises, shown to the customer with a retry path) on purpose;
+    swallowing errors in here would make that distinction impossible for
+    the caller to make.
 
-    Returns (user, purchase_kind), or (None, None) if the session wasn't
-    actually paid or didn't carry a recognisable user id. purchase_kind is
+    Returns a CheckoutRedirectResult (see its own docstring for the
+    applied/user split -- READ IT before changing this function; it's the
+    whole point of the Round 6 fix below). purchase_kind, when set, is
     "topup" when this payment specifically added passes to an existing
     project (see the _topup_project_key branch below) and None for every
     other outcome, INCLUDING a topup checkout that fell back to a plain bid
@@ -207,9 +234,30 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
     only distinguishes "subscription"/"bid" and drives the receipt EMAIL's
     wording) -- widening _receipt_kind itself to a third value would also
     change what the topup receipt email says, which is a separate, unnamed
-    change this pass doesn't make."""
+    change this pass doesn't make.
+
+    FIX BRIEF ROUND 6, Part 1: the Part 4b guard used to live right here,
+    before any of the money-applying work below, and returned early on a
+    session-identity mismatch -- which meant a customer whose browser had
+    no valid session cookie at the exact moment Stripe redirected them
+    back (uncommon, but a real possibility -- a fresh tab, a cleared
+    cookie jar, a corporate proxy that strips it) was charged by Stripe
+    and got NOTHING: no subscription activated, no bid credited, and
+    (because 00_init.py's caller took the "wasn't paid" branch and
+    cleared the query params) no session_id left in the URL to retry
+    with. This module is deliberately webhook-free (see the module
+    docstring) -- handle_checkout_redirect() is the ONLY code path that
+    ever applies a Checkout Session, so returning early here didn't just
+    skip showing a confirmation, it skipped the purchase itself, with no
+    second chance. Money must never depend on who happens to be logged in
+    at the exact millisecond a redirect lands; it must depend only on
+    client_reference_id, which is what actually got charged. The identity
+    check still happens -- Part 4b's real goal, never leaking a foreign
+    User object into the wrong request, is still met -- it just happens
+    at the RETURN, after the purchase is applied, via
+    CheckoutRedirectResult.applied vs .user, not before it."""
     if not stripe.api_key or not session_id:
-        return None, None
+        return CheckoutRedirectResult()
 
     session = stripe.checkout.Session.retrieve(session_id)
     # payment_status is the only field that actually says money changed
@@ -225,25 +273,22 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
     # correct and sufficient check; status is irrelevant to "was this
     # actually paid".
     if session.get("payment_status") not in ("paid", "no_payment_required"):
-        return None, None
+        return CheckoutRedirectResult()
 
     user_id = session.get("client_reference_id")
     if not user_id:
-        return None, None
+        return CheckoutRedirectResult()
 
-    # Part 4b (BRIEF_ISOLATION_AND_PRIVACY.md): never hand back a User
-    # object that doesn't belong to whoever is actually making this
-    # request. Every branch below only ever ACTS on user_id -- money is
-    # always credited to client_reference_id, never to whoever happens to
-    # be looking at the response -- so nothing is stolen without this
-    # check. But returning a foreign account's ORM object into the
-    # caller's request is a hazard waiting for a future call site that
-    # (unlike 00_init.py today, which only does a truthiness check on it)
-    # does more with the return value.
+    # Resolved once, up front, purely to decide what's SAFE TO RETURN --
+    # never used to decide whether to apply the purchase below. See
+    # CheckoutRedirectResult's docstring and the Round 6 note above.
     from modules import auth
-    _current = auth.current_user()
-    if _current is None or _current.id != user_id:
-        return None, None
+    _requesting_user = auth.current_user()
+
+    def _result_for(applied_user_id: str, user_row, purchase_kind) -> CheckoutRedirectResult:
+        if _requesting_user is not None and _requesting_user.id == applied_user_id:
+            return CheckoutRedirectResult(user=user_row, purchase_kind=purchase_kind, applied=True)
+        return CheckoutRedirectResult(user=None, purchase_kind=None, applied=True)
 
     with db.get_session() as s:
         already = s.query(db.ProcessedCheckoutSession).filter(
@@ -256,11 +301,12 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
             # purchase_kind is None here (not re-derived) -- a replay
             # showing the generic toast instead of the specific topup one
             # is a cosmetic difference only, not worth re-querying for.
-            return s.query(db.User).filter(db.User.id == already.user_id).first(), None
+            already_user = s.query(db.User).filter(db.User.id == already.user_id).first()
+            return _result_for(already.user_id, already_user, None)
 
         db_user = s.query(db.User).filter(db.User.id == user_id).first()
         if not db_user:
-            return None, None
+            return CheckoutRedirectResult()
         db_user.stripe_customer_id = session.get("customer") or db_user.stripe_customer_id
         _topup_project_key = ((session.get("metadata") or {}).get("topup_project_key") or "").strip().lower()
         _purchase_kind = None
@@ -318,7 +364,8 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
             # same outcome as the `already` branch above, just discovered a
             # few lines later.
             s.rollback()
-            return s.query(db.User).filter(db.User.id == user_id).first(), None
+            raced_user = s.query(db.User).filter(db.User.id == user_id).first()
+            return _result_for(user_id, raced_user, None)
         s.refresh(db_user)
 
     # Best-effort receipt email -- the purchase itself is already committed
@@ -332,7 +379,7 @@ def handle_checkout_redirect(session_id: str) -> db.User | None:
     except Exception as exc:
         print(f"[purchase_receipt_email] failed for {db_user.email}: {exc}", file=sys.stderr)
 
-    return db_user, _purchase_kind
+    return _result_for(user_id, db_user, _purchase_kind)
 
 
 def refresh_subscription_status(user: db.User) -> db.User:
