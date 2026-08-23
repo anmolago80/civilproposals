@@ -361,9 +361,9 @@ def _match_name_to_cv_file(name: str, cv_files: dict) -> str | None:
     Two passes, both safe against cross-attribution because each resolves to a
     single file (the AI is then only ever shown that one person's own CV).
     Both passes compare names via resourcing.normalize_name_key rather than a
-    plain .lower() -- a filename-derived name ("Andres Moreno Lara", built
+    plain .lower() -- a filename-derived name ("John Doe Miller", built
     mechanically from underscore-separated segments) and an AI-read name
-    (reproducing however the CV itself spells it, e.g. "Andres Moreno-Lara")
+    (reproducing however the CV itself spells it, e.g. "John Doe-Miller")
     are the same real person but differ in a hyphen vs. a space; without
     normalising, that mismatch makes this function report "no match" for a
     person who very much does have a CV on file:

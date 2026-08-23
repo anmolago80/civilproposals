@@ -129,18 +129,18 @@ def build_sample_project() -> dict:
             relevant_projects=["Example River bridge replacement, 2024"],
         ),
         resourcing.ResourceAssignment(
-            slot="Structural", slot_kind="discipline", person_name="Mat Williams",
+            slot="Structural", slot_kind="discipline", person_name="John Carter",
             qualification="MEng (Structural)", rpeq_status="RPEQ 22334",
             years_experience="12 years",
         ),
         # A support member with NO custom title -- must render a red placeholder,
         # never a silent "Team member".
         resourcing.ResourceAssignment(
-            slot="Structural", slot_kind="discipline", person_name="Ryan Swagemakers",
+            slot="Structural", slot_kind="discipline", person_name="Peter Jones",
             is_lead=False, years_experience="4 years",
         ),
         resourcing.ResourceAssignment(
-            slot="Geotechnical", slot_kind="discipline", person_name="Sam Lee",
+            slot="Geotechnical", slot_kind="discipline", person_name="Anna Brown",
             qualification="BSc (Geology)", years_experience="9 years",
         ),
         # Deliberately unassigned -- exports must show this as TBC, not hide it.
@@ -937,9 +937,9 @@ def check_spanish_pptx(failures: list[str]) -> None:
         resourcing.ResourceAssignment(slot="Project Director", slot_kind="management",
                                       person_name="Jane Smith"),
         resourcing.ResourceAssignment(slot="Structural", slot_kind="discipline",
-                                      person_name="Mat Williams", is_lead=True),
+                                      person_name="John Carter", is_lead=True),
         resourcing.ResourceAssignment(slot="Structural", slot_kind="discipline",
-                                      person_name="Ryan Swagemakers", is_lead=False),
+                                      person_name="Peter Jones", is_lead=False),
     ]
 
     for style in ("cards", "columns", "bands", "tree"):
@@ -1023,9 +1023,9 @@ def check_spanish_png_previews(failures: list[str]) -> None:
         resourcing.ResourceAssignment(slot="Project Director", slot_kind="management",
                                       person_name="Jane Smith"),
         resourcing.ResourceAssignment(slot="Structural", slot_kind="discipline",
-                                      person_name="Mat Williams", is_lead=True),
+                                      person_name="John Carter", is_lead=True),
         resourcing.ResourceAssignment(slot="Structural", slot_kind="discipline",
-                                      person_name="Ryan Swagemakers", is_lead=False),
+                                      person_name="Peter Jones", is_lead=False),
     ]
     org_model = org_chart_render.build_model(org_plan, "Cliente Real", "P", "T", language="es")
     for style in org_chart_render.STYLES:

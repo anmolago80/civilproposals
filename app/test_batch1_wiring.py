@@ -41,7 +41,7 @@ def test_schedule_filler_reads_real_quals(failures: list[str]) -> None:
             resourcing.ResourceAssignment(
                 slot="Structural",
                 slot_kind="discipline",
-                person_name="Raj Patel",
+                person_name="David Wilson",
                 qualification="MEng (Structural)",
                 # no RPEQ entered -- must not produce a trailing comma
                 years_experience="9 years",
@@ -52,15 +52,15 @@ def test_schedule_filler_reads_real_quals(failures: list[str]) -> None:
     data = returnable_schedules.build_fill_data(state)
     people = {p["name"]: p for p in data["personnel"]}
 
-    if "Jane Smith" not in people or "Raj Patel" not in people:
+    if "Jane Smith" not in people or "David Wilson" not in people:
         failures.append("[1a] the resourcing plan's people didn't reach the fill data")
         return
     if people["Jane Smith"]["quals"] != "BEng (Civil) (Hons), UQ, 2003, RPEQ 12345":
         failures.append(f"[1a] qualification+RPEQ not joined: {people['Jane Smith']['quals']!r}")
     if people["Jane Smith"]["years"] != "18 years":
         failures.append(f"[1a] years_experience not carried: {people['Jane Smith']['years']!r}")
-    if people["Raj Patel"]["quals"] != "MEng (Structural)":
-        failures.append(f"[1a] blank RPEQ left punctuation behind: {people['Raj Patel']['quals']!r}")
+    if people["David Wilson"]["quals"] != "MEng (Structural)":
+        failures.append(f"[1a] blank RPEQ left punctuation behind: {people['David Wilson']['quals']!r}")
     if people["Jane Smith"]["role"] != "Project Director":
         failures.append("[1a] role no longer resolves from slot/custom_title")
 
@@ -74,7 +74,7 @@ def test_blank_person_still_placeholders(failures: list[str]) -> None:
     state = _State(
         resource_plan=[
             resourcing.ResourceAssignment(
-                slot="Geotechnical", slot_kind="discipline", person_name="Sam Lee",
+                slot="Geotechnical", slot_kind="discipline", person_name="Anna Brown",
             )
         ],
         team_members=[],

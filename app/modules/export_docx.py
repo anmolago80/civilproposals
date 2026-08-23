@@ -490,8 +490,8 @@ def _build_letter_team(doc: Document, resource_plan: list, personnel_photos: dic
     same "include in proposal" ticks as the Large Scope pack's Key Personnel
     profiles -- see resourcing.letter_team_entries -- rather than a separate,
     disconnected team list. A discipline's support members (added under a
-    lead, each with their own custom title -- e.g. "Ryan Swagemakers, Bridge
-    Engineer" under "Mat Williams, Structural") render indented directly
+    lead, each with their own custom title -- e.g. "Peter Jones, Bridge
+    Engineer" under "John Carter, Structural") render indented directly
     under their lead, with a "->" marker, so the reporting relationship shown
     in the app's org chart preview is still visible here as plain text, even
     though this pack doesn't embed the chart image itself."""
