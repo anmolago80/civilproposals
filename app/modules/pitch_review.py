@@ -191,6 +191,26 @@ class PitchQuestions(BaseModel):
     sales_pitch_questions: list[str] = []
 
 
+def _format_evaluation_criteria(analysis) -> str:
+    """Shared by review_pitch and generate_pitch_questions -- both prompt
+    templates carry the same EVALUATION CRITERIA block (PROMPT_TEMPLATE line
+    ~91, QUESTIONS_PROMPT_TEMPLATE line ~138), so the formatting only needs
+    to exist once. generate_pitch_questions used to build its own .format()
+    call without this, and since QUESTIONS_PROMPT_TEMPLATE still has the
+    {evaluation_criteria} placeholder, every "Get sharpening questions"
+    click failed outright with a bare KeyError('evaluation_criteria')."""
+    criteria_lines = []
+    for criterion in (getattr(analysis, "evaluation_criteria", None) or []) if analysis else []:
+        name = (getattr(criterion, "name", "") or "").strip()
+        if not name:
+            continue
+        code = (getattr(criterion, "criterion_code", "") or "").strip()
+        weight = getattr(criterion, "detected_weighting", None)
+        label = f"{code}: {name}" if code else name
+        criteria_lines.append(f"- {label}" + (f" -- {weight:.0f}% of the score" if weight else ""))
+    return "\n".join(criteria_lines) or "- (none extracted yet)"
+
+
 def review_pitch(
     differentiator: str,
     sales_pitch: str,
@@ -216,18 +236,9 @@ def review_pitch(
     project_info = project_info or {}
     project_scope = (getattr(analysis, "project_scope", "") or "").strip() if analysis else ""
     client_objectives = (getattr(analysis, "client_objectives", None) or []) if analysis else []
-    criteria_lines = []
-    for criterion in (getattr(analysis, "evaluation_criteria", None) or []) if analysis else []:
-        name = (getattr(criterion, "name", "") or "").strip()
-        if not name:
-            continue
-        code = (getattr(criterion, "criterion_code", "") or "").strip()
-        weight = getattr(criterion, "detected_weighting", None)
-        label = f"{code}: {name}" if code else name
-        criteria_lines.append(f"- {label}" + (f" -- {weight:.0f}% of the score" if weight else ""))
 
     prompt = PROMPT_TEMPLATE.format(
-        evaluation_criteria="\n".join(criteria_lines) or "- (none extracted yet)",
+        evaluation_criteria=_format_evaluation_criteria(analysis),
         project_name=project_info.get("project_name") or "(not supplied)",
         client_name=project_info.get("client_name") or "(not supplied)",
         project_scope=project_scope or "(not extracted yet)",
@@ -279,6 +290,7 @@ def generate_pitch_questions(
     client_objectives = (getattr(analysis, "client_objectives", None) or []) if analysis else []
 
     prompt = QUESTIONS_PROMPT_TEMPLATE.format(
+        evaluation_criteria=_format_evaluation_criteria(analysis),
         project_name=project_info.get("project_name") or "(not supplied)",
         client_name=project_info.get("client_name") or "(not supplied)",
         project_scope=project_scope or "(not extracted yet)",
