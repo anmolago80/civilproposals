@@ -362,6 +362,19 @@ def _call_anthropic(prompt, system_message, config, max_tokens, temperature) -> 
     client = anthropic.Anthropic(api_key=api_key)
 
     def _create_and_extract(tokens, **kwargs):
+        # `temperature` is dropped here, not passed through: anthropic-sdk-python
+        # 1.x removed it from Messages.create()'s signature entirely (confirmed by
+        # inspecting the installed package -- there is no longer a single
+        # reference to "temperature" anywhere in it), and requirements.txt pins
+        # anthropic>=0.34 with no upper bound, so a fresh build always gets
+        # whatever is newest. Passing it raised a bare TypeError ("unexpected
+        # keyword argument") that _is_temperature_unsupported_error() didn't
+        # recognise (it was written for the API rejecting the value at runtime,
+        # not the SDK rejecting the keyword at call time), so every Anthropic
+        # call failed outright. Silently dropping it here means both old and new
+        # SDK versions work; losing the quality knob is the same acceptable
+        # trade-off _call_with_resilience's own fallback already makes below.
+        kwargs.pop("temperature", None)
         response = client.messages.create(
             model=model, max_tokens=tokens, system=system_message or "",
             messages=[{"role": "user", "content": prompt}], **kwargs,
@@ -606,10 +619,21 @@ def _call_with_resilience(create_and_extract_fn, temperature: float, max_tokens:
 
 def _is_temperature_unsupported_error(exc: Exception) -> bool:
     text = str(exc).lower()
-    return "temperature" in text and (
-        "deprecated" in text or "not supported" in text or "unsupported" in text
-        or "does not support" in text or "unrecognized" in text
-    )
+    if "temperature" not in text:
+        return False
+    if "deprecated" in text or "not supported" in text or "unsupported" in text \
+            or "does not support" in text or "unrecognized" in text:
+        return True
+    # A provider SDK's own method signature rejecting the keyword outright
+    # (a plain Python TypeError -- "...() got an unexpected keyword argument
+    # 'temperature'") is a different failure shape than the API rejecting an
+    # accepted parameter's *value* at runtime, but it calls for the exact same
+    # recovery: drop temperature and retry. This is what should have caught the
+    # anthropic-sdk-python 1.x break (see _call_anthropic) before that call site
+    # was fixed to never send temperature to that provider at all -- kept here
+    # as defense-in-depth against the same class of SDK drift in any of the
+    # other three providers (OpenAI, Azure OpenAI, Gemini) in the future.
+    return isinstance(exc, TypeError) and "unexpected keyword argument" in text
 
 
 def _build_messages(prompt: str, system_message: str | None) -> list[dict]:
