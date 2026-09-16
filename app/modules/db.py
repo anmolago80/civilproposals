@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     create_engine, Column, String, Integer, Float, DateTime, Boolean, LargeBinary,
-    ForeignKey, Text, select, func, UniqueConstraint, inspect, text,
+    ForeignKey, Text, select, func, case, UniqueConstraint, inspect, text,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
@@ -687,6 +687,64 @@ def admin_stats() -> dict:
             .limit(10)
             .all()
         )
+
+        # BRIEF_ADMIN_RECENT_SIGNUPS.md: recent_bids above only ever names
+        # an account AFTER its first Tender Analysis run -- a signed-up-
+        # but-never-run account is otherwise invisible by name here. This
+        # is the 15 newest accounts by creation date, regardless of usage.
+        #
+        # Local import: auth.py imports db at module level, so importing
+        # auth up at this module's top would be a cycle -- this is the
+        # only place in db.py that needs UNLIMITED_ACCOUNTS, so it's
+        # imported here instead.
+        from modules import auth
+        _unlimited = {e.strip().lower() for e in auth.UNLIMITED_ACCOUNTS}
+
+        recent_signup_users = (
+            s.query(User)
+            .order_by(User.created_at.desc())
+            .limit(15)
+            .all()
+        )
+        _signup_ids = [u.id for u in recent_signup_users]
+        # One grouped query for all 15 users' usage rows -- bids_run AND
+        # "has any non-trial row" together via conditional aggregation, so
+        # this stays a single query instead of a second one per check (no
+        # per-user N+1 either way).
+        _usage_by_user: dict[str, tuple[int, int]] = {}
+        if _signup_ids:
+            for _uid, _cnt, _nontrial_cnt in (
+                s.query(
+                    ProposalUsage.user_id,
+                    func.count(ProposalUsage.id),
+                    func.sum(case((ProposalUsage.funded_by != "trial", 1), else_=0)),
+                )
+                .filter(ProposalUsage.user_id.in_(_signup_ids))
+                .group_by(ProposalUsage.user_id)
+                .all()
+            ):
+                _usage_by_user[_uid] = (int(_cnt or 0), int(_nontrial_cnt or 0))
+
+        recent_signups = []
+        for u in recent_signup_users:
+            _bids_run, _nontrial_count = _usage_by_user.get(u.id, (0, 0))
+            _email_norm = (u.email or "").strip().lower()
+            if _email_norm in _unlimited:
+                tier = "unlimited"
+            elif u.subscription_status == "active":
+                tier = "subscribed"
+            elif u.subscription_status == "past_due":
+                tier = "past due"
+            elif (u.bid_credits or 0) > 0 or _nontrial_count > 0:
+                tier = "paid"
+            else:
+                tier = "trial"
+            recent_signups.append({
+                "email": u.email or "",
+                "created": u.created_at,
+                "tier": tier,
+                "bids_run": _bids_run,
+            })
     return {
         "total_users": int(total_users),
         "new_users_30d": int(new_users_30d),
@@ -700,6 +758,7 @@ def admin_stats() -> dict:
             {"project": r[0] or "(unnamed)", "when": r[1], "email": r[2] or ""}
             for r in recent_bids
         ],
+        "recent_signups": recent_signups,
     }
 
 

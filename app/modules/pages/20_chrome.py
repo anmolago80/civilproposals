@@ -243,6 +243,29 @@ with st.sidebar:
                     use_container_width=True, hide_index=True,
                 )
 
+            # BRIEF_ADMIN_RECENT_SIGNUPS.md: recent_bids above only ever
+            # names an account AFTER its first Tender Analysis run -- this
+            # shows WHO signed up, including accounts with 0 bids, which
+            # is otherwise invisible by name here.
+            st.markdown(f"#### {i18n.t('chrome_admin_recent_signups_header')}")
+            if _stats["recent_signups"]:
+                st.dataframe(
+                    [
+                        {
+                            i18n.t("chrome_admin_recent_signups_col_email"): r["email"],
+                            i18n.t("chrome_admin_recent_signups_col_signed_up"): (
+                                r["created"].strftime("%d %b %Y %H:%M") if r["created"] else ""
+                            ),
+                            i18n.t("chrome_admin_recent_signups_col_tier"): r["tier"],
+                            i18n.t("chrome_admin_recent_signups_col_bids_run"): r["bids_run"],
+                        }
+                        for r in _stats["recent_signups"]
+                    ],
+                    use_container_width=True, hide_index=True,
+                )
+            else:
+                st.caption(i18n.t("chrome_admin_recent_signups_empty"))
+
             # Part 2 of the trial-limits/AI-spend-backstop fix brief: the two
             # account-level figures that go with it. accounts_ai_cost_summary()
             # returns raw account fields (subscription_status/bid_credits), not

@@ -1671,4 +1671,14 @@ STRINGS: dict[str, str] = {
         "idioma de la propia interfaz de la app, que es el selector aparte en la barra "
         "lateral."
     ),
+
+    # BRIEF_ADMIN_RECENT_SIGNUPS.md -- diálogo de estadísticas de Admin,
+    # tabla "Altas recientes" (debajo de "Recent bids"): identifica cuentas
+    # por fecha de alta aunque todavía no hayan hecho ninguna oferta.
+    "chrome_admin_recent_signups_header": "Altas recientes",
+    "chrome_admin_recent_signups_col_email": "Correo electrónico",
+    "chrome_admin_recent_signups_col_signed_up": "Fecha de alta",
+    "chrome_admin_recent_signups_col_tier": "Nivel",
+    "chrome_admin_recent_signups_col_bids_run": "Ofertas realizadas",
+    "chrome_admin_recent_signups_empty": "Aún no hay altas.",
 }

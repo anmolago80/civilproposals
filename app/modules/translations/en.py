@@ -1679,4 +1679,14 @@ STRINGS: dict[str, str] = {
         "similar sections) is written in -- this does not change the app's own interface "
         "language, which is the separate switcher in the sidebar."
     ),
+
+    # BRIEF_ADMIN_RECENT_SIGNUPS.md -- Admin stats dialog, "Recent signups"
+    # table (below "Recent bids"): names accounts by signup date even
+    # before they've ever run a bid.
+    "chrome_admin_recent_signups_header": "Recent signups",
+    "chrome_admin_recent_signups_col_email": "Email",
+    "chrome_admin_recent_signups_col_signed_up": "Signed up",
+    "chrome_admin_recent_signups_col_tier": "Tier",
+    "chrome_admin_recent_signups_col_bids_run": "Bids run",
+    "chrome_admin_recent_signups_empty": "No signups yet.",
 }
