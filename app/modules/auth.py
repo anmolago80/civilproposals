@@ -1059,7 +1059,13 @@ SUBSCRIPTION_MONTHLY_BID_LIMIT = 4
 # had the icloud address before, which meant testing on the real account
 # was quietly burning real paid bids/trial limit). Keeping icloud too in
 # case it's a secondary test account.
-UNLIMITED_ACCOUNTS = {"anmolago@icloud.com", "anmolago@hotmail.com"}
+UNLIMITED_ACCOUNTS = {
+    "anmolago@icloud.com",
+    "anmolago@hotmail.com",
+    # Guest account granted unlimited access by the owner (not an admin --
+    # deliberately NOT in ADMIN_ACCOUNTS below).
+    "marco@marvarcor.com",
+}
 
 # Accounts that get the admin panel (the "Admin stats" button in the
 # sidebar -- accounts/usage/AI-cost rollups across ALL users). Granted by
