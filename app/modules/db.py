@@ -61,11 +61,14 @@ if not DATABASE_URL:
     _local_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "civilproposals_local.db")
     DATABASE_URL = f"sqlite:///{_local_path}"
 
-# Railway (and most managed Postgres providers) hand out a "postgres://" URL;
-# SQLAlchemy 2.x / modern psycopg2 wants "postgresql://". Normalise so the
-# same env var works without the user having to edit it.
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+# Railway (and most managed Postgres providers) hand out a "postgres://" URL.
+# Name the driver explicitly: SQLAlchemy 2.1+ defaults a bare "postgresql://"
+# to psycopg (v3), but this app ships psycopg2-binary. URLs that already name
+# a driver ("+psycopg", "+asyncpg", ...) and sqlite URLs are left unchanged.
+for _prefix in ("postgres://", "postgresql://"):
+    if DATABASE_URL.startswith(_prefix):
+        DATABASE_URL = "postgresql+psycopg2://" + DATABASE_URL[len(_prefix):]
+        break
 
 _engine_kwargs = {"pool_pre_ping": True}
 if DATABASE_URL.startswith("sqlite"):
