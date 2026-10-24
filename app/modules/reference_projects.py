@@ -143,7 +143,7 @@ def draft_reference_projects(
         material=material,
     )
     data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=4000,
-                        purpose="reference_projects", thinking="off", cache=True)
+                        purpose="reference_projects")
 
     raw_projects = data.get("projects", []) if isinstance(data, dict) else []
     projects = [ReferenceProject.model_validate(p) for p in raw_projects]

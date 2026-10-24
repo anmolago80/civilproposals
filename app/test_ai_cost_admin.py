@@ -425,13 +425,9 @@ class _FakeAnthropic:
 
     class _Messages:
         def create(self, model, max_tokens, system, messages, **kw):
-            _FakeAnthropic.calls.append({"model": model, "max_tokens": max_tokens, "prompt": messages[0]["content"],
-                                         "thinking": kw.get("thinking", "ABSENT")})
+            _FakeAnthropic.calls.append({"model": model, "max_tokens": max_tokens, "prompt": messages[0]["content"]})
             if _FakeAnthropic.replies:
-                nxt = _FakeAnthropic.replies.pop(0)
-                if isinstance(nxt, Exception):
-                    raise nxt
-                text, out, thinking, stop = nxt
+                text, out, thinking, stop = _FakeAnthropic.replies.pop(0)
             else:
                 text, out, thinking, stop = ("ok", 50, None, "end_turn")
             return _FakeAnthropic._Response(text, 1000, out, thinking, stop)
@@ -476,9 +472,8 @@ def test_requested_max_tokens_and_evidence_stored_per_attempt(failures: list[str
             # 2) an EMPTY reply -> _call_with_resilience re-asks with double the cap: a NEW row.
             _FakeAnthropic.replies = [("", 1200, 1200, "max_tokens"), ("notes", 800, 100, "end_turn")]
             ai_interface.call_ai("p", "sys", _CFG, max_tokens=1200, purpose="tender_analysis", step="map")
-            # 3) call_ai_json starts at the 16,000 ceiling; a genuine parse failure gets ONE
-            #    corrective retry (same cap) -- a NEW row.
-            _FakeAnthropic.replies = [("not json at all", 700, 0, "end_turn"), ('{"a": 1}', 900, 0, "end_turn")]
+            # 3) call_ai_json: unparseable reply -> re-asks with a bigger cap: a NEW row each.
+            _FakeAnthropic.replies = [("not json at all", 4000, 3000, "max_tokens"), ('{"a": 1}', 900, 0, "end_turn")]
             out = ai_interface.call_ai_json("p", "sys", _CFG, max_tokens=4000, purpose="tender_analysis", step="reduce")
             return out
         out = _with_fake_anthropic(run)
@@ -488,14 +483,14 @@ def test_requested_max_tokens_and_evidence_stored_per_attempt(failures: list[str
             ("map", None, 1200, 1190, 900, "end_turn"),
             ("map", None, 1200, 1200, 1200, "max_tokens"),
             ("map", "empty_retry", 2400, 800, 100, "end_turn"),
-            ("reduce", None, 16000, 700, 0, "end_turn"),
-            ("reduce", "json_retry", 16000, 900, 0, "end_turn"),
+            ("reduce", None, 4000, 4000, 3000, "max_tokens"),
+            ("reduce", "json_retry", 8000, 900, 0, "end_turn"),
         ]
         if got != want:
             failures.append(f"test_max_tokens: rows {got} != {want}")
         if out != {"a": 1}:
             failures.append("test_max_tokens: json result lost")
-        if [c["max_tokens"] for c in _FakeAnthropic.calls] != [1200, 1200, 2400, 16000, 16000]:
+        if [c["max_tokens"] for c in _FakeAnthropic.calls] != [1200, 1200, 2400, 4000, 8000]:
             failures.append("test_max_tokens: the logged cap is not what was actually requested")
     finally:
         _cleanup(user.id)
@@ -583,10 +578,8 @@ def test_inline_features_log_their_purpose(failures: list[str]) -> None:
         if any(not r.purpose for r in rows):
             failures.append("test_inline_purposes: a blank purpose was logged")
         reduce_row = rows[-1]
-        if reduce_row.max_tokens != 16000:
-            failures.append(f"test_inline_purposes: reduce requested {reduce_row.max_tokens}, expected 16000")
-        if {r.max_tokens for r in rows if r.step == "map"} != {tender_analyser.MAP_MAX_TOKENS}:
-            failures.append("test_inline_purposes: map calls are not requested at MAP_MAX_TOKENS")
+        if reduce_row.max_tokens != 4000:
+            failures.append(f"test_inline_purposes: reduce requested {reduce_row.max_tokens}, expected 4000")
     finally:
         _cleanup(user.id)
 
@@ -725,315 +718,6 @@ def test_new_columns_migrate_onto_an_old_table(failures: list[str]) -> None:
     for col in ("max_tokens", "thinking_tokens", "stop_reason", "step", "attempt"):
         if col not in cols:
             failures.append(f"test_migrate_cols: {col} was not added")
-
-
-# --------------------------------------------------------------------------
-# CP-TASK 4 -- no paying for failed attempts, truncated notes, dedupe
-# --------------------------------------------------------------------------
-
-_THINKING_OFF_PURPOSES = {
-    "tender_analysis", "discipline_detection", "cv_name_extraction", "team_bios", "resourcing",
-    "reference_projects", "methodology", "risk_register", "fee_benchmark", "team_intro", "experience_intro",
-}
-_THINKING_ON_PURPOSES = {"draft_generation", "pitch_review", "pitch_review_questions", "executive_summary"}
-_CACHED_PURPOSES = {"discipline_detection", "cv_name_extraction", "team_bios", "resourcing",
-                    "reference_projects", "methodology", "risk_register"}
-
-
-def _ai_call_sites():
-    """[(relpath, lineno, purpose, {keyword names -> ast node})] for every call_ai / call_ai_json."""
-    import ast
-    root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modules")
-    out = []
-    for dirpath, _d, files in os.walk(root):
-        for fn in files:
-            if not fn.endswith(".py") or fn == "ai_interface.py":
-                continue
-            path = os.path.join(dirpath, fn)
-            for node in ast.walk(ast.parse(open(path, encoding="utf-8").read())):
-                if isinstance(node, ast.Call):
-                    f = node.func
-                    name = f.id if isinstance(f, ast.Name) else (f.attr if isinstance(f, ast.Attribute) else "")
-                    if name in ("call_ai", "call_ai_json"):
-                        kws = {k.arg: k.value for k in node.keywords}
-                        purpose = kws["purpose"].value if "purpose" in kws and isinstance(kws["purpose"], ast.Constant) else None
-                        out.append((os.path.relpath(path, root), node.lineno, purpose, kws))
-    return out
-
-
-def test_thinking_is_off_exactly_where_listed(failures: list[str]) -> None:
-    import ast
-    sites = _ai_call_sites()
-    seen_off, seen_on = set(), set()
-    for rel, line, purpose, kws in sites:
-        off = "thinking" in kws and isinstance(kws["thinking"], ast.Constant) and kws["thinking"].value == "off"
-        if purpose in _THINKING_OFF_PURPOSES:
-            seen_off.add(purpose)
-            if not off:
-                failures.append(f"test_thinking: {rel}:{line} ({purpose}) must pass thinking='off'")
-        elif purpose in _THINKING_ON_PURPOSES:
-            seen_on.add(purpose)
-            if "thinking" in kws:
-                failures.append(f"test_thinking: {rel}:{line} ({purpose}) is a reasoning task -- thinking must stay on")
-        else:
-            failures.append(f"test_thinking: {rel}:{line} has an unclassified purpose {purpose!r}")
-    if seen_off != _THINKING_OFF_PURPOSES or seen_on != _THINKING_ON_PURPOSES:
-        failures.append(f"test_thinking: classification incomplete: off={sorted(_THINKING_OFF_PURPOSES - seen_off)} "
-                        f"on={sorted(_THINKING_ON_PURPOSES - seen_on)}")
-
-
-def test_thinking_param_reaches_the_api(failures: list[str]) -> None:
-    user = _new_user()
-    try:
-        def run():
-            ai_interface.set_usage_context(user_id=user.id, project_key="th|t|c|h", project_name="Th")
-            text = _brief(40_000)
-            n = len(tender_analyser.clean_and_chunk_tender_text(text)[1])
-            _FakeAnthropic.replies = [("note", 300, None, "end_turn")] * n + [('{"project_scope": "x"}', 500, None, "end_turn")]
-            tender_analyser.analyse_tender(text, None, _CFG)
-            map_reduce = [c["thinking"] for c in _FakeAnthropic.calls]
-            _FakeAnthropic.calls.clear()
-            _FakeAnthropic.replies = [('{"a": 1}', 10, None, "end_turn")] * 2
-            ai_interface.call_ai_json("p", "s", _CFG, purpose="executive_summary")       # a reasoning task: untouched
-            ai_interface.call_ai_json("p", "s", _CFG, purpose="x", thinking="off")
-            return map_reduce, [c["thinking"] for c in _FakeAnthropic.calls]
-        map_reduce, others = _with_fake_anthropic(run)
-        if any(t != {"type": "disabled"} for t in map_reduce) or not map_reduce:
-            failures.append(f"test_thinking_api: map/reduce requests carried {set(map(str, map_reduce))}")
-        if others != ["ABSENT", {"type": "disabled"}]:
-            failures.append(f"test_thinking_api: reasoning call must send no thinking param, got {others}")
-        # Per model: what 'off' means.
-        want = {"claude-sonnet-5": {"type": "disabled"}, "claude-sonnet-5-20261001": {"type": "disabled"},
-                "claude-haiku-5-5": {"type": "disabled"}, "claude-opus-5": {"type": "disabled"},
-                "claude-sonnet-5-5": {"type": "between_tools"},
-                "claude-opus-5-5": None, "claude-fable-5-1": None, "claude-sonnet-4-5": None, "gpt-4o": None}
-        for model, w in want.items():
-            if ai_interface.thinking_off_param(model) != w:
-                failures.append(f"test_thinking_api: {model} -> {ai_interface.thinking_off_param(model)}, expected {w}")
-    finally:
-        _cleanup(user.id)
-
-
-def test_thinking_param_rejection_falls_back(failures: list[str]) -> None:
-    """If the API refuses the parameter, the step still completes (without it) and
-    the model is remembered as not accepting it."""
-    class _Bad(Exception):
-        status_code = 400
-    user = _new_user()
-    cfg = {**_CFG, "model": "claude-haiku-5-5"}
-    ai_interface._thinking_param_rejected.discard("claude-haiku-5-5")
-    try:
-        def run():
-            ai_interface.set_usage_context(user_id=user.id, project_key="rj|t|c|h", project_name="Rj")
-            _FakeAnthropic.replies = [_Bad('thinking.type.disabled is not supported for this model'), ("ok", 10, None, "end_turn"),
-                                      ("ok2", 10, None, "end_turn")]
-            a = ai_interface.call_ai("p", "s", cfg, max_tokens=100, purpose="x", thinking="off")
-            b = ai_interface.call_ai("p", "s", cfg, max_tokens=100, purpose="x", thinking="off")
-            return a, b, [c["thinking"] for c in _FakeAnthropic.calls]
-        a, b, sent = _with_fake_anthropic(run)
-        if (a, b) != ("ok", "ok2"):
-            failures.append(f"test_thinking_fallback: results {(a, b)}")
-        if sent != [{"type": "disabled"}, "ABSENT", "ABSENT"]:
-            failures.append(f"test_thinking_fallback: requests carried {sent} (retry without it, then never again)")
-    finally:
-        ai_interface._thinking_param_rejected.discard("claude-haiku-5-5")
-        _cleanup(user.id)
-
-
-def test_json_budget_and_single_retry(failures: list[str]) -> None:
-    user = _new_user()
-    try:
-        def run():
-            ai_interface.set_usage_context(user_id=user.id, project_key="jb|t|c|h", project_name="Jb")
-            out = {}
-            # 1) clean first answer: ONE call, at the 16,000 ceiling even though 800 was asked for.
-            _FakeAnthropic.replies = [('{"a": 1}', 200, None, "end_turn")]
-            ai_interface.call_ai_json("p", "s", _CFG, max_tokens=800, purpose="x")
-            out["clean"] = [c["max_tokens"] for c in _FakeAnthropic.calls]
-            # 2) genuine parse failure twice: exactly TWO calls (one retry), then a clear error.
-            _FakeAnthropic.calls.clear()
-            _FakeAnthropic.replies = [("sorry, here you go", 50, None, "end_turn"), ("still prose", 50, None, "end_turn")]
-            try:
-                ai_interface.call_ai_json("p", "s", _CFG, max_tokens=800, purpose="x")
-                out["fail_raised"] = False
-            except ai_interface.AIConfigError:
-                out["fail_raised"] = True
-            out["fail"] = [c["max_tokens"] for c in _FakeAnthropic.calls]
-            # 3) parse failure then success: the retry is the second (and last) call.
-            _FakeAnthropic.calls.clear()
-            _FakeAnthropic.replies = [("prose", 50, None, "end_turn"), ('{"ok": true}', 60, None, "end_turn")]
-            out["retry_result"] = ai_interface.call_ai_json("p", "s", _CFG, purpose="x")
-            out["retry_calls"] = len(_FakeAnthropic.calls)
-            # 4) a reply that STOPPED AT THE CAP is not retried (the same budget would truncate again):
-            #    repaired from the truncated JSON, flagged.
-            _FakeAnthropic.calls.clear()
-            _FakeAnthropic.replies = [('{"a": [1, 2, 3', 16000, None, "max_tokens")]
-            repaired = ai_interface.call_ai_json("p", "s", _CFG, purpose="x")
-            out["trunc_calls"] = len(_FakeAnthropic.calls)
-            out["trunc_repaired"] = ai_interface.was_repaired(repaired)
-            return out
-        out = _with_fake_anthropic(run)
-        if out["clean"] != [16000]:
-            failures.append(f"test_json_budget: clean call requested {out['clean']}, expected [16000]")
-        if out["fail"] != [16000, 16000] or not out["fail_raised"]:
-            failures.append(f"test_json_budget: parse failure made {out['fail']} calls / raised={out['fail_raised']}")
-        if out["retry_result"] != {"ok": True} or out["retry_calls"] != 2:
-            failures.append(f"test_json_budget: retry path wrong: {out['retry_result']} in {out['retry_calls']} calls")
-        if out["trunc_calls"] != 1 or not out["trunc_repaired"]:
-            failures.append(f"test_json_budget: a truncated reply was retried ({out['trunc_calls']} calls) or not repaired")
-        if ai_interface.JSON_MAX_TOKENS_CEILING != 16000:
-            failures.append("test_json_budget: the ceiling is not 16,000")
-    finally:
-        _cleanup(user.id)
-
-
-def test_map_cap_and_truncation_warning(failures: list[str]) -> None:
-    import io, contextlib
-    if tender_analyser.MAP_MAX_TOKENS != 2000:
-        failures.append(f"test_map_cap: MAP_MAX_TOKENS is {tender_analyser.MAP_MAX_TOKENS}, expected 2000")
-    user = _new_user()
-    try:
-        def run():
-            ai_interface.set_usage_context(user_id=user.id, project_key="mp|t|c|h", project_name="Mp")
-            text = _brief(40_000)
-            n = len(tender_analyser.clean_and_chunk_tender_text(text)[1])
-            replies = [("note", 300, None, "end_turn")] * n
-            replies[1] = ("cut off nots", 2000, None, "max_tokens")            # one map call hits the cap
-            _FakeAnthropic.replies = replies + [('{"project_scope": "x"}', 500, None, "end_turn")]
-            tender_analyser.analyse_tender(text, None, _CFG)
-            return n
-        buf = io.StringIO()
-        with contextlib.redirect_stderr(buf):
-            n = _with_fake_anthropic(run)
-        warnings = [l for l in buf.getvalue().splitlines() if "stopped at max_tokens=2000" in l]
-        if len(warnings) != 1 or "map call 2/" not in warnings[0]:
-            failures.append(f"test_map_cap: expected exactly one truncation warning for map call 2, got {warnings}")
-        rows = _rows_for(user.id)
-        maps = [r for r in rows if r.step == "map"]
-        if [r.max_tokens for r in maps] != [2000] * n:
-            failures.append("test_map_cap: map calls were not requested at 2,000")
-        if [r.stop_reason for r in maps].count("max_tokens") != 1:
-            failures.append("test_map_cap: stop_reason not logged for the truncated map call")
-    finally:
-        _cleanup(user.id)
-
-
-def test_cached_calls_run_once_per_unchanged_input(failures: list[str]) -> None:
-    store: dict = {}
-    saved = ai_interface._json_cache_store
-    ai_interface._json_cache_store = lambda: store
-    user = _new_user()
-    try:
-        def run():
-            ai_interface.set_usage_context(user_id=user.id, project_key="ch|t|c|h", project_name="Ch")
-            brief = "A bridge over a creek with a rail crossing. " * 30
-            _FakeAnthropic.replies = [('{"disciplines": ["Structural", "Rail"]}', 40, None, "end_turn")] * 3
-            first = tender_analyser.detect_disciplines_from_text(brief, config=_CFG)
-            second = tender_analyser.detect_disciplines_from_text(brief, config=_CFG)       # same inputs
-            n_same = len(_FakeAnthropic.calls)
-            third = tender_analyser.detect_disciplines_from_text(brief + " Plus a new addendum.", config=_CFG)
-            return first, second, third, n_same, len(_FakeAnthropic.calls)
-        first, second, third, n_same, n_after_change = _with_fake_anthropic(run)
-        if first != second:
-            failures.append("test_cache: the saved result differs from the original")
-        if n_same != 1:
-            failures.append(f"test_cache: an unchanged re-run made {n_same} AI calls, expected 1")
-        if n_after_change != 2:
-            failures.append(f"test_cache: a changed input made {n_after_change} calls in total, expected 2")
-        if len(store) != 2:
-            failures.append(f"test_cache: {len(store)} cached entries, expected 2")
-        # Not cached when the caller didn't opt in, and a repaired (truncated) result is never saved.
-        store.clear()
-        def run2():
-            _FakeAnthropic.replies = [('{"a": 1}', 10, None, "end_turn")] * 2 + [('{"a": [1', 16000, None, "max_tokens")] * 2
-            ai_interface.call_ai_json("same", "s", _CFG, purpose="draft_generation")
-            ai_interface.call_ai_json("same", "s", _CFG, purpose="draft_generation")
-            n_plain = len(_FakeAnthropic.calls)
-            ai_interface.call_ai_json("trunc", "s", _CFG, purpose="risk_register", cache=True)
-            ai_interface.call_ai_json("trunc", "s", _CFG, purpose="risk_register", cache=True)
-            return n_plain, len(_FakeAnthropic.calls)
-        n_plain, n_total = _with_fake_anthropic(run2)
-        if n_plain != 2:
-            failures.append("test_cache: a call without cache=True was served from the cache")
-        if n_total != 4 or store:
-            failures.append(f"test_cache: a repaired/truncated result was cached ({n_total} calls, {len(store)} entries)")
-        # Which features opted in.
-        import ast
-        cached = {p for _r, _l, p, kws in _ai_call_sites() if "cache" in kws and isinstance(kws["cache"], ast.Constant) and kws["cache"].value is True}
-        if cached != _CACHED_PURPOSES:
-            failures.append(f"test_cache: cached purposes {sorted(cached)} != {sorted(_CACHED_PURPOSES)}")
-        # Outside a Streamlit script run (the worker) there is no cache at all.
-        ai_interface._json_cache_store = saved
-        if ai_interface._json_cache_store() is not None:
-            failures.append("test_cache: a cache exists outside a script run -- it would be shared between users")
-    finally:
-        ai_interface._json_cache_store = saved
-        _cleanup(user.id)
-
-
-def test_cache_is_saved_with_the_project(failures: list[str]) -> None:
-    from modules import project_store
-    if "ai_json_cache" not in project_store.PLAIN_KEYS:
-        failures.append("test_cache_saved: ai_json_cache is not saved with the project")
-        return
-    cache = {"abc": {"purpose": "risk_register", "at": "2026-10-25T00:00:00+00:00", "result": {"entries": [{"a": 1}]}}}
-    blob = project_store.save_project({"project_name": "P", "ai_json_cache": cache})
-    if project_store.load_project(blob).get("ai_json_cache") != cache:
-        failures.append("test_cache_saved: the cache did not survive save -> load")
-
-
-def test_no_project_breakdown_lists_rows(failures: list[str]) -> None:
-    from streamlit.testing.v1 import AppTest
-    admin_email = f"_adm_{uuid.uuid4().hex[:8]}@example.invalid"
-    auth.ADMIN_ACCOUNTS.add(admin_email)
-    email_utils.is_configured = lambda: False
-    admin = auth.create_user(admin_email, "testpassword123", device_claimed=False)
-    auth.accept_terms(admin)
-    u1, u2 = _new_user(), _new_user()
-    try:
-        with db.get_session() as s:
-            s.query(db.AiCallLog).filter(
-                (db.AiCallLog.project_key.is_(None)) | (db.AiCallLog.project_key == "")).delete(synchronize_session=False)
-            s.commit()
-            for i in range(3):      # NULL key, user 1
-                s.add(db.AiCallLog(user_id=u1.id, project_key=None, purpose="team_bios", model="claude-sonnet-5",
-                                   input_tokens=1000, output_tokens=500, estimated_cost_usd=0.01))
-            for i in range(2):      # empty-string key, user 2
-                s.add(db.AiCallLog(user_id=u2.id, project_key="", purpose="cv_name_extraction", model="claude-sonnet-5",
-                                   input_tokens=2000, output_tokens=100, estimated_cost_usd=0.005))
-            s.commit()
-        rows = [p for p in db.ai_cost_summary()["per_project"] if p["project_name"] == "(no project)"]
-        if len(rows) != 1 or rows[0]["calls"] != 5:
-            failures.append(f"test_no_project: expected ONE '(no project)' row of 5 calls, got {[(r['project_key'], r['calls']) for r in rows]}")
-        for key in ("(no project)", "", None):
-            bd = db.project_cost_breakdown(key, u1.id)             # even when the row carries one user's id
-            if bd["totals"]["calls"] != 5:
-                failures.append(f"test_no_project: breakdown({key!r}) lists {bd['totals']['calls']} calls, expected 5")
-        bd = db.project_cost_breakdown("(no project)", None)
-        if {p["purpose"] for p in bd["by_purpose"]} != {"team_bios", "cv_name_extraction"}:
-            failures.append("test_no_project: by-purpose totals wrong")
-        # And through the admin screen.
-        at = AppTest.from_file("app.py", default_timeout=180)
-        at.session_state["_auth_user_id"] = admin.id
-        at.session_state["_state_owner_id"] = admin.id
-        at.run()
-        [b for b in at.sidebar.button if "Admin" in (b.label or "")][0].click().run()
-        box = [sb for sb in at.selectbox if sb.key == "_admin_breakdown_pick"][0]
-        choice = [o for o in box.options if o.startswith("(no project)")]
-        if not choice:
-            failures.append(f"test_no_project: no '(no project)' option in {box.options}")
-            return
-        at.session_state["_admin_breakdown_pick"] = choice[0]
-        [b for b in at.sidebar.button if "Admin" in (b.label or "")][0].click().run()
-        calls_tables = [df.value for df in at.dataframe if "max_tokens requested" in set(df.value.columns)]
-        if not calls_tables or len(calls_tables[0]) != 5:
-            failures.append(f"test_no_project: the screen listed {len(calls_tables[0]) if calls_tables else 0} rows, expected 5")
-        if any("No AI calls are logged" in c.value for c in at.caption):
-            failures.append("test_no_project: the screen still says 'No AI calls are logged'")
-    finally:
-        auth.ADMIN_ACCOUNTS.discard(admin_email)
-        for u in (admin, u1, u2):
-            _cleanup(u.id)
 
 
 def main() -> int:

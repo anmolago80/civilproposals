@@ -139,7 +139,7 @@ def draft_team_bios_from_cv(
         )
 
     data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=3000,
-                        purpose="team_bios", thinking="off", cache=True)
+                        purpose="team_bios")
 
     raw_members = data.get("team_members", [])
     members = [TeamMember.model_validate(m) for m in raw_members]
@@ -487,7 +487,7 @@ def _call_single_profile_with_retry(
                 SINGLE_PROFILE_PROMPT.format(name=name, material=text,
                                              tender_context=format_tender_context(analysis)),
                 system_message=SINGLE_PROFILE_SYSTEM.format(name=name), config=config, max_tokens=900,
-                purpose="team_bios", thinking="off", cache=True,
+                purpose="team_bios",
             )
         except Exception as exc:
             last_exc = exc
@@ -582,7 +582,7 @@ def _extract_profile_fields_from_combined_text(
                 PROFILE_FIELDS_PROMPT.format(names=names_block, material=chunk,
                                              tender_context=format_tender_context(analysis)),
                 system_message=PROFILE_FIELDS_SYSTEM, config=config, max_tokens=2000,
-                purpose="team_bios", thinking="off", cache=True,
+                purpose="team_bios",
             )
         except Exception:
             failed_chunks += 1
@@ -651,7 +651,7 @@ def extract_person_names(cv_text: str, config: dict | None = None,
             data = call_ai_json(
                 NAME_EXTRACTION_PROMPT.format(material=chunk),
                 system_message=NAME_EXTRACTION_SYSTEM, config=config, max_tokens=1500,
-                purpose="cv_name_extraction", thinking="off", cache=True,
+                purpose="cv_name_extraction",
             )
         except Exception:
             failed_chunks += 1

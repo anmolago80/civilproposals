@@ -30,7 +30,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
     create_engine, Column, String, Integer, Float, DateTime, Boolean, LargeBinary,
-    ForeignKey, Text, select, func, case, UniqueConstraint, inspect, text, or_,
+    ForeignKey, Text, select, func, case, UniqueConstraint, inspect, text,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
@@ -781,9 +781,7 @@ def ai_cost_summary(limit_projects: int = 25) -> dict:
         unpriced = s.query(func.count(AiCallLog.id)).filter(AiCallLog.estimated_cost_usd.is_(None)).scalar() or 0
         rows = (
             s.query(
-                # NULL and "" are the SAME "(no project)" bucket -- grouped on
-                # the coalesced key they are one row, not two rows with one label.
-                func.coalesce(AiCallLog.project_key, ""),
+                AiCallLog.project_key,
                 func.max(AiCallLog.project_name),
                 func.max(AiCallLog.user_id),
                 func.count(AiCallLog.id),
@@ -791,7 +789,7 @@ def ai_cost_summary(limit_projects: int = 25) -> dict:
                 func.coalesce(func.sum(AiCallLog.input_tokens), 0),
                 func.coalesce(func.sum(AiCallLog.output_tokens), 0),
             )
-            .group_by(func.coalesce(AiCallLog.project_key, ""))
+            .group_by(AiCallLog.project_key)
             .order_by(func.coalesce(func.sum(AiCallLog.estimated_cost_usd), 0.0).desc())
             .limit(limit_projects)
             .all()
@@ -1158,27 +1156,17 @@ def project_cost_breakdown(project_key: str, user_id: str | None = None) -> dict
     from modules import ai_interface
 
     project_key = (project_key or "").strip()
-    # "(no project)" is how the admin table labels calls with an empty OR NULL
-    # project_key (e.g. inline calls made before any project was named). It is
-    # not a real key, and the bucket spans every account, so match on
-    # empty/NULL and don't narrow to one user.
-    no_project = project_key in ("", "(no project)")
     with get_session() as s:
-        if no_project:
-            q = s.query(AiCallLog).filter(or_(AiCallLog.project_key.is_(None), AiCallLog.project_key == ""))
-        else:
-            q = s.query(AiCallLog).filter(AiCallLog.project_key == project_key)
-            if user_id:
-                q = q.filter(AiCallLog.user_id == user_id)
+        q = s.query(AiCallLog).filter(AiCallLog.project_key == project_key)
+        if user_id:
+            q = q.filter(AiCallLog.user_id == user_id)
         rows = q.order_by(AiCallLog.created_at, AiCallLog.id).all()
-        run_starts = []
-        if not no_project:
-            job_q = s.query(Job.created_at).filter(
-                Job.job_type == "tender_analysis", func.lower(Job.project_key) == project_key.lower(),
-            )
-            if user_id:
-                job_q = job_q.filter(Job.user_id == user_id)
-            run_starts = sorted(r[0] for r in job_q.all() if r[0] is not None)
+        job_q = s.query(Job.created_at).filter(
+            Job.job_type == "tender_analysis", func.lower(Job.project_key) == project_key.lower(),
+        )
+        if user_id:
+            job_q = job_q.filter(Job.user_id == user_id)
+        run_starts = sorted(r[0] for r in job_q.all() if r[0] is not None)
 
     def _naive(dt):
         return dt.replace(tzinfo=None) if dt is not None and dt.tzinfo else dt

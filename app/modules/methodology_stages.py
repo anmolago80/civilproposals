@@ -335,7 +335,7 @@ def draft_methodology_stages(
         )
 
     data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=4000,
-                        purpose="methodology", thinking="off", cache=True)
+                        purpose="methodology")
     return _scrub_stages(data.get("stages"), week_count)
 
 

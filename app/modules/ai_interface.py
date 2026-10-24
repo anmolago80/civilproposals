@@ -134,65 +134,6 @@ LONG_PROMPT_PRICES: dict[str, tuple[int, tuple[float, float]]] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Thinking control (Anthropic)
-#
-# claude-sonnet-5 THINKS BY DEFAULT (adaptive, effort "high"), and thinking
-# tokens are billed as output AND counted inside max_tokens. For extraction /
-# structured-JSON work that is pure cost: on 23 Oct a York Region run showed 6
-# of 7 map calls stopping at exactly their 1,200 cap (notes truncated) and the
-# reduce taking 4 attempts (about US$1.00 of the US$1.88 bill was failed
-# attempts). Calls that don't need reasoning pass thinking="off".
-#
-# What "off" means per model (Anthropic's thinking-support table):
-#   claude-sonnet-5, claude-opus-5, claude-haiku-5-5 -> {"type": "disabled"}
-#   claude-sonnet-5-5                                -> {"type": "between_tools"}
-#   always-on models (opus-5-5, fable, mythos) and the 4.x models (off unless
-#   asked) -> no parameter is sent.
-# ---------------------------------------------------------------------------
-
-THINKING_OFF_PARAM: dict[str, dict] = {
-    "claude-sonnet-5": {"type": "disabled"},
-    "claude-opus-5": {"type": "disabled"},
-    "claude-haiku-5-5": {"type": "disabled"},
-    "claude-sonnet-5-5": {"type": "between_tools"},
-}
-
-# Models the API has REJECTED a thinking parameter for in this process (a
-# 400) -- never sent again, so one bad guess costs one retry, not one per call.
-_thinking_param_rejected: set[str] = set()
-
-# The stop_reason of the most recent provider call in this thread/context, so
-# callers of call_ai() (which returns only text) can tell a truncated answer
-# ("max_tokens") from a finished one.
-_last_stop_reason: contextvars.ContextVar[str | None] = contextvars.ContextVar(
-    "ai_last_stop_reason", default=None
-)
-
-
-def last_stop_reason() -> str | None:
-    """stop_reason of the last provider call made in this context (e.g.
-    "end_turn", "max_tokens"), or None if unknown."""
-    return _last_stop_reason.get()
-
-
-def thinking_off_param(model: str) -> dict | None:
-    """The request parameter that turns thinking off for `model`, or None when
-    there is nothing to send (see the table above)."""
-    model = _canonical_model_id(model)
-    if model in _thinking_param_rejected:
-        return None
-    return THINKING_OFF_PARAM.get(model)
-
-
-def _is_thinking_param_error(exc: Exception) -> bool:
-    """The API (or an old SDK) refusing the thinking parameter itself."""
-    text = str(exc).lower()
-    if isinstance(exc, TypeError) and "unexpected keyword argument" in text and "thinking" in text:
-        return True
-    return getattr(exc, "status_code", None) == 400 and "thinking" in text
-
-
 def set_usage_context(user_id: str | None = None, project_key: str = "",
                       project_name: str = "", purpose: str = "") -> None:
     """Attribute subsequent call_ai() calls (in this thread/task) to a
@@ -331,7 +272,7 @@ def _safe_int(value) -> int | None:
 def call_ai(prompt: str, system_message: str | None = None, config: dict | None = None,
             max_tokens: int = 4000, temperature: float = 0.3,
             purpose: str | None = None, step: str | None = None,
-            thinking: str | None = None, _attempt: str | None = None) -> str:
+            _attempt: str | None = None) -> str:
     """
     Send a prompt to whichever AI provider is configured and return the text response.
 
@@ -341,11 +282,6 @@ def call_ai(prompt: str, system_message: str | None = None, config: dict | None 
     `purpose` / `step` label the call in db.AiCallLog (which feature made it,
     and which step of it); every call site should pass a purpose -- a call that
     doesn't is labelled with its calling module's name rather than left blank.
-
-    `thinking="off"` turns the model's thinking off where the model supports
-    that (see THINKING_OFF_PARAM) -- for extraction / structured-JSON calls that
-    don't need reasoning. None leaves the model's default (thinking stays on for
-    claude-sonnet-5).
     """
     prior = _call_overrides.get()
     merged = dict(prior or {})
@@ -355,8 +291,6 @@ def call_ai(prompt: str, system_message: str | None = None, config: dict | None 
         merged["step"] = step
     if _attempt:
         merged["attempt"] = _attempt
-    if thinking:
-        merged["thinking"] = thinking
     token = _call_overrides.set(merged or None)
     try:
         return _call_ai_inner(prompt, system_message, config, max_tokens, temperature)
@@ -365,7 +299,6 @@ def call_ai(prompt: str, system_message: str | None = None, config: dict | None 
 
 
 def _call_ai_inner(prompt, system_message, config, max_tokens, temperature) -> str:
-    _last_stop_reason.set(None)      # never report a previous call's stop reason
     config = config or _get_config_from_session_state()
     provider = (config or {}).get("provider")
 
@@ -400,122 +333,58 @@ def was_repaired(data) -> bool:
     return bool(isinstance(data, dict) and data.get(REPAIRED_FLAG))
 
 
-# ---------------------------------------------------------------------------
-# Per-project cache of structured-JSON results
-#
-# A structured feature (reference-project drafting, methodology stages, risk
-# register, discipline re-scan, CV names / profile fields, staffing
-# suggestions) asked the same question twice -- same prompt, which already
-# folds in the brief, the analysis and every input it reads -- gets the saved
-# answer instead of a second paid call. It lives in st.session_state and is
-# saved with the project (project_store.PLAIN_KEYS), so it survives a reload;
-# change any input and the prompt, hence the key, changes: that is the whole
-# invalidation rule. Opted into per call with cache=True -- NOT for anything a
-# person expects to come out different when they press it again (drafts,
-# pitch review, executive summary, fee refresh).
-# ---------------------------------------------------------------------------
-
-JSON_CACHE_SESSION_KEY = "ai_json_cache"
-JSON_CACHE_MAX_ENTRIES = 60
-
-
-def _json_cache_store() -> dict | None:
-    """The cache dict for this browser session, or None outside a Streamlit
-    script run (the RQ worker, scripts): a process-wide dict there would be
-    shared between users."""
-    try:
-        from streamlit.runtime.scriptrunner import get_script_run_ctx
-        if get_script_run_ctx() is None:
-            return None
-        store = st.session_state.get(JSON_CACHE_SESSION_KEY)
-        if not isinstance(store, dict):
-            store = {}
-            st.session_state[JSON_CACHE_SESSION_KEY] = store
-        return store
-    except Exception:
-        return None
-
-
-def _json_cache_key(prompt: str, system_message: str | None, config: dict | None, purpose: str | None) -> str:
-    import hashlib
-    cfg = config or {}
-    blob = json.dumps([purpose or "", cfg.get("provider", ""), cfg.get("model", ""), system_message or "", prompt],
-                      ensure_ascii=False)
-    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
-
-
-def _json_cache_put(store: dict, key: str, purpose: str | None, result) -> None:
-    from datetime import datetime, timezone
-    store[key] = {"purpose": purpose or "", "at": datetime.now(timezone.utc).isoformat(), "result": result}
-    if len(store) > JSON_CACHE_MAX_ENTRIES:
-        for old_key in sorted(store, key=lambda k: store[k].get("at", ""))[: len(store) - JSON_CACHE_MAX_ENTRIES]:
-            del store[old_key]
-
-
-def _is_truncated(stop_reason: str | None) -> bool:
-    return (stop_reason or "") in ("max_tokens", "length")
-
-
 def call_ai_json(prompt: str, system_message: str | None = None, config: dict | None = None,
-                  max_tokens: int = 4000, purpose: str | None = None, step: str | None = None,
-                  thinking: str | None = None, cache: bool = False) -> dict:
+                  max_tokens: int = 4000, purpose: str | None = None, step: str | None = None) -> dict:
     """
     Same as call_ai(), but instructs the model to return JSON only and parses
-    the result.
+    the result. If the first response doesn't parse, it retries with a
+    corrective follow-up AND a progressively larger output budget.
 
-    BUDGET: every JSON call starts at JSON_MAX_TOKENS_CEILING (16,000)
-    whatever `max_tokens` the caller passed (it is only a floor now) -- unused
-    cap is not billed, and starting small was expensive: a reduce that needed
-    ~12,000 tokens was attempted at 4,000, 8,000 and 8,000 first, each a full
-    paid call that re-sent the whole prompt (about US$1.00 of a US$1.88 York
-    Region bill).
+    The budget escalation matters: the single most common reason a response
+    won't parse in this app is not that the model wrote prose instead of JSON,
+    but that it got *cut off mid-JSON* because the output budget ran out --
+    especially with "reasoning" models, which silently spend a chunk of that
+    budget on hidden internal reasoning before emitting a single visible
+    character. A truncated object has no closing brace, so nothing parses.
+    Re-asking with the same small budget just truncates again; re-asking with
+    a bigger budget usually fixes it. `_try_parse_json` also tries to repair a
+    truncated object as a last resort before we give up on a given attempt.
 
-    RETRY: at most ONE, and only for a genuine parse failure -- the model
-    answered but not with parseable JSON. A reply that stopped at the cap
-    ("max_tokens") is not retried: the same budget would truncate again, so it
-    goes straight to the truncated-JSON repair below.
-
-    `thinking="off"` -- see call_ai(). `cache=True` -- see the cache section
-    above: an identical prompt for this project returns the saved result.
-
-    Raises a clear, actionable AIConfigError if it still can't be read.
+    Raises a clear, actionable AIConfigError if every attempt fails.
     """
-    store = _json_cache_store() if cache else None
-    cache_key = _json_cache_key(prompt, system_message, config, purpose) if store is not None else None
-    if cache_key is not None:
-        hit = store.get(cache_key)
-        if isinstance(hit, dict) and "result" in hit:
-            print(f"[ai_cache] hit purpose={purpose} -- saved result reused, no AI call", file=sys.stderr)
-            return hit["result"]
-
     json_instruction = (
         "\n\nRespond with ONLY valid JSON. No markdown code fences, no commentary "
         "before or after the JSON, no trailing commas."
     )
-    budget = max(max_tokens, JSON_MAX_TOKENS_CEILING)
 
-    raw = call_ai(prompt + json_instruction, system_message, config, budget, temperature=0.1,
-                  purpose=purpose, step=step, thinking=thinking)
-    parsed = _try_parse_json(raw)
-    last_raw = raw
-    if parsed is None and not _is_truncated(last_stop_reason()):
-        # A genuine parse failure (prose, wrong shape): one corrective retry.
-        corrective = (
-            f"Your previous response could not be parsed as JSON. Here is what you returned:\n\n"
-            f"{last_raw[:2000]}\n\n"
-            f"Return ONLY a complete, valid JSON object for this request:\n\n{prompt}"
-            f"{json_instruction}"
-        )
-        last_raw = call_ai(corrective, system_message, config, budget, temperature=0.1,
-                           purpose=purpose, step=step, thinking=thinking, _attempt="json_retry")
-        parsed = _try_parse_json(last_raw)
-    if parsed is not None:
-        if cache_key is not None:
-            _json_cache_put(store, cache_key, purpose, parsed)
-        return parsed
+    # Escalating output budgets: the requested size, then double, then the
+    # ceiling -- deduped and kept in ascending order.
+    budgets = sorted({
+        max_tokens,
+        min(max_tokens * 2, JSON_MAX_TOKENS_CEILING),
+        JSON_MAX_TOKENS_CEILING,
+    })
 
-    # Still unreadable. Last resort: try to repair the last response (close
-    # off a truncated object) rather than failing outright.
+    last_raw = ""
+    for attempt_index, budget in enumerate(budgets):
+        if attempt_index == 0:
+            attempt_prompt = prompt + json_instruction
+        else:
+            attempt_prompt = (
+                f"Your previous response could not be parsed as JSON (it may have been cut "
+                f"off before it finished). Here is what you returned:\n\n{last_raw[:2000]}\n\n"
+                f"Return ONLY a complete, valid JSON object for this request:\n\n{prompt}"
+                f"{json_instruction}"
+            )
+        raw = call_ai(attempt_prompt, system_message, config, budget, temperature=0.1,
+                      purpose=purpose, step=step, _attempt="json_retry" if attempt_index else None)
+        parsed = _try_parse_json(raw)
+        if parsed is not None:
+            return parsed
+        last_raw = raw
+
+    # Every budget exhausted. Last resort: try to repair the biggest response
+    # we got (close off a truncated object) rather than failing outright.
     repaired = _try_parse_json(last_raw, repair=True)
     if repaired is not None:
         # A repaired parse closes off a TRUNCATED object, so trailing fields
@@ -528,8 +397,8 @@ def call_ai_json(prompt: str, system_message: str | None = None, config: dict | 
         return repaired
 
     raise AIConfigError(
-        "The AI's response could not be read as valid data, even after one retry. This "
-        "usually means the selected model was cut off before it "
+        "The AI's response could not be read as valid data, even after retrying with a "
+        "larger output budget. This usually means the selected model was cut off before it "
         "finished, or isn't reliably returning structured output. If you're using a newer "
         "'reasoning' model (e.g. an OpenAI o-series or GPT-5 model), it can spend most of its "
         "output budget on hidden internal reasoning and get truncated. Switch to a standard "
@@ -566,8 +435,6 @@ def _call_openai(prompt, system_message, config, max_tokens, temperature) -> str
             _safe_int(getattr(usage, "completion_tokens", None)),
             max_tokens=tokens,
         )
-        _finish = getattr(response.choices[0], "finish_reason", None)
-        _last_stop_reason.set("max_tokens" if _finish == "length" else _finish)
         return response.choices[0].message.content or ""
 
     return _call_with_resilience(_create_and_extract, temperature, max_tokens)
@@ -601,8 +468,6 @@ def _call_azure_openai(prompt, system_message, config, max_tokens, temperature) 
             _safe_int(getattr(usage, "completion_tokens", None)),
             max_tokens=tokens,
         )
-        _finish = getattr(response.choices[0], "finish_reason", None)
-        _last_stop_reason.set("max_tokens" if _finish == "length" else _finish)
         return response.choices[0].message.content or ""
 
     return _call_with_resilience(_create_and_extract, temperature, max_tokens)
@@ -632,24 +497,10 @@ def _call_anthropic(prompt, system_message, config, max_tokens, temperature) -> 
         # SDK versions work; losing the quality knob is the same acceptable
         # trade-off _call_with_resilience's own fallback already makes below.
         kwargs.pop("temperature", None)
-        off = thinking_off_param(model) if (_call_overrides.get() or {}).get("thinking") == "off" else None
-        create_kwargs = dict(
+        response = client.messages.create(
             model=model, max_tokens=tokens, system=system_message or "",
             messages=[{"role": "user", "content": prompt}], **kwargs,
         )
-        try:
-            response = client.messages.create(**create_kwargs, **({"thinking": off} if off else {}))
-        except Exception as exc:
-            if not off or not _is_thinking_param_error(exc):
-                raise
-            # The API / SDK doesn't accept our thinking parameter for this
-            # model: remember that, and make the call the old way rather than
-            # fail a customer's step over a cost optimisation.
-            print(f"[ai_interface] thinking parameter rejected for {model} ({exc}); "
-                  f"sending without it from now on", file=sys.stderr)
-            _thinking_param_rejected.add(_canonical_model_id(model))
-            response = client.messages.create(**create_kwargs)
-        _last_stop_reason.set(getattr(response, "stop_reason", None))
         usage = getattr(response, "usage", None)
         _record_usage(
             "Anthropic Claude", model,

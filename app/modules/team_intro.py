@@ -142,7 +142,7 @@ def draft_team_intro(
         )
 
     data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=1800,
-                        purpose="team_intro", thinking="off")
+                        purpose="team_intro")
 
     return TeamIntro(
         heading=(data.get("heading") or "").strip(),
