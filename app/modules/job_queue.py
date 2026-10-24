@@ -81,6 +81,11 @@ RESULT_TTL_SECONDS = 60 * 60 * 2       # 2 hours
 FAILURE_TTL_SECONDS = 60 * 60 * 2      # 2 hours
 JOB_TIMEOUT_SECONDS = 60 * 15          # generous ceiling for a big drafting pack
 
+# How long the web side waits on a job (see 10_state_helpers.py's
+# _wait_for_job) and how often it polls. Module-level so tests can shorten them.
+WAIT_MAX_SECONDS = 20 * 60
+POLL_INTERVAL_SECONDS = 1.5
+
 _redis_conn = None
 
 
@@ -116,6 +121,16 @@ def enqueue(user_id: str, job_type: str, func, *args, **kwargs) -> str:
     the same way in both the web process and the worker process -- an
     instance method or a closure (e.g. a Streamlit progress_callback) can't
     be pickled across the process boundary."""
+    return enqueue_tracked(user_id, job_type, None, False, func, *args, **kwargs)
+
+
+def enqueue_tracked(user_id: str, job_type: str, project_key: str | None, reserved: bool,
+                    func, *args, **kwargs) -> str:
+    """enqueue() plus the two facts the in-flight guard needs on the Job row:
+    which project this job belongs to (db.find_inflight_job() reads it back,
+    so the project's Run button stays disabled across refreshes and tabs while
+    the job is queued/started) and whether the run RESERVED a ProposalUsage
+    row up front, i.e. whether a failure of this job must refund it."""
     queue = _get_queue()
     rq_job = queue.enqueue(
         func, *args,
@@ -125,7 +140,10 @@ def enqueue(user_id: str, job_type: str, func, *args, **kwargs) -> str:
         **kwargs,
     )
     with db.get_session() as s:
-        s.add(db.Job(id=rq_job.id, user_id=user_id, job_type=job_type, status="queued"))
+        s.add(db.Job(
+            id=rq_job.id, user_id=user_id, job_type=job_type, status="queued",
+            project_key=(project_key or "").strip().lower() or None, reserved=bool(reserved),
+        ))
         s.commit()
     return rq_job.id
 
@@ -178,6 +196,26 @@ def get_status(job_id: str, user_id: str) -> dict:
         "result": rq_job.result if status == "finished" else None,
         "error": error,
     }
+
+
+def cancel_if_queued(job_id: str, user_id: str) -> bool:
+    """Cancels a job that is still waiting in the queue (no worker has picked
+    it up) so it can never run later. True if it was cancelled (and its Job
+    row marked failed); False if it isn't the caller's, doesn't exist, or a
+    worker has already started it -- a started job is left to finish."""
+    with db.get_session() as s:
+        owned = s.query(db.Job).filter(db.Job.id == job_id, db.Job.user_id == user_id).first()
+    if not owned:
+        return False
+    try:
+        rq_job = RQJob.fetch(job_id, connection=_get_redis())
+        if rq_job.get_status(refresh=True) not in ("queued", "deferred", "scheduled"):
+            return False
+        rq_job.cancel()
+    except Exception:
+        return False
+    _update_job_row(job_id, "failed", "Cancelled: no worker picked this job up in time.")
+    return True
 
 
 def _update_job_row(job_id: str, status: str, error_message: str) -> None:

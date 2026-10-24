@@ -41,8 +41,10 @@ Design notes:
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
+import secrets
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -50,10 +52,10 @@ import bcrypt
 import streamlit as st
 import streamlit.components.v1 as components
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
-from sqlalchemy import text
+from sqlalchemy import case, func, or_, text
 from sqlalchemy.exc import IntegrityError
 
-from modules import db, email_utils, i18n
+from modules import db, email_identity, email_utils, i18n
 
 # Computed independently here rather than imported from 00_init.py's
 # IS_SAAS_MODE -- that would make this module's import order depend on
@@ -100,6 +102,31 @@ _serializer = URLSafeTimedSerializer(APP_SECRET_KEY, salt="civilproposals-auth")
 # underlying secret key.
 _reset_serializer = URLSafeTimedSerializer(APP_SECRET_KEY, salt="civilproposals-pwreset")
 RESET_TOKEN_MAX_AGE_SECONDS = 60 * 60  # 1 hour
+
+# One free trial per person. The same-browser block is a long-lived, signed
+# cookie written the moment a trial is claimed (see claim_trial()); a distinct
+# salt keeps it from ever being mistaken for a session or reset token.
+TRIAL_COOKIE_NAME = "civilproposals_trial"
+TRIAL_COOKIE_MAX_AGE_SECONDS = 5 * 365 * 24 * 60 * 60  # ~5 years
+_trial_device_serializer = URLSafeTimedSerializer(APP_SECRET_KEY, salt="civilproposals-trial-device")
+# st.session_state keys: whether THIS browser tab has claimed a trial (the
+# cookie snapshot st.context.cookies gives is taken when the tab connects, so a
+# claim made after that is invisible to it until a reload), and the deferred
+# cookie write (same race-avoidance pattern as _cookie_write_pending).
+_TRIAL_DEVICE_SESSION_KEY = "_trial_device_claimed"
+_TRIAL_COOKIE_PENDING_KEY = "_trial_cookie_pending"
+
+# Optional, default OFF: one trial per work-email DOMAIN (consumer mailbox
+# providers -- gmail, outlook, hotmail, yahoo, icloud, proton ... -- are
+# ignored; see email_identity.FREE_EMAIL_DOMAINS).
+TRIAL_ONE_PER_COMPANY_DOMAIN = os.environ.get("TRIAL_ONE_PER_COMPANY_DOMAIN", "").strip().lower() in ("1", "true", "yes", "on")
+
+# Email confirmation (6-digit code, emailed through Resend).
+VERIFY_CODE_TTL_SECONDS = 15 * 60
+VERIFY_CODE_MAX_ATTEMPTS = 5
+VERIFY_RESEND_COOLDOWN_SECONDS = 30
+
+ACCOUNT_EXISTS_MESSAGE = "An account already exists for this email"
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +315,11 @@ def _clear_cookie_token() -> None:
 # ---------------------------------------------------------------------------
 
 LOGIN_MAX_FAILURES = 5
+# The per-IP counter is shared by EVERY account behind one address (an office,
+# a carrier NAT, a bot probing the form), so it needs far more headroom than
+# the per-email one -- at 5, a handful of failures from strangers locked
+# legitimate users out of accounts they had never mistyped.
+LOGIN_MAX_FAILURES_PER_IP = 25
 LOGIN_LOCKOUT_SECONDS = 15 * 60
 LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
 
@@ -330,7 +362,18 @@ def _client_ip() -> str:
 def _throttle_keys(email: str) -> list[str]:
     email_norm = (email or "").strip().lower()
     email_digest = hashlib.sha256(email_norm.encode("utf-8")).hexdigest()[:24]
-    return [f"cp:loginfail:email:{email_digest}", f"cp:loginfail:ip:{_client_ip()}"]
+    keys = [f"cp:loginfail:email:{email_digest}"]
+    ip = _client_ip()
+    # With no usable client address the "ip" counter would be ONE counter for
+    # every visitor -- five failures anywhere would lock everybody out -- so
+    # in that case only the per-email throttle applies.
+    if ip != "unknown":
+        keys.append(f"cp:loginfail:ip:{ip}")
+    return keys
+
+
+def _max_failures_for(key: str) -> int:
+    return LOGIN_MAX_FAILURES_PER_IP if ":ip:" in key else LOGIN_MAX_FAILURES
 
 
 def login_lockout_remaining(email: str) -> int:
@@ -373,7 +416,7 @@ def record_login_failure(email: str) -> int:
                 pipe.incr(key)
                 pipe.expire(key, LOGIN_FAILURE_WINDOW_SECONDS)
                 count = int(pipe.execute()[0])
-                if count >= LOGIN_MAX_FAILURES:
+                if count >= _max_failures_for(key):
                     r.set(key + ":lock", "1", ex=LOGIN_LOCKOUT_SECONDS)
             except Exception:
                 count = None
@@ -384,13 +427,13 @@ def record_login_failure(email: str) -> int:
                 prev_count = 0
             count = prev_count + 1
             new_lock_until = lock_until
-            if count >= LOGIN_MAX_FAILURES:
+            if count >= _max_failures_for(key):
                 new_lock_until = now + LOGIN_LOCKOUT_SECONDS
             _login_failures_local[key] = (count, now + LOGIN_FAILURE_WINDOW_SECONDS, new_lock_until)
             # Opportunistic cleanup so this dict can't grow unboundedly.
             if len(_login_failures_local) > 5000:
                 _login_failures_local.clear()
-        remaining_attempts = min(remaining_attempts, max(0, LOGIN_MAX_FAILURES - count))
+        remaining_attempts = min(remaining_attempts, max(0, _max_failures_for(key) - count))
     return remaining_attempts
 
 
@@ -436,37 +479,342 @@ def get_user_by_id(user_id: str) -> db.User | None:
         return s.query(db.User).filter(db.User.id == user_id).first()
 
 
-def create_user(email: str, password: str, name: str = "", firm_name: str = "") -> db.User:
+def _naive_utc(dt: datetime | None) -> datetime | None:
+    """Timestamps come back naive from SQLite/Postgres TIMESTAMP columns but
+    are written aware -- normalise to naive UTC so they can be compared."""
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+def _utcnow_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _is_unlimited_email(email: str) -> bool:
+    return (email or "").strip().lower() in UNLIMITED_ACCOUNTS
+
+
+# ---------------------------------------------------------------------------
+# One free trial per person
+#
+# Three independent signals, strongest first:
+#   1. the NORMALISED email (email_identity.normalize_email): aliases of one
+#      mailbox are one account (db.User.email_normalized is UNIQUE) and the
+#      db.TrialClaim ledger remembers every mailbox that ever held a trial,
+#      even after its account is deleted;
+#   2. a signed, long-lived cookie set when a trial is claimed -- a second
+#      account created in that browser gets no trial;
+#   3. (flag only, never blocks) a day-rotated IP+user-agent hash, surfaced in
+#      the admin view.
+# A trial is CLAIMED when the address is confirmed (verify_email_code), not at
+# signup, so a mistyped, never-confirmed address can't use up the ledger.
+# ---------------------------------------------------------------------------
+
+def make_trial_device_token() -> str:
+    return _trial_device_serializer.dumps({"trial": 1})
+
+
+def verify_trial_device_token(token: str) -> bool:
+    if not token:
+        return False
+    try:
+        data = _trial_device_serializer.loads(token, max_age=TRIAL_COOKIE_MAX_AGE_SECONDS)
+        return bool(isinstance(data, dict) and data.get("trial") == 1)
+    except (BadSignature, SignatureExpired, Exception):
+        return False
+
+
+def device_has_claimed_trial() -> bool:
+    """True when this browser already claimed a free trial -- via the signed
+    cookie, or a claim made earlier in this same tab (see
+    _TRIAL_DEVICE_SESSION_KEY). Never raises: outside a Streamlit request
+    (scripts, tests) there is no browser, so the answer is False."""
+    try:
+        if st.session_state.get(_TRIAL_DEVICE_SESSION_KEY):
+            return True
+    except Exception:
+        pass
+    try:
+        return verify_trial_device_token(st.context.cookies.get(TRIAL_COOKIE_NAME) or "")
+    except Exception:
+        return False
+
+
+def _mark_device_claimed() -> None:
+    """Called when a trial has just been claimed in this browser: remember it
+    for this tab, and queue the cookie write for the next script run (writing
+    it now would be cancelled by the st.rerun() that follows -- see log_in())."""
+    try:
+        st.session_state[_TRIAL_DEVICE_SESSION_KEY] = True
+        st.session_state[_TRIAL_COOKIE_PENDING_KEY] = True
+    except Exception:
+        pass
+
+
+def _set_trial_device_cookie() -> None:
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=TRIAL_COOKIE_MAX_AGE_SECONDS)
+    expires_str = expires_at.strftime("%a, %d %b %Y %H:%M:%S GMT")
+    parts = [f"{TRIAL_COOKIE_NAME}={make_trial_device_token()}", f"expires={expires_str}", "path=/", "SameSite=Lax"]
+    if _is_secure_request():
+        parts.append("Secure")
+    _write_cookie_js("; ".join(parts))
+
+
+def _ip_ua_hash() -> str:
+    """Day-rotated SHA-256 of client IP + user-agent -- an admin-view SIGNAL
+    that two trial claims came from the same place on the same day. It rotates
+    daily on purpose (a stored hash can't be used to follow someone across
+    days) and is never used to block anything, since offices share IPs."""
+    try:
+        ip = _client_ip()
+        ua = (st.context.headers.get("User-Agent", "") or "")[:300]
+    except Exception:
+        return ""
+    if ip == "unknown" and not ua:
+        return ""
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return hashlib.sha256(f"{day}|{ip}|{ua}".encode("utf-8")).hexdigest()
+
+
+def _trial_denial_reason(s, normalized: str, device_claimed: bool | None, exclude_user_id: str | None = None) -> str:
+    """"" if a trial may be granted for this normalised address, else why not
+    ("email" / "device" / "domain")."""
+    q = s.query(db.TrialClaim).filter(db.TrialClaim.email_normalized == normalized)
+    if exclude_user_id:
+        q = q.filter(db.TrialClaim.user_id != exclude_user_id)
+    if q.first() is not None:
+        return "email"
+    if device_claimed is None:
+        device_claimed = device_has_claimed_trial()
+    if device_claimed:
+        return "device"
+    if TRIAL_ONE_PER_COMPANY_DOMAIN:
+        domain = email_identity.email_domain(normalized)
+        if domain and not email_identity.is_free_email_domain(domain):
+            dq = s.query(db.TrialClaim).filter(db.TrialClaim.email_domain == domain)
+            if exclude_user_id:
+                dq = dq.filter(db.TrialClaim.user_id != exclude_user_id)
+            if dq.first() is not None:
+                return "domain"
+    return ""
+
+
+def claim_trial(user: db.User) -> bool:
+    """Records this account's free trial in the ledger. Returns True if the
+    account holds the trial, False if it gets none (the reason is stored in
+    db.User.trial_denied_reason). Idempotent; UNLIMITED_ACCOUNTS are exempt
+    (no ledger row, never denied). On success the browser is marked as having
+    claimed a trial (cookie), so a second account made in it gets none."""
+    with db.get_session() as s:
+        u = s.query(db.User).filter(db.User.id == user.id).first()
+        if not u or _is_unlimited_email(u.email):
+            return False
+        if s.query(db.TrialClaim).filter(db.TrialClaim.user_id == u.id).first() is not None:
+            return not (u.trial_denied_reason or "")
+        if u.trial_denied_reason:
+            return False
+        normalized = u.email_normalized or email_identity.normalize_email(u.email)
+        reason = _trial_denial_reason(s, normalized, None, exclude_user_id=u.id)
+        if not reason:
+            s.add(db.TrialClaim(
+                email_normalized=normalized,
+                email_domain=email_identity.email_domain(normalized),
+                user_id=u.id,
+                device_hash=_ip_ua_hash(),
+            ))
+            try:
+                s.commit()
+            except IntegrityError:
+                # Lost a race for the same mailbox -- somebody else's claim
+                # for it landed first.
+                s.rollback()
+                reason = "email"
+        if reason:
+            u.trial_denied_reason = reason
+            s.commit()
+            return False
+    _mark_device_claimed()
+    return True
+
+
+def create_user(email: str, password: str, name: str = "", firm_name: str = "", *,
+                device_claimed: bool | None = None) -> db.User:
+    """Creates an account. The new account can sign in at once but is
+    UNVERIFIED: it cannot use the free trial until it confirms the 6-digit
+    code emailed here (see verify_email_code). A signup whose NORMALISED email
+    matches an existing account is refused; one whose mailbox already held a
+    trial (ledger), or from a browser that already claimed one, is created
+    with no trial (trial_denied_reason) rather than refused.
+
+    device_claimed overrides the browser check (None = detect it); it exists
+    so scripts and tests, which have no browser, can exercise that path."""
     email = (email or "").strip().lower()
     if not email or "@" not in email:
         raise ValueError("Enter a valid email address.")
     if len(password or "") < 8:
         raise ValueError("Password must be at least 8 characters.")
-    if get_user_by_email(email):
-        raise ValueError("An account with that email already exists. Try logging in instead.")
+    normalized = email_identity.normalize_email(email)
+    unlimited = _is_unlimited_email(email)
+
+    with db.get_session() as s:
+        if s.query(db.User).filter(
+            or_(db.User.email == email, db.User.email_normalized == normalized)
+        ).first() is not None:
+            raise ValueError(ACCOUNT_EXISTS_MESSAGE)
+        denied = "" if unlimited else _trial_denial_reason(s, normalized, device_claimed)
 
     user = db.User(
         email=email,
+        email_normalized=normalized,
         password_hash=hash_password(password),
         name=(name or "").strip(),
         firm_name=(firm_name or "").strip(),
+        trial_denied_reason=denied,
     )
     with db.get_session() as s:
         s.add(user)
-        s.commit()
+        try:
+            s.commit()
+        except IntegrityError:
+            # Two signups for the same mailbox raced past the check above;
+            # the unique index on email / email_normalized caught the loser.
+            s.rollback()
+            raise ValueError(ACCOUNT_EXISTS_MESSAGE)
         s.refresh(user)
 
-    # Best-effort welcome email -- signup itself already succeeded (the
-    # commit above went through), so a Resend hiccup here must never look
-    # like signup failed. Previously a new account got zero confirmation
-    # email at all; this was the first of the missing conversion-loop
-    # emails.
-    try:
-        email_utils.send_welcome_email(user.email, user.name)
-    except Exception as exc:
-        print(f"[welcome_email] failed for {user.email}: {exc}", file=sys.stderr)
+    # Best-effort -- signup itself already succeeded (the commit above went
+    # through), so an email hiccup here must never look like signup failed;
+    # the verification panel offers "Send me a new code". The welcome email
+    # now goes out once the address is confirmed (verify_email_code).
+    if not unlimited:
+        try:
+            send_verification_code(user)
+        except Exception as exc:
+            print(f"[verify_email] failed for signup: {exc}", file=sys.stderr)
 
     return user
+
+
+# ---------------------------------------------------------------------------
+# Email confirmation
+# ---------------------------------------------------------------------------
+
+def is_email_verified(user: db.User | None) -> bool:
+    """True once the account's address is confirmed. UNLIMITED_ACCOUNTS and
+    every account that existed before confirmation was introduced (stamped by
+    the migration) count as verified."""
+    if user is None:
+        return False
+    return _is_unlimited_email(user.email) or getattr(user, "email_verified_at", None) is not None
+
+
+def _verify_code_digest(user_id: str, code: str) -> str:
+    return hmac.new(APP_SECRET_KEY.encode("utf-8"), f"verify|{user_id}|{code}".encode("utf-8"),
+                    hashlib.sha256).hexdigest()
+
+
+def send_verification_code(user: db.User) -> str:
+    """Emails a fresh 6-digit code (replacing any pending one). Returns
+    "sent", "cooldown" (asked again within VERIFY_RESEND_COOLDOWN_SECONDS),
+    "already_verified", "not_configured" (Resend isn't set up) or "failed"."""
+    if not email_utils.is_configured():
+        return "not_configured"
+    now = _utcnow_naive()
+    with db.get_session() as s:
+        u = s.query(db.User).filter(db.User.id == user.id).first()
+        if not u:
+            return "failed"
+        if is_email_verified(u):
+            return "already_verified"
+        sent_at = _naive_utc(u.verify_code_sent_at)
+        if sent_at and (now - sent_at).total_seconds() < VERIFY_RESEND_COOLDOWN_SECONDS:
+            return "cooldown"
+        code = f"{secrets.randbelow(10**6):06d}"
+        u.verify_code_hash = _verify_code_digest(u.id, code)
+        u.verify_code_expires_at = now + timedelta(seconds=VERIFY_CODE_TTL_SECONDS)
+        u.verify_code_attempts = 0
+        u.verify_code_sent_at = now
+        s.commit()
+        to_email = u.email
+    try:
+        email_utils.send_verification_email(to_email, code)
+    except Exception as exc:
+        print(f"[verify_email] FAILED to send: {exc}", file=sys.stderr)
+        return "failed"
+    return "sent"
+
+
+def verify_email_code(user: db.User, code: str) -> str:
+    """Checks a typed code. Returns "ok", "wrong", "expired" (none pending or
+    past its TTL -- request a new one) or "too_many" (VERIFY_CODE_MAX_ATTEMPTS
+    wrong guesses -- request a new one). On "ok" the address is confirmed and
+    the free trial is claimed (claim_trial); the welcome email is sent only
+    when a trial was actually granted, since it promises one."""
+    code = "".join((code or "").split())
+    now = _utcnow_naive()
+    with db.get_session() as s:
+        u = s.query(db.User).filter(db.User.id == user.id).first()
+        if not u:
+            return "expired"
+        if is_email_verified(u):
+            return "ok"
+        expires = _naive_utc(u.verify_code_expires_at)
+        if not u.verify_code_hash or not expires or expires < now:
+            return "expired"
+        if (u.verify_code_attempts or 0) >= VERIFY_CODE_MAX_ATTEMPTS:
+            return "too_many"
+        if not (code.isdigit() and len(code) == 6) or not hmac.compare_digest(
+            u.verify_code_hash, _verify_code_digest(u.id, code)
+        ):
+            u.verify_code_attempts = (u.verify_code_attempts or 0) + 1
+            s.commit()
+            return "too_many" if u.verify_code_attempts >= VERIFY_CODE_MAX_ATTEMPTS else "wrong"
+        u.email_verified_at = now
+        u.verify_code_hash = None
+        u.verify_code_expires_at = None
+        u.verify_code_attempts = 0
+        s.commit()
+        email, name = u.email, u.name
+
+    if claim_trial(user):
+        try:
+            email_utils.send_welcome_email(email, name)
+        except Exception as exc:
+            print(f"[welcome_email] failed for {email}: {exc}", file=sys.stderr)
+    return "ok"
+
+
+def render_email_verification_panel(user: db.User, key_prefix: str = "_verify") -> None:
+    """The "confirm your email" prompt shown where an unverified account
+    would otherwise start its trial (the Run Analysis button): explains why
+    it is locked, takes the 6-digit code, and can send a new one."""
+    st.warning(i18n.t("verify_required_warning", email=user.email))
+    with st.form(f"{key_prefix}_form"):
+        code = st.text_input(i18n.t("verify_code_label"), max_chars=6, key=f"{key_prefix}_code")
+        submitted = st.form_submit_button(i18n.t("verify_submit_button"), type="primary")
+    if submitted:
+        result = verify_email_code(user, code)
+        if result == "ok":
+            st.rerun()
+        elif result == "wrong":
+            st.error(i18n.t("verify_error_wrong"))
+        elif result == "too_many":
+            st.error(i18n.t("verify_error_too_many"))
+        else:
+            st.error(i18n.t("verify_error_expired"))
+    if st.button(i18n.t("verify_resend_button"), key=f"{key_prefix}_resend"):
+        status = send_verification_code(user)
+        if status == "sent":
+            st.success(i18n.t("verify_sent_info", email=user.email))
+        elif status == "cooldown":
+            st.info(i18n.t("verify_cooldown_info"))
+        elif status == "already_verified":
+            st.rerun()
+        else:
+            st.error(i18n.t("verify_send_failed_error"))
 
 
 def authenticate(email: str, password: str) -> db.User | None:
@@ -634,6 +982,10 @@ def current_user() -> db.User | None:
         user = get_user_by_id(st.session_state["_auth_user_id"])
         if user and st.session_state.pop("_cookie_write_pending", False):
             _set_cookie_token(make_token(user.id))
+        if user and st.session_state.pop(_TRIAL_COOKIE_PENDING_KEY, False):
+            # A trial was just claimed in this browser -- deferred write, see
+            # _mark_device_claimed().
+            _set_trial_device_cookie()
         return user
 
     if st.session_state.get("_logged_out_this_session"):
@@ -670,6 +1022,9 @@ def current_user() -> db.User | None:
 # Part 2 for the concrete scenario this closes.
 _SESSION_KEYS_SURVIVING_ACCOUNT_SWITCH = frozenset({
     "_auth_user_id", "_cookie_write_pending", "_cookie_clear_pending", "_lang",
+    # A trial claimed in this tab must still count against a second account
+    # made in the same tab (the cookie snapshot is stale until a reload).
+    "_trial_device_claimed", "_trial_cookie_pending",
 })
 
 
@@ -1139,7 +1494,8 @@ def get_access_status(user: db.User) -> dict:
     UNLIMITED_ACCOUNTS, who never see it go true -- see "unlimited" below.
     """
     is_unlimited = (user.email or "").strip().lower() in UNLIMITED_ACCOUNTS
-    trial_remaining = max(0, DEFAULT_TRIAL_LIMIT - (user.trial_proposals_used or 0))
+    trial_denied_reason = "" if is_unlimited else (getattr(user, "trial_denied_reason", "") or "")
+    trial_remaining = _trial_remaining(user)
     bid_credits = max(0, user.bid_credits or 0)
     subscription_bids_remaining = max(0, SUBSCRIPTION_MONTHLY_BID_LIMIT - (user.subscription_bids_used or 0))
 
@@ -1161,7 +1517,21 @@ def get_access_status(user: db.User) -> dict:
         "subscription_bid_limit": SUBSCRIPTION_MONTHLY_BID_LIMIT,
         "limit_reached": limit_reached,
         "unlimited": is_unlimited,
+        # Why this account has no free trial ("" = it does / did): "email",
+        # "device" or "domain" -- see claim_trial(). Not the same as having
+        # USED the trial (trial_remaining == 0 with no reason).
+        "trial_denied_reason": trial_denied_reason,
+        "email_verified": is_email_verified(user),
     }
+
+
+def _trial_remaining(user: db.User) -> int:
+    """Free-trial bids this account may still spend: 0 once used up, and 0
+    from the start for an account denied a trial (one per person -- see
+    claim_trial). UNLIMITED_ACCOUNTS are never denied."""
+    if (getattr(user, "trial_denied_reason", "") or "") and not _is_unlimited_email(user.email):
+        return 0
+    return max(0, DEFAULT_TRIAL_LIMIT - (user.trial_proposals_used or 0))
 
 
 def record_proposal_usage(user: db.User, project_key: str, project_name: str = "") -> bool:
@@ -1240,7 +1610,7 @@ def record_proposal_usage(user: db.User, project_key: str, project_name: str = "
             else:
                 _funded_by = _funded_by or "subscription"
         else:
-            trial_remaining = max(0, DEFAULT_TRIAL_LIMIT - (db_user.trial_proposals_used or 0))
+            trial_remaining = _trial_remaining(db_user)
             if trial_remaining > 0:
                 db_user.trial_proposals_used = (db_user.trial_proposals_used or 0) + 1
                 _just_used_last_trial_bid = (trial_remaining == 1) and (db_user.bid_credits or 0) == 0
@@ -1303,6 +1673,178 @@ def record_proposal_usage(user: db.User, project_key: str, project_name: str = "
         except Exception as exc:
             print(f"[trial_used_email] failed for {user_email}: {exc}", file=sys.stderr)
 
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Reserve-before-run metering
+#
+# record_proposal_usage() above charges AFTER the analysis finishes. For a
+# ~6-minute queued job that left a window in which the Run button stayed
+# enabled and a second click / refresh / tab queued a second full (~US$1)
+# run. reserve_proposal_usage() closes it: the ProposalUsage row and the spend
+# are committed BEFORE the job is enqueued, and refund_proposal_usage()
+# undoes both, in one transaction, if the job fails.
+# ---------------------------------------------------------------------------
+
+def _guarded_spend(s, user_id: str, tier: str) -> bool:
+    """Spends ONE unit of `tier` ("trial" / "subscription" / "credit") with a
+    single guarded UPDATE, so two concurrent reservations -- even for two
+    different projects -- cannot both spend the last unit: only an UPDATE whose
+    WHERE still holds (the unit is still there) matches a row."""
+    U = db.User
+    if tier == "trial":
+        used = func.coalesce(U.trial_proposals_used, 0)
+        q = s.query(U).filter(U.id == user_id, used < DEFAULT_TRIAL_LIMIT)
+        values = {U.trial_proposals_used: used + 1}
+    elif tier == "subscription":
+        used = func.coalesce(U.subscription_bids_used, 0)
+        q = s.query(U).filter(U.id == user_id, used < SUBSCRIPTION_MONTHLY_BID_LIMIT)
+        values = {U.subscription_bids_used: used + 1}
+    else:
+        credits = func.coalesce(U.bid_credits, 0)
+        q = s.query(U).filter(U.id == user_id, credits > 0)
+        values = {U.bid_credits: credits - 1}
+    return q.update(values, synchronize_session=False) == 1
+
+
+def reserve_proposal_usage(user: db.User, project_key: str, project_name: str = "") -> dict:
+    """Atomically records AND spends the first Tender Analysis run of a
+    project, BEFORE the (billable) job is enqueued. Returns
+    {"status": ..., "funded_by": ..., "just_used_last_trial_bid": bool} where
+    status is:
+      "reserved"   -- spent; the caller must enqueue the job, and call
+                      refund_proposal_usage() if it fails;
+      "already"    -- a row for (user, project) already exists: this is a
+                      second click / refresh / tab racing the first (or a
+                      finished run) -- turn it away, do NOT start a job;
+      "blocked"    -- nothing left to spend (trial used or denied, no
+                      subscription quota, no credits);
+      "unverified" -- the account's email isn't confirmed yet.
+    UNLIMITED_ACCOUNTS are recorded as "unlimited" and spend nothing."""
+    project_key = (project_key or "").strip().lower()
+    if not project_key:
+        raise ValueError(
+            "reserve_proposal_usage() requires a non-empty project_key -- refusing to silently "
+            "skip metering."
+        )
+    with db.get_session() as s:
+        db_user = s.query(db.User).filter(db.User.id == user.id).first()
+        if not db_user:
+            return {"status": "blocked", "funded_by": "", "just_used_last_trial_bid": False}
+        unlimited = _is_unlimited_email(db_user.email)
+        if not unlimited and not is_email_verified(db_user):
+            return {"status": "unverified", "funded_by": "", "just_used_last_trial_bid": False}
+        if s.query(db.ProposalUsage).filter(
+            db.ProposalUsage.user_id == db_user.id,
+            db.ProposalUsage.project_key == project_key,
+        ).first() is not None:
+            return {"status": "already", "funded_by": "", "just_used_last_trial_bid": False}
+
+        funded_by = None
+        just_used_last = False
+        if unlimited:
+            funded_by = "unlimited"
+        else:
+            if db_user.subscription_status in ("active", "past_due"):
+                order = ("subscription", "credit")
+            elif not (db_user.trial_denied_reason or ""):
+                order = ("trial", "credit")
+            else:
+                order = ("credit",)
+            for tier in order:
+                if _guarded_spend(s, db_user.id, tier):
+                    funded_by = tier
+                    just_used_last = tier == "trial" and (db_user.bid_credits or 0) == 0
+                    break
+        if funded_by is None:
+            s.rollback()
+            # A concurrent reservation for THIS project may have just spent
+            # the last unit -- that is "already running", not "out of bids".
+            if s.query(db.ProposalUsage).filter(
+                db.ProposalUsage.user_id == user.id,
+                db.ProposalUsage.project_key == project_key,
+            ).first() is not None:
+                return {"status": "already", "funded_by": "", "just_used_last_trial_bid": False}
+            return {"status": "blocked", "funded_by": "", "just_used_last_trial_bid": False}
+
+        s.add(db.ProposalUsage(
+            user_id=db_user.id, project_key=project_key, project_name=project_name, funded_by=funded_by,
+        ))
+        if funded_by in ("subscription", "credit"):
+            # Same paid-project pass allowance record_proposal_usage() opens:
+            # 5 purchased, this first run already spent.
+            if s.query(db.ProjectPasses).filter(
+                db.ProjectPasses.user_id == db_user.id,
+                db.ProjectPasses.project_key == project_key,
+            ).first() is None:
+                s.add(db.ProjectPasses(
+                    user_id=db_user.id, project_key=project_key, passes_purchased=5, passes_used=1,
+                ))
+        try:
+            s.commit()
+        except IntegrityError:
+            # Lost the race on the (user_id, project_key) unique index: a
+            # concurrent click reserved first. Rolling back also undoes the
+            # guarded spend above, so nothing is charged twice.
+            s.rollback()
+            return {"status": "already", "funded_by": "", "just_used_last_trial_bid": False}
+    print(f"[metering] reserved user={user.id} project={project_key} funded_by={funded_by}", file=sys.stderr)
+    return {"status": "reserved", "funded_by": funded_by, "just_used_last_trial_bid": just_used_last}
+
+
+def notify_trial_used(user: db.User) -> None:
+    """Best-effort "you've used your free trial" email, sent once the run
+    that spent the last trial bid has actually SUCCEEDED."""
+    try:
+        email_utils.send_trial_used_email(user.email)
+    except Exception as exc:
+        print(f"[trial_used_email] failed: {exc}", file=sys.stderr)
+
+
+def refund_proposal_usage(user: db.User, project_key: str) -> bool:
+    """Undoes reserve_proposal_usage() for a run that failed: in ONE
+    transaction, restores whatever the reservation spent (trial bid,
+    subscription quota unit or pay-as-you-go credit), removes the paid
+    project's just-opened pass allowance, and deletes the ProposalUsage row --
+    so the project can be run again and is billed only if it succeeds.
+    Idempotent: a second call (two tabs both seeing the failure) finds nothing
+    and returns False."""
+    project_key = (project_key or "").strip().lower()
+    if not project_key:
+        return False
+    U = db.User
+    with db.get_session() as s:
+        row = s.query(db.ProposalUsage).filter(
+            db.ProposalUsage.user_id == user.id,
+            db.ProposalUsage.project_key == project_key,
+        ).first()
+        if row is None:
+            return False
+        funded_by = row.funded_by or ""
+        if funded_by == "trial":
+            s.query(U).filter(U.id == user.id).update({
+                U.trial_proposals_used: case((func.coalesce(U.trial_proposals_used, 0) > 0,
+                                              func.coalesce(U.trial_proposals_used, 0) - 1), else_=0),
+            }, synchronize_session=False)
+        elif funded_by == "subscription":
+            s.query(U).filter(U.id == user.id).update({
+                U.subscription_bids_used: case((func.coalesce(U.subscription_bids_used, 0) > 0,
+                                                func.coalesce(U.subscription_bids_used, 0) - 1), else_=0),
+            }, synchronize_session=False)
+        elif funded_by == "credit":
+            s.query(U).filter(U.id == user.id).update(
+                {U.bid_credits: func.coalesce(U.bid_credits, 0) + 1}, synchronize_session=False,
+            )
+        if funded_by in ("subscription", "credit"):
+            s.query(db.ProjectPasses).filter(
+                db.ProjectPasses.user_id == user.id,
+                db.ProjectPasses.project_key == project_key,
+                db.ProjectPasses.passes_used <= 1,
+            ).delete(synchronize_session=False)
+        s.delete(row)
+        s.commit()
+    print(f"[metering] refunded user={user.id} project={project_key} funded_by={funded_by}", file=sys.stderr)
     return True
 
 

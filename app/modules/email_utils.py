@@ -136,6 +136,22 @@ def send_password_reset_email(to_email: str, reset_url: str) -> None:
     _send(to_email, "Reset your CivilProposals password", html)
 
 
+def send_verification_email(to_email: str, code: str) -> None:
+    """Sends the 6-digit code a new account must enter before it can use its
+    free trial (see auth.send_verification_code()). Raises like every other
+    send_*_email(); the caller decides how to surface a failure -- unlike the
+    password reset this one IS shown to the user, since the person at the
+    keyboard is the one waiting on the code."""
+    html = _wrap(
+        "<p>Your CivilProposals confirmation code is:</p>"
+        f'<p style="font-size:28px;font-weight:700;letter-spacing:6px;margin:12px 0;">{code}</p>'
+        '<p style="color:#5A6B7A;font-size:13px;">Enter it in the app to confirm this email address '
+        "and unlock your free trial. The code expires in 15 minutes. If you didn't create a "
+        "CivilProposals account, you can safely ignore this email.</p>"
+    )
+    _send(to_email, f"Your CivilProposals code: {code}", html)
+
+
 def send_welcome_email(to_email: str, name: str = "") -> None:
     """Sent once, right after signup (see auth.create_user()) -- previously
     the ONLY email anyone got was a password reset, meaning a brand-new

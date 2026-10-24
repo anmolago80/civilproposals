@@ -266,6 +266,37 @@ with st.sidebar:
             else:
                 st.caption(i18n.t("chrome_admin_recent_signups_empty"))
 
+            # Recent activity: the same 15 newest accounts, with what each one
+            # has actually DONE -- read-only, built by db._recent_activity_rows.
+            st.markdown(f"#### {i18n.t('chrome_admin_recent_activity_header')}")
+            if _stats.get("recent_activity"):
+                st.caption(i18n.t("chrome_admin_recent_activity_caption"))
+                _yes, _no = i18n.t("chrome_admin_recent_activity_yes"), i18n.t("chrome_admin_recent_activity_no")
+                st.dataframe(
+                    [
+                        {
+                            i18n.t("chrome_admin_recent_activity_col_email"): r["email"],
+                            i18n.t("chrome_admin_recent_activity_col_signed_up"): (
+                                r["created"].strftime("%d %b %Y %H:%M") if r["created"] else ""
+                            ),
+                            i18n.t("chrome_admin_recent_activity_col_verified"): _yes if r["verified"] else _no,
+                            i18n.t("chrome_admin_recent_activity_col_tier"): r["tier"],
+                            i18n.t("chrome_admin_recent_activity_col_projects"): r["projects_run"],
+                            i18n.t("chrome_admin_recent_activity_col_ta_runs"): r["ta_runs"],
+                            i18n.t("chrome_admin_recent_activity_col_drafted"): _yes if r["drafted"] else _no,
+                            i18n.t("chrome_admin_recent_activity_col_downloads"): ", ".join(
+                                f"{_type} {_when.strftime('%d %b')}" if _when else _type
+                                for _type, _when in r["downloads"]
+                            ),
+                            i18n.t("chrome_admin_recent_activity_col_ip_shared"): _yes if r["ip_shared"] else _no,
+                        }
+                        for r in _stats["recent_activity"]
+                    ],
+                    use_container_width=True, hide_index=True,
+                )
+            else:
+                st.caption(i18n.t("chrome_admin_recent_activity_empty"))
+
             # Part 2 of the trial-limits/AI-spend-backstop fix brief: the two
             # account-level figures that go with it. accounts_ai_cost_summary()
             # returns raw account fields (subscription_status/bid_credits), not

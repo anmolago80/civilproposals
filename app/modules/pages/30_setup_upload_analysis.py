@@ -655,6 +655,54 @@ with tabs[2]:
             ).first() is not None
     _trial_blocked = IS_SAAS_MODE and current_user and not _access["allowed"] and not _already_counted
 
+    # One free trial per person: an account that hasn't confirmed its email
+    # can sign in but can't start a metered run (UNLIMITED_ACCOUNTS exempt).
+    _verify_blocked = bool(
+        IS_SAAS_MODE and current_user and not _access.get("unlimited")
+        and not _access.get("email_verified", True)
+    )
+    if _verify_blocked:
+        auth.render_email_verification_panel(current_user, key_prefix="_tab3_verify")
+
+    # In-flight guard + resume. The queued job's id is kept per (user,
+    # project) in the database, so while it is queued or running the Run
+    # button stays disabled across a browser refresh and across tabs -- the
+    # old code only recorded the run AFTER the ~6-minute job, so a second
+    # click / refresh / tab queued a second full (billable) analysis. A
+    # refresh or second tab that lands here while the job runs picks it up
+    # and shows its result when it finishes, instead of losing it.
+    _inflight = None
+    _resumed_now = False
+    if IS_SAAS_MODE and current_user and _project_key.strip():
+        _inflight = db.find_inflight_job(current_user.id, _project_key, "tender_analysis")
+    if _inflight and st.session_state.get("analysis") is None:
+        st.info(i18n.t("analysis_inflight_info"))
+        _resume_progress = st.progress(0.05, text=i18n.t("analysis_inflight_text"))
+        try:
+            st.session_state.analysis = _wait_for_job(_inflight["id"], _resume_progress, i18n.t("analysis_inflight_text"))
+            _resume_progress.progress(1.0, text=i18n.t("drafting_done_text"))
+            st.success(i18n.t("analysis_complete_success"))
+            _maybe_snapshot_paid_identity()
+            _resumed_now = True
+            _inflight = None
+        except JobStillRunningError as exc:
+            st.info(str(exc))
+        except Exception as exc:
+            # The job failed: give back what the reservation spent (a no-op
+            # for a repeat run on a paid project, which reserved nothing --
+            # its pass is not refunded, same as before) and let them retry.
+            if _inflight["reserved"]:
+                auth.refund_proposal_usage(current_user, _project_key)
+                # Re-read the balance so the Run button below reflects the
+                # refund on this very run, not only after the next rerun.
+                _access = auth.get_access_status(auth.get_user_by_id(current_user.id) or current_user)
+            _already_counted = _already_counted and not _inflight["reserved"]
+            _trial_blocked = IS_SAAS_MODE and current_user and not _access["allowed"] and not _already_counted
+            _inflight = None
+            _show_error(i18n.t("analysis_failed_error"), exc)
+    elif _inflight:
+        st.info(i18n.t("analysis_inflight_info"))
+
     # Part B / B2: re-running Tender Analysis on a project that's ALREADY
     # been recorded (see _already_counted above) used to always be free --
     # correct for the idempotent "same project + same document, don't
@@ -703,7 +751,7 @@ with tabs[2]:
     if _page_soft_warn_msg:
         st.info(_page_soft_warn_msg)
 
-    if _repeat_blocked and _repeat_is_trial:
+    if _repeat_blocked and _repeat_is_trial and not _resumed_now:
         # Part B: the free trial's one-and-only generation pass on this
         # project has already been spent -- re-running analysis again
         # (even on the exact same document) now needs a paid bid, unlike
@@ -716,7 +764,7 @@ with tabs[2]:
         _render_upgrade_buttons(current_user, key_prefix="_tab3_repeat_trial",
                                  already_subscribed=_access["subscribed"] or _access["past_due"],
                                  topup_project_key=_project_key)
-    elif _repeat_blocked:
+    elif _repeat_blocked and not _resumed_now:
         # Paid project, but its 5-pass allowance (Part B2) is used up.
         st.warning(i18n.t("passes_exhausted"))
         # Audit fix Part 8: was a two-step button-then-link_button flow --
@@ -739,6 +787,10 @@ with tabs[2]:
             st.warning(i18n.t("analysis_past_due_warning", limit=_access['subscription_bid_limit']))
         elif _access["subscribed"]:
             st.warning(i18n.t("analysis_subscribed_limit_warning", limit=_access['subscription_bid_limit']))
+        elif _access.get("trial_denied_reason"):
+            # One trial per person: this mailbox / browser / company domain
+            # already had its free trial -- a plan is the only way on.
+            st.warning(i18n.t(f"analysis_trial_denied_{_access['trial_denied_reason']}"))
         else:
             st.warning(i18n.t("analysis_trial_exhausted_warning", limit=_access['trial_limit']))
         _render_upgrade_buttons(current_user, key_prefix="_tab3",
@@ -780,7 +832,7 @@ with tabs[2]:
         else:
             st.caption(i18n.t("analysis_payg_caption", credits=_access['bid_credits']))
 
-    if st.button(i18n.t("analysis_run_button"), type="primary", disabled=not ready or _trial_blocked or _repeat_blocked or bool(_extra_blocked_msg)):
+    if st.button(i18n.t("analysis_run_button"), type="primary", disabled=not ready or _trial_blocked or _repeat_blocked or bool(_extra_blocked_msg) or _verify_blocked or bool(_inflight)):
         # Audit fix Part 1c: for a repeat run on an already-funded PAID
         # project, spend the pass ATOMICALLY and BEFORE the (expensive,
         # billable) AI call runs -- see auth.consume_project_pass()'s
@@ -801,9 +853,34 @@ with tabs[2]:
             if not _pass_ok:
                 st.warning(i18n.t("passes_exhausted"))
 
+        # First run of this project: RESERVE it -- record the ProposalUsage
+        # row and spend the trial/subscription/credit, atomically -- BEFORE
+        # the AI call, not after it (see auth.reserve_proposal_usage). A
+        # second click, refresh or tab that races this one gets "already"
+        # and is turned away here, before any job is queued. If the job
+        # then fails, the reservation is refunded below.
+        _reserved = False
+        _reservation = {}
+        if _pass_ok and IS_SAAS_MODE and current_user and not _already_counted:
+            _reservation = auth.reserve_proposal_usage(current_user, _project_key, st.session_state.project_name)
+            _reserve_status = _reservation["status"]
+            if _reserve_status == "reserved":
+                _reserved = True
+            else:
+                _pass_ok = False
+                if _reserve_status == "already":
+                    st.warning(i18n.t("analysis_already_running_warning"))
+                elif _reserve_status == "unverified":
+                    st.warning(i18n.t("verify_required_warning", email=current_user.email))
+                elif _access.get("trial_denied_reason"):
+                    st.warning(i18n.t(f"analysis_trial_denied_{_access['trial_denied_reason']}"))
+                else:
+                    st.warning(i18n.t("analysis_trial_exhausted_warning", limit=_access['trial_limit']))
+
         if _pass_ok:
             extracted = st.session_state.tender_extracted
             progress = st.progress(0.0, text=i18n.t("analysis_progress_text"))
+            _queued_run = bool(IS_SAAS_MODE and current_user and job_queue.redis_available())
 
             def _progress_cb(done, total):
                 progress.progress((done + 1) / max(total, 1), text=i18n.t("analysis_progress_detail", done=done + 1, total=total))
@@ -841,6 +918,7 @@ with tabs[2]:
                     inline_extra_kwargs={"progress_callback": _progress_cb},
                     queue_func=job_queue.run_tender_analysis_job,
                     queue_args=(extracted.text, extracted.annotations, _redacted_ai_config),
+                    job_project_key=_project_key, job_reserved=_reserved,
                 )
                 st.session_state.analysis = analysis
                 progress.progress(1.0, text=i18n.t("drafting_done_text"))
@@ -856,7 +934,12 @@ with tabs[2]:
                         # further to charge here.
                         pass
                     else:
-                        auth.record_proposal_usage(current_user, _project_key, st.session_state.project_name)
+                        # Already recorded and spent up front (reserve above);
+                        # the run succeeded, so the reservation stands.
+                        if _reservation.get("just_used_last_trial_bid"):
+                            # Sent now, not at reservation: a failed run is
+                            # refunded and must not tell them the trial is gone.
+                            auth.notify_trial_used(current_user)
                         # Signup-funnel step 3 (activation): a bid actually analysed.
                         analytics.track_event("Bid Analysed")
                     # Part C: remember this as the last-confirmed PAID identity
@@ -865,8 +948,30 @@ with tabs[2]:
                     # has to happen right HERE (the moment a paid generation
                     # cycle actually completes) rather than on every rerun.
                     _maybe_snapshot_paid_identity()
+            except JobStillRunningError as exc:
+                # Gave up waiting but a worker is still running the job: it
+                # may yet finish, so this is NOT a failure and NOT refunded.
+                # The Run button stays off (in-flight guard) and a refresh
+                # picks the result up.
+                st.info(str(exc))
             except Exception as exc:
+                # Failed run: undo the reservation in one transaction so the
+                # trial / quota / credit comes back and the project can be
+                # run again (a no-op for a paid repeat run, which reserved
+                # nothing).
+                if _reserved:
+                    auth.refund_proposal_usage(current_user, _project_key)
                 _show_error(i18n.t("analysis_failed_error"), exc)
+            except BaseException:
+                # The script run itself was interrupted (browser refresh,
+                # stop). A queued job carries on in the worker and the
+                # in-flight guard picks it up on the next load -- keep the
+                # reservation. With no job to wait for (inline mode, or
+                # interrupted before it was queued) nothing will ever
+                # deliver a result, so give the reservation back.
+                if _reserved and not db.find_inflight_job(current_user.id, _project_key, "tender_analysis"):
+                    auth.refund_proposal_usage(current_user, _project_key)
+                raise
 
     analysis = st.session_state.analysis
     if analysis:

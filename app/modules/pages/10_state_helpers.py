@@ -282,7 +282,8 @@ def _init_state():
 
 def _run_job_or_inline(job_type, func, args=(), kwargs=None, progress=None,
                         queued_text="Queued...", running_text="Working...",
-                        inline_extra_kwargs=None, queue_func=None, queue_args=None):
+                        inline_extra_kwargs=None, queue_func=None, queue_args=None,
+                        job_project_key=None, job_reserved=False):
     """
     Runs func(*args, **kwargs) either in the background job queue (see
     modules/job_queue.py) or inline in this process, and either way blocks
@@ -335,10 +336,24 @@ def _run_job_or_inline(job_type, func, args=(), kwargs=None, progress=None,
             "project_name": st.session_state.get("project_name", ""),
             "purpose": job_type,
         }
-    job_id = job_queue.enqueue(current_user.id, job_type, enqueue_func, *enqueue_args, **enqueue_kwargs)
+    # job_project_key / job_reserved are recorded on the Job row so the
+    # project's Run button stays disabled while this job is queued or running
+    # (db.find_inflight_job) -- across a browser refresh and across tabs -- and
+    # so a failed job knows whether it must refund a reserved ProposalUsage.
+    job_id = job_queue.enqueue_tracked(
+        current_user.id, job_type, job_project_key, job_reserved,
+        enqueue_func, *enqueue_args, **enqueue_kwargs,
+    )
     if progress:
         progress.progress(0.05, text=queued_text)
+    return _wait_for_job(job_id, progress, running_text)
 
+
+def _wait_for_job(job_id, progress=None, running_text="Working..."):
+    """Polls a queued job until it finishes and returns its result; raises
+    RuntimeError if it failed (or never ran). Shared by _run_job_or_inline
+    (the click that queued it) and the Tender Analysis tab's resume path (a
+    refresh or second tab that finds the job still in flight)."""
     # Hard ceiling on how long this waits, in case a job is enqueued but
     # never picked up (e.g. the worker service -- see modules/worker.py --
     # is down or was never deployed) or somehow never resolves. Without
@@ -351,9 +366,9 @@ def _run_job_or_inline(job_type, func, args=(), kwargs=None, progress=None,
     # execution ceiling once a worker actually starts the job) so a
     # legitimately long-running job is never preempted before RQ itself
     # would have given up on it.
-    MAX_WAIT_SECONDS = 20 * 60
+    MAX_WAIT_SECONDS = job_queue.WAIT_MAX_SECONDS
     elapsed = 0.0
-    poll_interval = 1.5
+    poll_interval = job_queue.POLL_INTERVAL_SECONDS
     while elapsed < MAX_WAIT_SECONDS:
         status = job_queue.get_status(job_id, current_user.id)
         if status["status"] == "finished":
@@ -369,12 +384,28 @@ def _run_job_or_inline(job_type, func, args=(), kwargs=None, progress=None,
         time.sleep(poll_interval)
         elapsed += poll_interval
 
-    raise RuntimeError(
-        "This is taking much longer than expected and may mean the background worker is "
-        "offline. Nothing was charged for this attempt beyond what the trial/subscription "
-        "gate already checked -- try again in a few minutes, and contact "
-        "hello@civilproposals.com if it keeps happening."
+    # Gave up waiting. A job still sitting in the queue (never picked up --
+    # the worker is offline) is cancelled so it can't run later, unpaid-for,
+    # once the worker returns; that case is a plain failure and the caller
+    # refunds. A job a worker HAS started may still finish and be delivered
+    # (see the Tender Analysis tab's resume path), so that one is NOT a
+    # failure and must not be refunded.
+    if job_queue.cancel_if_queued(job_id, current_user.id):
+        raise RuntimeError(
+            "This is taking much longer than expected and may mean the background worker is "
+            "offline. Nothing was charged for this attempt -- try again in a few minutes, and "
+            "contact hello@civilproposals.com if it keeps happening."
+        )
+    raise JobStillRunningError(
+        "This analysis is still running in the background. Refresh this page in a few minutes -- "
+        "it will pick up where it left off, and the project can't be started a second time "
+        "while it runs."
     )
+
+
+class JobStillRunningError(RuntimeError):
+    """_wait_for_job() gave up waiting, but the job was already started by a
+    worker and may still complete. NOT a failed job: callers must not refund."""
 
 
 def _ocr_export_note() -> str | None:

@@ -25,7 +25,7 @@ import os
 import sys
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
     create_engine, Column, String, Integer, Float, DateTime, Boolean, LargeBinary,
@@ -157,6 +157,33 @@ class User(Base):
     # (see modules/pages/10_state_helpers.py's PLAIN_KEYS / Part A3).
     preferred_language = Column(String, nullable=True)
 
+    # One free trial per person (see auth.create_user / claim_trial and the
+    # TrialClaim ledger below).
+    #
+    # email_normalized: email_identity.normalize_email(email) -- lowercase,
+    # "+tag" stripped on every domain, dots removed for gmail/googlemail. UNIQUE,
+    # so "a.b+x@gmail.com" cannot be opened beside "ab@gmail.com". NULL only for
+    # a legacy account whose normalised form collided with an older account
+    # (several NULLs are allowed by a unique index).
+    email_normalized = Column(String, unique=True, nullable=True, index=True)
+
+    # NULL = the address has not been confirmed yet: the account can sign in
+    # but cannot spend the trial (auth.is_email_verified). Every account that
+    # existed when this column was added is stamped verified by the migration.
+    email_verified_at = Column(DateTime, nullable=True)
+    # Pending 6-digit confirmation code: HMAC of the code (never the code),
+    # when it expires, how many wrong guesses it has had, when it was sent
+    # (resend cooldown).
+    verify_code_hash = Column(String, nullable=True)
+    verify_code_expires_at = Column(DateTime, nullable=True)
+    verify_code_attempts = Column(Integer, default=0)
+    verify_code_sent_at = Column(DateTime, nullable=True)
+
+    # "" = this account may claim / holds the free trial. Otherwise why it
+    # gets none: "email" (that mailbox already had a trial), "device" (this
+    # browser already claimed one), "domain" (company-domain switch).
+    trial_denied_reason = Column(String, default="")
+
     library_entries = relationship("LibraryEntry", back_populates="user", cascade="all, delete-orphan")
     reference_library_entries = relationship(
         "ReferenceLibraryEntry", back_populates="user", cascade="all, delete-orphan",
@@ -212,6 +239,31 @@ class ProposalUsage(Base):
     funded_by = Column(String, default="")
 
     user = relationship("User", back_populates="proposal_usage")
+
+
+class TrialClaim(Base):
+    """The free-trial ledger: one row per mailbox that has ever been granted a
+    trial, keyed by the NORMALISED email (see email_identity.normalize_email).
+
+    Rows are never deleted -- deliberately not cascaded from users and never
+    touched by any account-deletion path -- so deleting an account and signing
+    up again with the same mailbox (or an alias of it) finds its old row and
+    gets no second trial.
+
+    user_id is a plain string, not a foreign key, for the same reason: it must
+    survive the user row being removed.
+
+    device_hash is the day-rotated SHA-256 of IP + user-agent at claim time.
+    It is a SIGNAL for the admin view only (offices share IPs, so it can never
+    block anyone) and only matches claims made the same UTC day."""
+    __tablename__ = "trial_claims"
+
+    id = Column(String, primary_key=True, default=_uid)
+    email_normalized = Column(String, nullable=False, unique=True, index=True)
+    email_domain = Column(String, default="", index=True)
+    user_id = Column(String, nullable=False, index=True)
+    claimed_at = Column(DateTime, default=_now)
+    device_hash = Column(String, default="", index=True)
 
 
 class ArtifactEvent(Base):
@@ -426,6 +478,13 @@ class Job(Base):
     created_at = Column(DateTime, default=_now)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
     error_message = Column(Text, default="")
+    # In-flight guard for the metered Tender Analysis run: which project this
+    # job belongs to (lower-cased, same form as ProposalUsage.project_key), and
+    # whether the run RESERVED a ProposalUsage row before it was queued (so a
+    # failed job knows it must refund it -- a repeat run on a paid project
+    # spent a pass instead, which is never refunded). See find_inflight_job().
+    project_key = Column(String, nullable=True, index=True)
+    reserved = Column(Boolean, default=False)
 
 
 class AiCallLog(Base):
@@ -662,6 +721,117 @@ def ai_cost_summary(limit_projects: int = 25) -> dict:
     }
 
 
+# A queued/started Job row older than this is treated as dead rather than
+# "still running" -- comfortably above job_queue.JOB_TIMEOUT_SECONDS (15 min)
+# plus the web side's own wait ceiling, so a worker that died can never leave
+# a project's Run button disabled forever.
+INFLIGHT_JOB_MAX_AGE_MINUTES = 30
+
+
+def find_inflight_job(user_id: str, project_key: str, job_type: str = "tender_analysis") -> dict | None:
+    """The queued/running background job for (user, project), if any -- the
+    in-flight guard behind the Tender Analysis Run button. It is read from the
+    database, not from session state, so it holds across a browser refresh and
+    across tabs. Returns {"id", "status", "reserved", "created_at"} or None."""
+    project_key = (project_key or "").strip().lower()
+    if not user_id or not project_key:
+        return None
+    cutoff = (_now() - timedelta(minutes=INFLIGHT_JOB_MAX_AGE_MINUTES)).replace(tzinfo=None)
+    with get_session() as s:
+        row = (
+            s.query(Job)
+            .filter(
+                Job.user_id == user_id,
+                Job.project_key == project_key,
+                Job.job_type == job_type,
+                Job.status.in_(("queued", "started")),
+                Job.created_at >= cutoff,
+            )
+            .order_by(Job.created_at.desc())
+            .first()
+        )
+        if row is None:
+            return None
+        return {"id": row.id, "status": row.status, "reserved": bool(row.reserved), "created_at": row.created_at}
+
+
+def _recent_activity_rows(s, users: list, signups: list[dict], usage_by_user: dict) -> list[dict]:
+    """The owner-only "Recent activity" table (admin panel): one row per
+    account in `users` (already the 15 newest), read-only. `signups` is the
+    parallel list admin_stats() built (it carries the tier); `usage_by_user`
+    is {user_id: (projects_run, non_trial_count)}.
+
+    - ta_runs counts Tender Analysis Job rows that did not fail, so a double
+      run on one project shows as 2 runs against 1 project. Accounts whose
+      runs predate / bypass the queue (no Job rows) fall back to projects_run.
+    - downloads come from ArtifactEvent, which is only written for FREE-tier
+      (trial-funded) projects -- a paid project's unlimited re-downloads leave
+      no row, so an empty list there does not mean "never downloaded".
+    - ip_shared flags a trial claim whose day-rotated IP+user-agent hash
+      matches an EARLIER claim by a different account. A flag only: offices
+      share IPs, nothing is ever blocked on it."""
+    ids = [u.id for u in users]
+    if not ids:
+        return []
+    ta_runs = {
+        uid: int(n) for uid, n in
+        s.query(Job.user_id, func.count(Job.id))
+        .filter(Job.user_id.in_(ids), Job.job_type == "tender_analysis", Job.status != "failed")
+        .group_by(Job.user_id).all()
+    }
+    drafted = {
+        r[0] for r in s.query(Job.user_id)
+        .filter(Job.user_id.in_(ids), Job.job_type == "draft_generation", Job.status != "failed")
+        .distinct().all()
+    }
+    drafted |= {
+        r[0] for r in s.query(AiCallLog.user_id)
+        .filter(AiCallLog.user_id.in_(ids), AiCallLog.purpose == "draft_generation")
+        .distinct().all()
+    }
+    downloads: dict[str, list[tuple[str, datetime]]] = {}
+    for uid, atype, when in (
+        s.query(ArtifactEvent.user_id, ArtifactEvent.artifact_type, func.max(ArtifactEvent.created_at))
+        .filter(ArtifactEvent.user_id.in_(ids))
+        .group_by(ArtifactEvent.user_id, ArtifactEvent.artifact_type)
+        .order_by(func.max(ArtifactEvent.created_at))
+        .all()
+    ):
+        downloads.setdefault(uid, []).append((atype, when))
+
+    claims = {c.user_id: c for c in s.query(TrialClaim).filter(TrialClaim.user_id.in_(ids)).all()}
+    hashes = {c.device_hash for c in claims.values() if c.device_hash}
+    others = (
+        s.query(TrialClaim.device_hash, TrialClaim.user_id, TrialClaim.claimed_at)
+        .filter(TrialClaim.device_hash.in_(hashes)).all()
+        if hashes else []
+    )
+
+    rows = []
+    for u, sign in zip(users, signups):
+        claim = claims.get(u.id)
+        ip_shared = bool(
+            claim and claim.device_hash and any(
+                o[0] == claim.device_hash and o[1] != u.id and o[2] is not None
+                and claim.claimed_at is not None and o[2] < claim.claimed_at
+                for o in others
+            )
+        )
+        projects_run = int(usage_by_user.get(u.id, (0, 0))[0])
+        rows.append({
+            "email": u.email or "",
+            "created": u.created_at,
+            "verified": u.email_verified_at is not None,
+            "tier": sign["tier"],
+            "projects_run": projects_run,
+            "ta_runs": max(ta_runs.get(u.id, 0), projects_run),
+            "drafted": u.id in drafted,
+            "downloads": downloads.get(u.id, []),
+            "ip_shared": ip_shared,
+        })
+    return rows
+
+
 def admin_stats() -> dict:
     """Read-only rollup for the admin panel (see app's sidebar "Admin
     stats" button; gated by auth.is_admin_user). Aggregates across ALL
@@ -748,6 +918,7 @@ def admin_stats() -> dict:
                 "tier": tier,
                 "bids_run": _bids_run,
             })
+        recent_activity = _recent_activity_rows(s, recent_signup_users, recent_signups, _usage_by_user)
     return {
         "total_users": int(total_users),
         "new_users_30d": int(new_users_30d),
@@ -762,6 +933,7 @@ def admin_stats() -> dict:
             for r in recent_bids
         ],
         "recent_signups": recent_signups,
+        "recent_activity": recent_activity,
     }
 
 
@@ -912,6 +1084,81 @@ def _run_light_migrations() -> None:
     if "preferred_language" not in existing_columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE users ADD COLUMN preferred_language VARCHAR"))
+
+    # One free trial per person: new users columns (see User), then the
+    # one-time legacy backfill. Every account that exists when email_verified_at
+    # is first added is treated as VERIFIED (created_at) and gets a
+    # TrialClaim row, so existing customers are unaffected, and a legacy
+    # account that is deleted and re-created cannot pick up a second trial.
+    _verified_column_added = "email_verified_at" not in existing_columns
+    for _col, _ddl in (
+        ("email_normalized", "VARCHAR"),
+        ("email_verified_at", "TIMESTAMP"),
+        ("verify_code_hash", "VARCHAR"),
+        ("verify_code_expires_at", "TIMESTAMP"),
+        ("verify_code_attempts", "INTEGER DEFAULT 0"),
+        ("verify_code_sent_at", "TIMESTAMP"),
+        ("trial_denied_reason", "VARCHAR DEFAULT ''"),
+    ):
+        if _col not in existing_columns:
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE users ADD COLUMN {_col} {_ddl}"))
+            except Exception:
+                # The web and worker services both run init_db() when a deploy
+                # starts them together; the other one may have added this
+                # column between our check and our ALTER. Anything else wrong
+                # with the column surfaces on the very next statement.
+                if _col not in {c["name"] for c in inspect(engine).get_columns("users")}:
+                    raise
+
+    from modules import email_identity
+    with engine.begin() as conn:
+        # Oldest account wins a normalised address; a later legacy alias of it
+        # keeps NULL (a unique index allows any number of NULLs) rather than
+        # failing the whole migration -- it still logs in by its own email.
+        _taken = {r[0] for r in conn.execute(text(
+            "SELECT email_normalized FROM users WHERE email_normalized IS NOT NULL"
+        ))}
+        for _uid_, _email in conn.execute(text(
+            "SELECT id, email FROM users WHERE email_normalized IS NULL ORDER BY created_at, id"
+        )).fetchall():
+            _n = email_identity.normalize_email(_email)
+            if _n and _n not in _taken:
+                conn.execute(text("UPDATE users SET email_normalized = :n WHERE id = :i"),
+                             {"n": _n, "i": _uid_})
+                _taken.add(_n)
+    if _verified_column_added:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "UPDATE users SET email_verified_at = COALESCE(created_at, CURRENT_TIMESTAMP) "
+                "WHERE email_verified_at IS NULL"
+            ))
+            for _uid_, _n, _created in conn.execute(text(
+                "SELECT id, email_normalized, created_at FROM users WHERE email_normalized IS NOT NULL"
+            )).fetchall():
+                conn.execute(text(
+                    "INSERT INTO trial_claims (id, email_normalized, email_domain, user_id, claimed_at, device_hash) "
+                    "SELECT :id, :n, :d, :u, :c, '' WHERE NOT EXISTS "
+                    "(SELECT 1 FROM trial_claims WHERE email_normalized = :n)"
+                ), {"id": _uid(), "n": _n, "d": email_identity.email_domain(_n), "u": _uid_, "c": _created})
+    with engine.begin() as conn:
+        # Same name create_all() gives a fresh database's index, so a fresh
+        # database doesn't end up with two.
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email_normalized ON users (email_normalized)"
+        ))
+
+    if "jobs" in inspector.get_table_names():
+        _job_columns = {c["name"] for c in inspector.get_columns("jobs")}
+        if "project_key" not in _job_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE jobs ADD COLUMN project_key VARCHAR"))
+        if "reserved" not in _job_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE jobs ADD COLUMN reserved BOOLEAN DEFAULT FALSE"))
+        with engine.begin() as conn:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_jobs_project_key ON jobs (project_key)"))
 
     # Retrofit the (user_id, project_key) unique constraint onto
     # proposal_usage -- see ProposalUsage's docstring for why this exists
