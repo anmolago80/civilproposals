@@ -266,6 +266,7 @@ def analyse_tender(
                 system_message=SYSTEM_MESSAGE,
                 config=config,
                 max_tokens=1200,
+                purpose="tender_analysis", step="map",
             )
             notes.append(f"--- Notes from part {i + 1}/{len(chunks)} ---\n{note}")
         source_material = "\n\n".join(notes)
@@ -286,7 +287,8 @@ def analyse_tender(
             "invent, omit, or alter any fact, number, date, weighting, or name because of this "
             "instruction; extract exactly what the brief states, just written in Spanish."
         )
-    raw = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=4000)
+    raw = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=4000,
+                       purpose="tender_analysis", step="reduce")
 
     analysis = TenderAnalysis.model_validate(raw)
     analysis.user_flagged_items = _flagged_items_from_annotations(annotations)
@@ -352,6 +354,7 @@ def detect_disciplines_from_text(brief_text: str, config: dict | None = None,
         data = call_ai_json(
             DISCIPLINE_DETECTION_PROMPT.format(brief=material),
             system_message=DISCIPLINE_DETECTION_SYSTEM, config=config, max_tokens=800,
+            purpose="discipline_detection",
         )
     except Exception as exc:
         return [], warnings + [

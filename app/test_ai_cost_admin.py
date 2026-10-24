@@ -394,6 +394,332 @@ def test_i18n_catalogs_have_new_keys(failures: list[str]) -> None:
         failures.append(f"test_i18n: catalogs differ: {sorted(set(en.STRINGS) ^ set(es.STRINGS))[:5]}")
 
 
+# --------------------------------------------------------------------------
+# CP-TASK 3b -- per-call evidence, purposes, cost breakdown
+# --------------------------------------------------------------------------
+
+class _FakeAnthropic:
+    """Stands in for the `anthropic` package: records each request and returns
+    whatever the test queued, with the usage shape the real SDK returns."""
+    calls: list[dict] = []
+    replies: list[tuple] = []     # (text, output_tokens, thinking_tokens, stop_reason)
+
+    class _Block:
+        def __init__(self, text):
+            self.type, self.text = "text", text
+
+    class _Details:
+        def __init__(self, thinking):
+            self.thinking_tokens = thinking
+
+    class _Usage:
+        def __init__(self, inp, out, thinking):
+            self.input_tokens, self.output_tokens = inp, out
+            self.output_tokens_details = _FakeAnthropic._Details(thinking) if thinking is not None else None
+
+    class _Response:
+        def __init__(self, text, inp, out, thinking, stop):
+            self.content = [_FakeAnthropic._Block(text)]
+            self.usage = _FakeAnthropic._Usage(inp, out, thinking)
+            self.stop_reason = stop
+
+    class _Messages:
+        def create(self, model, max_tokens, system, messages, **kw):
+            _FakeAnthropic.calls.append({"model": model, "max_tokens": max_tokens, "prompt": messages[0]["content"]})
+            if _FakeAnthropic.replies:
+                text, out, thinking, stop = _FakeAnthropic.replies.pop(0)
+            else:
+                text, out, thinking, stop = ("ok", 50, None, "end_turn")
+            return _FakeAnthropic._Response(text, 1000, out, thinking, stop)
+
+    def __init__(self, api_key=None):
+        self.messages = _FakeAnthropic._Messages()
+
+
+def _with_fake_anthropic(fn):
+    import types
+    saved = sys.modules.get("anthropic")
+    mod = types.ModuleType("anthropic"); mod.Anthropic = _FakeAnthropic
+    sys.modules["anthropic"] = mod
+    _FakeAnthropic.calls, _FakeAnthropic.replies = [], []
+    try:
+        return fn()
+    finally:
+        if saved is not None:
+            sys.modules["anthropic"] = saved
+        else:
+            del sys.modules["anthropic"]
+        ai_interface.set_usage_context()
+
+
+_CFG = {"provider": "Anthropic Claude", "api_key": "k", "model": "claude-sonnet-5"}
+
+
+def _rows_for(user_id: str):
+    with db.get_session() as s:
+        return s.query(db.AiCallLog).filter(db.AiCallLog.user_id == user_id).order_by(
+            db.AiCallLog.created_at, db.AiCallLog.id).all()
+
+
+def test_requested_max_tokens_and_evidence_stored_per_attempt(failures: list[str]) -> None:
+    user = _new_user()
+    try:
+        def run():
+            ai_interface.set_usage_context(user_id=user.id, project_key="k|t|c|h", project_name="P", purpose="tender_analysis")
+            # 1) a plain call: its own cap, thinking tokens and stop reason are stored.
+            _FakeAnthropic.replies = [("notes", 1190, 900, "end_turn")]
+            ai_interface.call_ai("p", "sys", _CFG, max_tokens=1200, purpose="tender_analysis", step="map")
+            # 2) an EMPTY reply -> _call_with_resilience re-asks with double the cap: a NEW row.
+            _FakeAnthropic.replies = [("", 1200, 1200, "max_tokens"), ("notes", 800, 100, "end_turn")]
+            ai_interface.call_ai("p", "sys", _CFG, max_tokens=1200, purpose="tender_analysis", step="map")
+            # 3) call_ai_json: unparseable reply -> re-asks with a bigger cap: a NEW row each.
+            _FakeAnthropic.replies = [("not json at all", 4000, 3000, "max_tokens"), ('{"a": 1}', 900, 0, "end_turn")]
+            out = ai_interface.call_ai_json("p", "sys", _CFG, max_tokens=4000, purpose="tender_analysis", step="reduce")
+            return out
+        out = _with_fake_anthropic(run)
+        rows = _rows_for(user.id)
+        got = [(r.step, r.attempt, r.max_tokens, r.output_tokens, r.thinking_tokens, r.stop_reason) for r in rows]
+        want = [
+            ("map", None, 1200, 1190, 900, "end_turn"),
+            ("map", None, 1200, 1200, 1200, "max_tokens"),
+            ("map", "empty_retry", 2400, 800, 100, "end_turn"),
+            ("reduce", None, 4000, 4000, 3000, "max_tokens"),
+            ("reduce", "json_retry", 8000, 900, 0, "end_turn"),
+        ]
+        if got != want:
+            failures.append(f"test_max_tokens: rows {got} != {want}")
+        if out != {"a": 1}:
+            failures.append("test_max_tokens: json result lost")
+        if [c["max_tokens"] for c in _FakeAnthropic.calls] != [1200, 1200, 2400, 4000, 8000]:
+            failures.append("test_max_tokens: the logged cap is not what was actually requested")
+    finally:
+        _cleanup(user.id)
+
+
+def test_output_over_requested_cap_is_flagged(failures: list[str]) -> None:
+    """max_tokens is a hard cap, so output above it is an anomaly worth shouting about:
+    a stderr warning at log time and a YES in the breakdown."""
+    import io, contextlib
+    user = _new_user()
+    key = "over|t|c|h"
+    try:
+        def run():
+            ai_interface.set_usage_context(user_id=user.id, project_key=key, project_name="Over")
+            _FakeAnthropic.replies = [("notes", 5000, None, "end_turn")]
+            ai_interface.call_ai("p", "sys", _CFG, max_tokens=1200, purpose="tender_analysis", step="map")
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            _with_fake_anthropic(run)
+        if "output_tokens 5000 > requested max_tokens 1200" not in buf.getvalue():
+            failures.append("test_over_cap: no warning logged")
+        bd = db.project_cost_breakdown(key, user.id)
+        if not bd["calls"] or not bd["calls"][0]["over_cap"]:
+            failures.append("test_over_cap: breakdown did not flag the call")
+    finally:
+        _cleanup(user.id)
+
+
+def test_every_ai_call_site_sets_a_purpose(failures: list[str]) -> None:
+    import ast
+    root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modules")
+    sites = 0
+    for dirpath, _dirs, files in os.walk(root):
+        for fn in files:
+            if not fn.endswith(".py") or fn == "ai_interface.py":
+                continue
+            path = os.path.join(dirpath, fn)
+            tree = ast.parse(open(path, encoding="utf-8").read())
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call):
+                    f = node.func
+                    name = f.id if isinstance(f, ast.Name) else (f.attr if isinstance(f, ast.Attribute) else "")
+                    if name in ("call_ai", "call_ai_json"):
+                        sites += 1
+                        if "purpose" not in {k.arg for k in node.keywords}:
+                            failures.append(f"test_purposes: {os.path.relpath(path, root)}:{node.lineno} {name}() has no purpose=")
+    if sites < 15:
+        failures.append(f"test_purposes: only {sites} call sites found -- the scan is broken")
+    # An unlabelled call is still never blank: it takes its calling module's name.
+    user = _new_user()
+    try:
+        def run():
+            ai_interface.set_usage_context(user_id=user.id, project_key="u|t|c|h", project_name="U")
+            ai_interface.call_ai("p", "sys", _CFG, max_tokens=100)
+        _with_fake_anthropic(run)
+        purposes = [r.purpose for r in _rows_for(user.id)]
+        if not purposes or not all(purposes):
+            failures.append(f"test_purposes: an unlabelled call logged a blank purpose: {purposes}")
+    finally:
+        _cleanup(user.id)
+
+
+def test_inline_features_log_their_purpose(failures: list[str]) -> None:
+    """Real feature functions, run against the stub: discipline re-scan and the
+    tender analysis steps land with the right purpose/step -- including when the
+    surrounding job context carries no purpose at all (the inline path)."""
+    user = _new_user()
+    try:
+        def run():
+            ai_interface.set_usage_context(user_id=user.id, project_key="in|t|c|h", project_name="In")  # no purpose
+            _FakeAnthropic.replies = [('{"disciplines": ["Structural"]}', 40, None, "end_turn")]
+            tender_analyser.detect_disciplines_from_text("A bridge over a creek. " * 20, config=_CFG)
+            text = _brief(40_000)
+            n_chunks = len(tender_analyser.clean_and_chunk_tender_text(text)[1])
+            _FakeAnthropic.replies = [("note (p.1)", 300, None, "end_turn")] * n_chunks + [
+                ('{"project_scope": "x"}', 500, None, "end_turn")]
+            tender_analyser.analyse_tender(text, None, _CFG)
+            return n_chunks
+        n_chunks = _with_fake_anthropic(run)
+        rows = _rows_for(user.id)
+        got = [(r.purpose, r.step or "") for r in rows]
+        want = [("discipline_detection", "")] + [("tender_analysis", "map")] * n_chunks + [("tender_analysis", "reduce")]
+        if got != want:
+            failures.append(f"test_inline_purposes: {got[:4]}... != {want[:4]}...")
+        if any(not r.purpose for r in rows):
+            failures.append("test_inline_purposes: a blank purpose was logged")
+        reduce_row = rows[-1]
+        if reduce_row.max_tokens != 4000:
+            failures.append(f"test_inline_purposes: reduce requested {reduce_row.max_tokens}, expected 4000")
+    finally:
+        _cleanup(user.id)
+
+
+def test_breakdown_from_fixture_rows(failures: list[str]) -> None:
+    from datetime import datetime, timedelta, timezone
+    user = _new_user()
+    key = "York Region Water Model Update|T|C|abcdef0123456789"
+    t0 = datetime(2026, 10, 23, 14, 53, tzinfo=timezone.utc)
+    try:
+        with db.get_session() as s:
+            for run in range(2):
+                base = t0 + timedelta(minutes=6 * run)
+                s.add(db.Job(id=f"bd{run}-{user.id}", user_id=user.id, job_type="tender_analysis", status="finished",
+                             project_key=key.lower(), created_at=base))
+                for i in range(14):    # legacy rows: no step / attempt / max_tokens
+                    s.add(db.AiCallLog(user_id=user.id, project_key=key, project_name="York", purpose="tender_analysis",
+                                       model="claude-sonnet-5", input_tokens=4000, output_tokens=1000,
+                                       estimated_cost_usd=0.0165, created_at=base + timedelta(seconds=20 * i)))
+                s.add(db.AiCallLog(user_id=user.id, project_key=key, project_name="York", purpose="tender_analysis",
+                                   model="claude-sonnet-5", input_tokens=46_000, output_tokens=4_000,
+                                   estimated_cost_usd=0.2, created_at=base + timedelta(seconds=320)))
+            # a labelled, post-analysis call
+            s.add(db.AiCallLog(user_id=user.id, project_key=key, project_name="York", purpose="team_bios", step="",
+                               model="claude-sonnet-5", input_tokens=5000, output_tokens=2000, max_tokens=3000,
+                               stop_reason="end_turn", created_at=t0 + timedelta(minutes=30)))
+            s.commit()
+        bd = db.project_cost_breakdown(key, user.id)
+        if bd["totals"]["calls"] != 31:
+            failures.append(f"test_breakdown: {bd['totals']['calls']} calls, expected 31")
+        want_in = 2 * (14 * 4000 + 46_000) + 5000
+        want_out = 2 * (14 * 1000 + 4000) + 2000
+        if (bd["totals"]["input_tokens"], bd["totals"]["output_tokens"]) != (want_in, want_out):
+            failures.append(f"test_breakdown: totals {bd['totals']}")
+        want_cost = want_in * 2 / 1e6 + want_out * 10 / 1e6     # recomputed at (2, 10), not the stored $0.0165s
+        if abs(bd["totals"]["cost_usd"] - want_cost) > 1e-6:
+            failures.append(f"test_breakdown: cost {bd['totals']['cost_usd']} != {want_cost}")
+        purposes = {p["purpose"]: p for p in bd["by_purpose"]}
+        if purposes["tender_analysis"]["calls"] != 30 or purposes["team_bios"]["calls"] != 1:
+            failures.append(f"test_breakdown: by purpose {purposes}")
+        if len(bd["runs"]) != 2:
+            failures.append(f"test_breakdown: {len(bd['runs'])} runs, expected 2 (one per queued job)")
+        else:
+            kinds = {k["kind"]: k for k in bd["runs"][0]["kinds"]}
+            if kinds.get("map (inferred)", {}).get("calls") != 14 or kinds.get("reduce (inferred)", {}).get("calls") != 1:
+                failures.append(f"test_breakdown: legacy map/reduce inference wrong: {kinds}")
+            run_cost = 14 * (4000 * 2 + 1000 * 10) / 1e6 + (46_000 * 2 + 4000 * 10) / 1e6
+            if abs(bd["runs"][0]["cost_usd"] - run_cost) > 1e-6:
+                failures.append(f"test_breakdown: run cost {bd['runs'][0]['cost_usd']} != {run_cost}")
+        if not any(c["purpose"] == "team_bios" and c["run"] is None for c in bd["calls"]):
+            failures.append("test_breakdown: a post-analysis call must sit outside every run")
+        if [c["time"] for c in bd["calls"]] != sorted(c["time"] for c in bd["calls"]):
+            failures.append("test_breakdown: calls not in time order")
+    finally:
+        _cleanup(user.id)
+
+
+def test_breakdown_expander_renders(failures: list[str]) -> None:
+    from streamlit.testing.v1 import AppTest
+    admin_email = f"_adm_{uuid.uuid4().hex[:8]}@example.invalid"
+    auth.ADMIN_ACCOUNTS.add(admin_email)
+    email_utils.is_configured = lambda: False
+    admin = auth.create_user(admin_email, "testpassword123", device_claimed=False)
+    auth.accept_terms(admin)
+    other = _new_user()
+    key = "Culvert Job|T|C|0123456789abcdef"
+    try:
+        with db.get_session() as s:
+            s.add(db.AiCallLog(user_id=other.id, project_key=key, project_name="Culvert Job", purpose="tender_analysis",
+                               step="map", model="claude-sonnet-5", input_tokens=4000, output_tokens=1100,
+                               max_tokens=1200, thinking_tokens=800, stop_reason="end_turn", estimated_cost_usd=0.02))
+            s.add(db.AiCallLog(user_id=other.id, project_key=key, project_name="Culvert Job", purpose="tender_analysis",
+                               step="reduce", attempt="json_retry", model="claude-sonnet-5", input_tokens=15000,
+                               output_tokens=9000, max_tokens=8000, estimated_cost_usd=0.1))
+            s.add(db.AiCallLog(user_id=other.id, project_key=key, project_name="Culvert Job", purpose="team_bios",
+                               model="claude-sonnet-5", input_tokens=3000, output_tokens=900, max_tokens=3000))
+            s.commit()
+        at = AppTest.from_file("app.py", default_timeout=180)
+        at.session_state["_auth_user_id"] = admin.id
+        at.session_state["_state_owner_id"] = admin.id
+        at.run()
+        [b for b in at.sidebar.button if "Admin" in (b.label or "")][0].click().run()
+        if at.exception:
+            failures.append(f"test_expander: exception {[e.value for e in at.exception]}")
+            return
+        boxes = [sb for sb in at.selectbox if sb.key == "_admin_breakdown_pick"]
+        if not boxes:
+            failures.append("test_expander: project picker not found under Cost by project")
+            return
+        # Nothing is computed until a project is chosen.
+        if any("max_tokens requested" in set(df.value.columns) for df in at.dataframe):
+            failures.append("test_expander: breakdown tables shown before a project was picked")
+        choice = [o for o in boxes[0].options if o.startswith("Culvert Job")][0]
+        # AppTest re-runs the whole script (closing the dialog) on any widget change, so the
+        # pick is pre-seeded and the dialog re-opened -- the same render path a real pick takes.
+        at.session_state["_admin_breakdown_pick"] = choice
+        [b for b in at.sidebar.button if "Admin" in (b.label or "")][0].click().run()
+        if at.exception:
+            failures.append(f"test_expander: exception after picking {[e.value for e in at.exception]}")
+            return
+        frames = [df.value for df in at.dataframe]
+        calls_df = [f for f in frames if "max_tokens requested" in set(f.columns)]
+        if not calls_df:
+            failures.append("test_expander: call-by-call table did not render")
+            return
+        calls_df = calls_df[0]
+        if len(calls_df) != 3:
+            failures.append(f"test_expander: {len(calls_df)} call rows, expected 3")
+        need = {"Time (UTC)", "Purpose", "Step", "Model", "Tokens in", "Tokens out", "Cost (USD)",
+                "max_tokens requested", "Thinking tokens", "Stop reason", "Output over cap"}
+        if not need <= set(calls_df.columns):
+            failures.append(f"test_expander: columns missing: {sorted(need - set(calls_df.columns))}")
+        by_kind = {r["Step"]: r for _, r in calls_df.iterrows()}
+        if by_kind["reduce (json_retry)"]["Output over cap"] != "YES" or by_kind["map"]["max_tokens requested"] != "1,200":
+            failures.append(f"test_expander: row contents wrong: {by_kind}")
+        if not any("Purpose" in f.columns and "Calls" in f.columns and "Step" not in f.columns for f in frames):
+            failures.append("test_expander: per-purpose totals table missing")
+        if not any("Run" in f.columns and "Calls" in f.columns and "Started (UTC)" in f.columns for f in frames):
+            failures.append("test_expander: per-run table missing")
+        if not any("Totals: 3 calls" in m.value for m in at.markdown):
+            failures.append("test_expander: totals line missing")
+    finally:
+        auth.ADMIN_ACCOUNTS.discard(admin_email)
+        _cleanup(admin.id); _cleanup(other.id)
+
+
+def test_new_columns_migrate_onto_an_old_table(failures: list[str]) -> None:
+    from sqlalchemy import text
+    with db.engine.begin() as conn:
+        for col in ("max_tokens", "thinking_tokens", "stop_reason", "step", "attempt"):
+            conn.execute(text(f"ALTER TABLE ai_call_log DROP COLUMN {col}"))
+    db._run_light_migrations()
+    db._run_light_migrations()
+    from sqlalchemy import inspect as sa_inspect
+    cols = {c["name"] for c in sa_inspect(db.engine).get_columns("ai_call_log")}
+    for col in ("max_tokens", "thinking_tokens", "stop_reason", "step", "attempt"):
+        if col not in cols:
+            failures.append(f"test_migrate_cols: {col} was not added")
+
+
 def main() -> int:
     failures: list[str] = []
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

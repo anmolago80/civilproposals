@@ -125,6 +125,7 @@ def draft_experience_intro(
             + canonical_marker_instruction(output_language)
         )
 
-    data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=800)
+    data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=800,
+                        purpose="experience_intro")
 
     return ExperienceIntro(paragraph=(data.get("paragraph") or "").strip())

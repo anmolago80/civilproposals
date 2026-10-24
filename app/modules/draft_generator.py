@@ -281,7 +281,7 @@ def generate_draft_section(
         )
 
     data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config,
-                        max_tokens=draft_token_budget(section))
+                        max_tokens=draft_token_budget(section), purpose="draft_generation")
 
     return SectionDraft(
         section_title=section.title,

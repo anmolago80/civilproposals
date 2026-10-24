@@ -185,7 +185,8 @@ def draft_executive_summary(
             + canonical_marker_instruction(output_language)
         )
 
-    data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=2500)
+    data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=2500,
+                        purpose="executive_summary")
 
     blocks = [
         ExecutiveSummaryBlock(title=(b.get("title") or "").strip(), body=(b.get("body") or "").strip())

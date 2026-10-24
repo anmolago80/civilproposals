@@ -334,7 +334,8 @@ def draft_methodology_stages(
             + hold_point_phrasing_instruction(output_language)
         )
 
-    data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=4000)
+    data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=4000,
+                        purpose="methodology")
     return _scrub_stages(data.get("stages"), week_count)
 
 

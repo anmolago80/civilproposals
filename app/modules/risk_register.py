@@ -138,7 +138,8 @@ def draft_risk_register(analysis, gap_items: list | None = None,
             "language, not the substance -- do not invent, omit, or alter any risk, impact, or "
             "mitigation because of this instruction."
         )
-    data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=2500)
+    data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=2500,
+                        purpose="risk_register")
 
     entries = []
     seen = set()

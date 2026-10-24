@@ -260,7 +260,8 @@ def review_pitch(
             + canonical_marker_instruction(output_language)
         )
 
-    data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=1500)
+    data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=1500,
+                        purpose="pitch_review")
 
     return PitchReview(
         differentiator_comment=(data.get("differentiator_comment") or "").strip(),
@@ -309,7 +310,8 @@ def generate_pitch_questions(
             + canonical_marker_instruction(output_language)
         )
 
-    data = call_ai_json(prompt, system_message=QUESTIONS_SYSTEM_MESSAGE, config=config, max_tokens=700)
+    data = call_ai_json(prompt, system_message=QUESTIONS_SYSTEM_MESSAGE, config=config, max_tokens=700,
+                        purpose="pitch_review_questions")
 
     def _cap_list(items, max_items: int = 4) -> list[str]:
         return [q.strip() for q in (items or []) if isinstance(q, str) and q.strip()][:max_items]

@@ -583,6 +583,24 @@ class AiCallLog(Base):
     estimated_cost_usd = Column(Float, nullable=True)
     created_at = Column(DateTime, default=_now)
 
+    # Per-call evidence for the admin cost breakdown (all nullable -- rows
+    # logged before these existed have none):
+    #   max_tokens      the output cap REQUESTED for this one call (a retry is a
+    #                   separate call and row, with its own, larger, cap);
+    #   thinking_tokens how many of output_tokens were the model's thinking
+    #                   (usage.output_tokens_details.thinking_tokens), billed
+    #                   as output and counted inside max_tokens;
+    #   stop_reason     "end_turn" / "max_tokens" ... -- "max_tokens" means the
+    #                   answer was cut off;
+    #   step            which step of the feature ("map" / "reduce");
+    #   attempt         "" for a first attempt, "json_retry" (call_ai_json
+    #                   re-asked after an unparseable reply) or "empty_retry".
+    max_tokens = Column(Integer, nullable=True)
+    thinking_tokens = Column(Integer, nullable=True)
+    stop_reason = Column(String, nullable=True)
+    step = Column(String, nullable=True)
+    attempt = Column(String, nullable=True)
+
 
 class BlogPost(Base):
     """One row per marketing-blog article (see modules/blog.py and the Blog
@@ -724,7 +742,10 @@ class FirmProfile(Base):
 
 def log_ai_call(user_id: str | None, project_key: str, project_name: str, purpose: str,
                 provider: str, model: str, input_tokens: int | None,
-                output_tokens: int | None, estimated_cost_usd: float | None) -> None:
+                output_tokens: int | None, estimated_cost_usd: float | None,
+                max_tokens: int | None = None, thinking_tokens: int | None = None,
+                stop_reason: str | None = None, step: str | None = None,
+                attempt: str | None = None) -> None:
     """Best-effort insert -- see AiCallLog. Callers must wrap in try/except
     (ai_interface._record_usage does); this function itself doesn't swallow
     errors so tests can still see them."""
@@ -739,6 +760,11 @@ def log_ai_call(user_id: str | None, project_key: str, project_name: str, purpos
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             estimated_cost_usd=estimated_cost_usd,
+            max_tokens=max_tokens,
+            thinking_tokens=thinking_tokens,
+            stop_reason=(stop_reason or None) and str(stop_reason)[:32],
+            step=(step or "")[:32] or None,
+            attempt=(attempt or "")[:32] or None,
         ))
         s.commit()
 
@@ -1090,6 +1116,131 @@ def admin_stats() -> dict:
     }
 
 
+# Gap (seconds) between two Tender Analysis calls that starts a new run when
+# there is no Job row to say where runs begin.
+_RUN_GAP_SECONDS = 180
+
+
+def _call_kind(row: dict, run_median_input: float | None) -> str:
+    """Human label for one call within the breakdown. Rows logged since the
+    step/attempt columns existed carry them; older rows are INFERRED (the
+    reduce is the one call with a far larger prompt than the median map call)
+    and labelled so."""
+    step, attempt = row["step"], row["attempt"]
+    if step:
+        return f"{step} ({attempt})" if attempt else step
+    if row["purpose"] == "tender_analysis" and run_median_input:
+        inferred = "reduce" if (row["input_tokens"] or 0) >= 2 * run_median_input else "map"
+        return f"{inferred} (inferred)"
+    return row["purpose"] or "(none)"
+
+
+def project_cost_breakdown(project_key: str, user_id: str | None = None) -> dict:
+    """Read-only, call-by-call cost breakdown for ONE project -- the admin
+    "Cost breakdown" expander. Costs are recomputed from the logged tokens at
+    the CURRENT price table (so they are right for rows logged before a price
+    correction too), falling back to the stored estimate for an unpriced model.
+
+    Returns {
+      "calls":      [{time, purpose, step, attempt, kind, model, input_tokens,
+                      output_tokens, cost_usd, max_tokens, thinking_tokens,
+                      stop_reason, over_cap, run}],   # time order
+      "totals":     {calls, input_tokens, output_tokens, cost_usd},
+      "by_purpose": [{purpose, calls, input_tokens, output_tokens, cost_usd}],
+      "runs":       [{run, started, calls, input_tokens, output_tokens, cost_usd,
+                      kinds: [{kind, calls, input_tokens, output_tokens, cost_usd}]}],
+    }
+    A Tender Analysis "run" starts at each tender_analysis Job row for the
+    project (jobs table), or -- for runs with no Job row -- after a gap of
+    _RUN_GAP_SECONDS between tender_analysis calls."""
+    from modules import ai_interface
+
+    project_key = (project_key or "").strip()
+    with get_session() as s:
+        q = s.query(AiCallLog).filter(AiCallLog.project_key == project_key)
+        if user_id:
+            q = q.filter(AiCallLog.user_id == user_id)
+        rows = q.order_by(AiCallLog.created_at, AiCallLog.id).all()
+        job_q = s.query(Job.created_at).filter(
+            Job.job_type == "tender_analysis", func.lower(Job.project_key) == project_key.lower(),
+        )
+        if user_id:
+            job_q = job_q.filter(Job.user_id == user_id)
+        run_starts = sorted(r[0] for r in job_q.all() if r[0] is not None)
+
+    def _naive(dt):
+        return dt.replace(tzinfo=None) if dt is not None and dt.tzinfo else dt
+
+    calls = []
+    for r in rows:
+        cost = ai_interface.estimate_cost_usd(r.model, r.input_tokens, r.output_tokens)
+        if cost is None:
+            cost = r.estimated_cost_usd or 0.0
+        calls.append({
+            "time": r.created_at, "purpose": r.purpose or "", "step": r.step or "", "attempt": r.attempt or "",
+            "model": r.model or "", "input_tokens": r.input_tokens or 0, "output_tokens": r.output_tokens or 0,
+            "cost_usd": float(cost), "max_tokens": r.max_tokens, "thinking_tokens": r.thinking_tokens,
+            "stop_reason": r.stop_reason or "",
+            "over_cap": bool(r.max_tokens and r.output_tokens and r.output_tokens > r.max_tokens),
+            "run": None, "kind": "",
+        })
+
+    # Assign Tender Analysis calls to runs.
+    ta = [c for c in calls if c["purpose"] == "tender_analysis"]
+    if run_starts:
+        starts = [_naive(t) for t in run_starts]
+        for c in ta:
+            idx = 0
+            for i, t0 in enumerate(starts):
+                if t0 is not None and t0 <= _naive(c["time"]):
+                    idx = i
+            c["run"] = idx + 1
+    else:
+        run, last = 1, None
+        for c in ta:
+            t = _naive(c["time"])
+            if last is not None and t is not None and (t - last).total_seconds() > _RUN_GAP_SECONDS:
+                run += 1
+            c["run"] = run
+            last = t
+    by_run: dict[int, list[dict]] = {}
+    for c in ta:
+        by_run.setdefault(c["run"], []).append(c)
+    for run_calls in by_run.values():
+        inputs = sorted(c["input_tokens"] for c in run_calls)
+        median = inputs[len(inputs) // 2] if inputs else None
+        for c in run_calls:
+            c["kind"] = _call_kind(c, median)
+    for c in calls:
+        if not c["kind"]:
+            c["kind"] = _call_kind(c, None)
+
+    def _sum(group: list[dict]) -> dict:
+        return {"calls": len(group), "input_tokens": sum(c["input_tokens"] for c in group),
+                "output_tokens": sum(c["output_tokens"] for c in group),
+                "cost_usd": sum(c["cost_usd"] for c in group)}
+
+    by_purpose: dict[str, list[dict]] = {}
+    for c in calls:
+        by_purpose.setdefault(c["purpose"] or "(none)", []).append(c)
+    runs = []
+    for n in sorted(by_run):
+        group = by_run[n]
+        kinds: dict[str, list[dict]] = {}
+        for c in group:
+            kinds.setdefault(c["kind"], []).append(c)
+        runs.append({
+            "run": n, "started": group[0]["time"], **_sum(group),
+            "kinds": [{"kind": k, **_sum(v)} for k, v in sorted(kinds.items(), key=lambda kv: -_sum(kv[1])["cost_usd"])],
+        })
+    return {
+        "calls": calls,
+        "totals": _sum(calls),
+        "by_purpose": [{"purpose": k, **_sum(v)} for k, v in sorted(by_purpose.items(), key=lambda kv: -_sum(kv[1])["cost_usd"])],
+        "runs": runs,
+    }
+
+
 def project_ai_cost(project_key: str, user_id: str | None = None) -> dict:
     """Cost rollup for ONE project -- used to show a per-bid cost figure.
     Returns {"calls", "cost_usd", "input_tokens", "output_tokens",
@@ -1311,6 +1462,18 @@ def _run_light_migrations() -> None:
     # rewritten, so it is a no-op after the first run (and safe when the web
     # and worker services both start).
     if "ai_call_log" in inspector.get_table_names():
+        _ai_cols = {c["name"] for c in inspector.get_columns("ai_call_log")}
+        for _col, _ddl in (("max_tokens", "INTEGER"), ("thinking_tokens", "INTEGER"),
+                           ("stop_reason", "VARCHAR"), ("step", "VARCHAR"), ("attempt", "VARCHAR")):
+            if _col not in _ai_cols:
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(text(f"ALTER TABLE ai_call_log ADD COLUMN {_col} {_ddl}"))
+                except Exception:
+                    # web and worker both migrate at start-up -- the other one
+                    # may have added it between our check and our ALTER.
+                    if _col not in {c["name"] for c in inspect(engine).get_columns("ai_call_log")}:
+                        raise
         from modules import ai_interface
         for _model in ("claude-sonnet-5", "claude-opus-4-6", "gemini-3.1-pro-preview"):
             _pi, _po = ai_interface.MODEL_PRICES_PER_MTOK[_model]

@@ -78,6 +78,16 @@ _usage_context: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
     "ai_usage_context", default=None
 )
 
+# Per-call attribution that is NOT part of the user/project context above:
+# which feature made the call (purpose), which step of it (step, e.g. the
+# tender analysis's "map" vs "reduce") and whether it is a retry (attempt:
+# "json_retry" = call_ai_json re-asking after an unparseable answer,
+# "empty_retry" = _call_with_resilience re-asking after an empty one).
+# Set around one call_ai() by its keyword arguments, read by _record_usage().
+_call_overrides: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "ai_call_overrides", default=None
+)
+
 # Approximate USD per MILLION tokens (input, output). These are estimates
 # for internal cost visibility only -- update them when provider pricing
 # changes; an unknown model logs its token counts with cost NULL rather
@@ -167,24 +177,70 @@ def estimate_cost_usd(model: str, input_tokens: int | None, output_tokens: int |
     )
 
 
+def _caller_module_purpose() -> str:
+    """Last-resort purpose for a call nobody labelled: the module that made it
+    ("team_bios", "risk_register" ...), so no AiCallLog row is ever blank."""
+    try:
+        frame = sys._getframe(1)
+        while frame is not None:
+            name = frame.f_globals.get("__name__", "")
+            if name and name != __name__:
+                return name.rsplit(".", 1)[-1] or "unattributed"
+            frame = frame.f_back
+    except Exception:
+        pass
+    return "unattributed"
+
+
+def _thinking_tokens_of(usage) -> int | None:
+    """Tokens the model spent thinking, as reported in
+    usage.output_tokens_details.thinking_tokens (a SUBSET of output_tokens, so
+    already billed and counted there). None when the SDK/model doesn't say."""
+    details = getattr(usage, "output_tokens_details", None)
+    if details is None and isinstance(usage, dict):
+        details = usage.get("output_tokens_details")
+    if isinstance(details, dict):
+        return _safe_int(details.get("thinking_tokens"))
+    return _safe_int(getattr(details, "thinking_tokens", None))
+
+
 def _record_usage(provider: str, model: str,
-                  input_tokens: int | None, output_tokens: int | None) -> None:
-    """Best-effort write of one AI call's usage to db.AiCallLog. Never
-    raises -- see the section comment above."""
+                  input_tokens: int | None, output_tokens: int | None,
+                  max_tokens: int | None = None, thinking_tokens: int | None = None,
+                  stop_reason: str | None = None) -> None:
+    """Best-effort write of ONE provider call's usage to db.AiCallLog -- every
+    attempt is its own row (a retry is a new call and a new row, with its own
+    requested max_tokens). Never raises -- see the section comment above."""
     try:
         from modules import db
         ctx = _usage_context.get() or {}
+        over = _call_overrides.get() or {}
         _project_key = ctx.get("project_key", "")
+        purpose = over.get("purpose") or ctx.get("purpose", "") or _caller_module_purpose()
+        if max_tokens and output_tokens and output_tokens > max_tokens:
+            # Should be impossible: max_tokens is a hard cap on thinking + text
+            # for one call. If it ever happens the per-call rows in the admin
+            # breakdown are the evidence to take to Anthropic.
+            print(
+                f"[ai_interface] WARNING output_tokens {output_tokens} > requested max_tokens "
+                f"{max_tokens} (model={model}, purpose={purpose}, step={over.get('step', '')})",
+                file=sys.stderr,
+            )
         db.log_ai_call(
             user_id=ctx.get("user_id"),
             project_key=_project_key,
             project_name=ctx.get("project_name", ""),
-            purpose=ctx.get("purpose", ""),
+            purpose=purpose,
             provider=provider,
             model=model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             estimated_cost_usd=estimate_cost_usd(model, input_tokens, output_tokens),
+            max_tokens=max_tokens,
+            thinking_tokens=thinking_tokens,
+            stop_reason=stop_reason,
+            step=over.get("step", ""),
+            attempt=over.get("attempt", ""),
         )
         # Non-trial/unlimited accounts are never blocked by AI spend (see
         # limits.ai_spend_block_reason) -- but a single project running
@@ -214,13 +270,35 @@ def _safe_int(value) -> int | None:
 # ---------------------------------------------------------------------------
 
 def call_ai(prompt: str, system_message: str | None = None, config: dict | None = None,
-            max_tokens: int = 4000, temperature: float = 0.3) -> str:
+            max_tokens: int = 4000, temperature: float = 0.3,
+            purpose: str | None = None, step: str | None = None,
+            _attempt: str | None = None) -> str:
     """
     Send a prompt to whichever AI provider is configured and return the text response.
 
     `config` shape: {"provider": str, "api_key": str, "model": str, "endpoint": str}
     If `config` is omitted, this tries to read `st.session_state["ai_config"]`.
+
+    `purpose` / `step` label the call in db.AiCallLog (which feature made it,
+    and which step of it); every call site should pass a purpose -- a call that
+    doesn't is labelled with its calling module's name rather than left blank.
     """
+    prior = _call_overrides.get()
+    merged = dict(prior or {})
+    if purpose:
+        merged["purpose"] = purpose
+    if step:
+        merged["step"] = step
+    if _attempt:
+        merged["attempt"] = _attempt
+    token = _call_overrides.set(merged or None)
+    try:
+        return _call_ai_inner(prompt, system_message, config, max_tokens, temperature)
+    finally:
+        _call_overrides.reset(token)
+
+
+def _call_ai_inner(prompt, system_message, config, max_tokens, temperature) -> str:
     config = config or _get_config_from_session_state()
     provider = (config or {}).get("provider")
 
@@ -256,7 +334,7 @@ def was_repaired(data) -> bool:
 
 
 def call_ai_json(prompt: str, system_message: str | None = None, config: dict | None = None,
-                  max_tokens: int = 4000) -> dict:
+                  max_tokens: int = 4000, purpose: str | None = None, step: str | None = None) -> dict:
     """
     Same as call_ai(), but instructs the model to return JSON only and parses
     the result. If the first response doesn't parse, it retries with a
@@ -298,7 +376,8 @@ def call_ai_json(prompt: str, system_message: str | None = None, config: dict | 
                 f"Return ONLY a complete, valid JSON object for this request:\n\n{prompt}"
                 f"{json_instruction}"
             )
-        raw = call_ai(attempt_prompt, system_message, config, budget, temperature=0.1)
+        raw = call_ai(attempt_prompt, system_message, config, budget, temperature=0.1,
+                      purpose=purpose, step=step, _attempt="json_retry" if attempt_index else None)
         parsed = _try_parse_json(raw)
         if parsed is not None:
             return parsed
@@ -354,6 +433,7 @@ def _call_openai(prompt, system_message, config, max_tokens, temperature) -> str
             "OpenAI", model,
             _safe_int(getattr(usage, "prompt_tokens", None)),
             _safe_int(getattr(usage, "completion_tokens", None)),
+            max_tokens=tokens,
         )
         return response.choices[0].message.content or ""
 
@@ -386,6 +466,7 @@ def _call_azure_openai(prompt, system_message, config, max_tokens, temperature) 
             "Azure OpenAI", deployment,
             _safe_int(getattr(usage, "prompt_tokens", None)),
             _safe_int(getattr(usage, "completion_tokens", None)),
+            max_tokens=tokens,
         )
         return response.choices[0].message.content or ""
 
@@ -425,6 +506,8 @@ def _call_anthropic(prompt, system_message, config, max_tokens, temperature) -> 
             "Anthropic Claude", model,
             _safe_int(getattr(usage, "input_tokens", None)),
             _safe_int(getattr(usage, "output_tokens", None)),
+            max_tokens=tokens, thinking_tokens=_thinking_tokens_of(usage),
+            stop_reason=getattr(response, "stop_reason", None),
         )
         parts = [block.text for block in response.content if getattr(block, "type", "") == "text"]
         return "\n".join(parts)
@@ -450,6 +533,7 @@ def _call_gemini(prompt, system_message, config, max_tokens, temperature) -> str
             "Google Gemini", model_name,
             _safe_int(getattr(usage, "prompt_token_count", None)),
             _safe_int(getattr(usage, "candidates_token_count", None)),
+            max_tokens=tokens,
         )
         return response.text or ""
 
@@ -645,7 +729,12 @@ def _call_with_resilience(create_and_extract_fn, temperature: float, max_tokens:
 
     bigger = min(max_tokens * 2, MAX_TOKENS_RETRY_CEILING)
     if bigger > max_tokens:
-        text = _attempt_with_temperature_fallback(bigger)
+        prior = _call_overrides.get()
+        token = _call_overrides.set({**(prior or {}), "attempt": "empty_retry"})
+        try:
+            text = _attempt_with_temperature_fallback(bigger)
+        finally:
+            _call_overrides.reset(token)
         if text.strip():
             return text
 

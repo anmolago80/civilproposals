@@ -181,8 +181,13 @@ with st.sidebar:
         @st.dialog("Admin -- accounts, usage & AI cost", width="large")
         def _admin_stats_dialog():
             try:
-                _stats = db.admin_stats()
-                _cost = db.ai_cost_summary()
+                # Computed once per OPEN of the dialog (the button below clears
+                # this). Widgets inside a dialog re-run only the dialog, and
+                # re-reading every account's latest saved project on each pick
+                # in the breakdown expander would be slow for no reason.
+                if "_admin_dialog_data" not in st.session_state:
+                    st.session_state["_admin_dialog_data"] = (db.admin_stats(), db.ai_cost_summary())
+                _stats, _cost = st.session_state["_admin_dialog_data"]
             except Exception as _exc:
                 st.error(f"Stats unavailable right now: {_exc}")
                 return
@@ -240,6 +245,88 @@ with st.sidebar:
                     use_container_width=True, hide_index=True,
                 )
                 st.caption(i18n.t("chrome_admin_size_caption"))
+
+                # Call-by-call breakdown for one project (read-only) -- replaces
+                # running a script on the server. Nothing is computed until a
+                # project is chosen.
+                with st.expander(i18n.t("chrome_admin_breakdown_title")):
+                    _bd_labels = {
+                        f"{p['project_name']} \u00b7 ${p['cost_usd']:.2f} \u00b7 {p['calls']} calls": p
+                        for p in _cost["per_project"]
+                    }
+                    _bd_pick = st.selectbox(
+                        i18n.t("chrome_admin_breakdown_pick"), list(_bd_labels), index=None,
+                        placeholder=i18n.t("chrome_admin_breakdown_placeholder"), key="_admin_breakdown_pick",
+                    )
+                    if _bd_pick:
+                        _bd_proj = _bd_labels[_bd_pick]
+                        _bd = db.project_cost_breakdown(_bd_proj["project_key"], _bd_proj["user_id"] or None)
+                        st.caption(i18n.t("chrome_admin_breakdown_caption"))
+                        if not _bd["calls"]:
+                            st.caption(i18n.t("chrome_admin_breakdown_empty"))
+                        else:
+                            _t = _bd["totals"]
+                            st.markdown("**" + i18n.t(
+                                "chrome_admin_breakdown_totals", calls=_t["calls"], inp=f"{_t['input_tokens']:,}",
+                                out=f"{_t['output_tokens']:,}", cost=f"{_t['cost_usd']:.4f}",
+                            ) + "**")
+                            st.markdown(i18n.t("chrome_admin_breakdown_by_purpose"))
+                            st.dataframe(
+                                [{
+                                    i18n.t("chrome_admin_breakdown_col_purpose"): x["purpose"],
+                                    i18n.t("chrome_admin_breakdown_col_calls"): x["calls"],
+                                    i18n.t("chrome_admin_breakdown_col_in"): f"{x['input_tokens']:,}",
+                                    i18n.t("chrome_admin_breakdown_col_out"): f"{x['output_tokens']:,}",
+                                    i18n.t("chrome_admin_breakdown_col_cost"): round(x["cost_usd"], 4),
+                                } for x in _bd["by_purpose"]],
+                                use_container_width=True, hide_index=True,
+                            )
+                            if _bd["runs"]:
+                                st.markdown(i18n.t("chrome_admin_breakdown_by_run"))
+                                _run_rows = []
+                                for _r in _bd["runs"]:
+                                    _run_rows.append({
+                                        i18n.t("chrome_admin_breakdown_col_run"): f"#{_r['run']}",
+                                        i18n.t("chrome_admin_breakdown_col_started"): (
+                                            _r["started"].strftime("%d %b %H:%M:%S") if _r["started"] else ""),
+                                        i18n.t("chrome_admin_breakdown_col_kind"): "TOTAL",
+                                        i18n.t("chrome_admin_breakdown_col_calls"): _r["calls"],
+                                        i18n.t("chrome_admin_breakdown_col_in"): f"{_r['input_tokens']:,}",
+                                        i18n.t("chrome_admin_breakdown_col_out"): f"{_r['output_tokens']:,}",
+                                        i18n.t("chrome_admin_breakdown_col_cost"): round(_r["cost_usd"], 4),
+                                    })
+                                    for _k in _r["kinds"]:
+                                        _run_rows.append({
+                                            i18n.t("chrome_admin_breakdown_col_run"): "",
+                                            i18n.t("chrome_admin_breakdown_col_started"): "",
+                                            i18n.t("chrome_admin_breakdown_col_kind"): _k["kind"],
+                                            i18n.t("chrome_admin_breakdown_col_calls"): _k["calls"],
+                                            i18n.t("chrome_admin_breakdown_col_in"): f"{_k['input_tokens']:,}",
+                                            i18n.t("chrome_admin_breakdown_col_out"): f"{_k['output_tokens']:,}",
+                                            i18n.t("chrome_admin_breakdown_col_cost"): round(_k["cost_usd"], 4),
+                                        })
+                                st.dataframe(_run_rows, use_container_width=True, hide_index=True)
+                            st.markdown(i18n.t("chrome_admin_breakdown_calls"))
+                            st.dataframe(
+                                [{
+                                    i18n.t("chrome_admin_breakdown_col_time"): (
+                                        c["time"].strftime("%d %b %H:%M:%S") if c["time"] else ""),
+                                    i18n.t("chrome_admin_breakdown_col_run"): f"#{c['run']}" if c["run"] else "",
+                                    i18n.t("chrome_admin_breakdown_col_purpose"): c["purpose"],
+                                    i18n.t("chrome_admin_breakdown_col_kind"): c["kind"],
+                                    i18n.t("chrome_admin_breakdown_col_model"): c["model"],
+                                    i18n.t("chrome_admin_breakdown_col_in"): f"{c['input_tokens']:,}",
+                                    i18n.t("chrome_admin_breakdown_col_out"): f"{c['output_tokens']:,}",
+                                    i18n.t("chrome_admin_breakdown_col_cost"): round(c["cost_usd"], 4),
+                                    i18n.t("chrome_admin_breakdown_col_max_tokens"): (
+                                        f"{c['max_tokens']:,}" if c["max_tokens"] else "\u2014"),
+                                    i18n.t("chrome_admin_breakdown_col_thinking"): (
+                                        f"{c['thinking_tokens']:,}" if c["thinking_tokens"] is not None else "\u2014"),
+                                    i18n.t("chrome_admin_breakdown_col_stop"): c["stop_reason"] or "\u2014",
+                                    i18n.t("chrome_admin_breakdown_col_over_cap"): "YES" if c["over_cap"] else "",
+                                } for c in _bd["calls"]],
+                                use_container_width=True, hide_index=True,
+                            )
 
             if _stats["recent_bids"]:
                 st.markdown("#### Recent bids")
@@ -385,6 +472,7 @@ with st.sidebar:
                 st.caption("No AI calls logged for any account yet.")
 
         if st.button("📊 Admin stats", key="_admin_stats_btn", use_container_width=True):
+            st.session_state.pop("_admin_dialog_data", None)
             _admin_stats_dialog()
 
         # Blog editor. Deliberately NOT a dialog like the stats panel above:

@@ -142,7 +142,8 @@ def draft_reference_projects(
         client_objectives="\n".join(f"- {o}" for o in (client_objectives or [])) or "- (none extracted)",
         material=material,
     )
-    data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=4000)
+    data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=4000,
+                        purpose="reference_projects")
 
     raw_projects = data.get("projects", []) if isinstance(data, dict) else []
     projects = [ReferenceProject.model_validate(p) for p in raw_projects]
