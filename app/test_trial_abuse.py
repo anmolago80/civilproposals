@@ -909,7 +909,7 @@ def test_admin_recent_activity_renders(failures: list[str]) -> None:
                 cols |= set(df.value.columns)
             except Exception:
                 pass
-        for want in ("Verified", "Projects run", "Tender Analysis runs", "Proposal drafted", "Downloads",
+        for want in ("Furthest step", "Last active", "Verified", "Projects run", "Tender Analysis runs", "Proposal drafted", "Downloads",
                      "IP shared with earlier trial"):
             if want not in cols:
                 failures.append(f"test_admin_render: column {want!r} missing (have {sorted(cols)})")
@@ -920,6 +920,107 @@ def test_admin_recent_activity_renders(failures: list[str]) -> None:
     finally:
         auth.ADMIN_ACCOUNTS.discard(admin_email)
         _cleanup_user(admin.id); _cleanup_user(other.id)
+
+
+def _project_zip(**state) -> bytes:
+    """A real saved project, produced by the app's own save_project()."""
+    from modules import project_store
+    return project_store.save_project(state)
+
+
+def _save_project_row(user_id: str, name: str, blob: bytes, updated=None) -> str:
+    pid = uuid.uuid4().hex
+    with db.get_session() as s:
+        s.add(db.SavedProject(id=pid, user_id=user_id, name=name, slug=name.replace(" ", "_") + pid[:4],
+                              project_bytes=blob, updated_at=updated or db._now()))
+        s.commit()
+    return pid
+
+
+def test_furthest_step_from_saved_projects(failures: list[str]) -> None:
+    """Every step, derived from projects saved by the app's own save_project(),
+    including the traps: auto-populated EMPTY resource/fee rows are not Team /
+    Fees, and the order is Setup, Upload, Analysis, Team, Fees, Draft, Export."""
+    from modules import project_progress as pp
+    from modules.document_processor import ExtractedDocument
+    from modules.tender_analyser import TenderAnalysis
+    from modules.resourcing import ResourceAssignment
+    from modules.fee_estimation_engine import DisciplineFeeEstimate
+    from modules.draft_generator import SectionDraft
+
+    doc = ExtractedDocument(filename="b.pdf", text="brief", page_count=3)
+    ana = TenderAnalysis(project_scope="x")
+    empty_slot = ResourceAssignment(slot="Project Director", slot_kind="management")
+    staffed = ResourceAssignment(slot="Project Director", slot_kind="management", person_name="Ada Lovelace")
+    zero_fee = DisciplineFeeEstimate(discipline="Civil", fee_percentage=0.0, source="t", confidence="Low")
+    real_fee = DisciplineFeeEstimate(discipline="Civil", fee_percentage=12.5, source="t", confidence="High")
+    draft = SectionDraft(section_title="S", draft_heading="H", draft_text="t",
+                         required_user_inputs=[], recommended_graphic_placeholders=[])
+
+    cases = [
+        ("blank",           {}, False, ""),
+        ("setup",           {"project_name": "York"}, False, "setup"),
+        ("upload",          {"project_name": "York", "tender_extracted": doc}, False, "upload"),
+        ("analysis",        {"project_name": "York", "tender_extracted": doc, "analysis": ana}, False, "analysis"),
+        # Placeholders created the moment analysis runs do NOT count.
+        ("empty placeholders", {"project_name": "York", "tender_extracted": doc, "analysis": ana,
+                               "resource_plan": [empty_slot], "fee_estimates": [zero_fee]}, False, "analysis"),
+        ("team",            {"project_name": "York", "analysis": ana, "resource_plan": [staffed]}, False, "team"),
+        ("fees",            {"project_name": "York", "analysis": ana, "resource_plan": [staffed],
+                             "fee_estimates": [real_fee]}, False, "fees"),
+        ("draft",           {"project_name": "York", "analysis": ana, "resource_plan": [staffed],
+                             "fee_estimates": [real_fee], "drafts": {"S": draft}}, False, "draft"),
+        # Furthest, not contiguous: drafted without staffing or fees.
+        ("draft only",      {"project_name": "York", "analysis": ana, "drafts": {"S": draft}}, False, "draft"),
+        ("export",          {"project_name": "York", "analysis": ana, "drafts": {"S": draft}}, True, "export"),
+    ]
+    for label, state, exported, want in cases:
+        payload = pp.read_payload(_project_zip(**state))
+        got = pp.furthest_step(payload, exported) if payload is not None else "UNREADABLE"
+        if got != want:
+            failures.append(f"test_furthest_step[{label}]: got {got!r}, expected {want!r}")
+    if pp.read_payload(b"not a zip") is not None:
+        failures.append("test_furthest_step: a corrupt file must read as None, not raise")
+    if tuple(pp.STEPS) != ("setup", "upload", "analysis", "team", "fees", "draft", "export"):
+        failures.append("test_furthest_step: step order is not the one the owner asked for")
+
+
+def test_admin_activity_furthest_step_and_last_active(failures: list[str]) -> None:
+    from modules.document_processor import ExtractedDocument
+    from modules.tender_analyser import TenderAnalysis
+    doc = ExtractedDocument(filename="b.pdf", text="brief", page_count=3)
+    a = _new_user(); b = _new_user(); c = _new_user(); d = _new_user()
+    try:
+        old = db._now() - timedelta(days=3)
+        # a: two projects -- only the LATEST (by updated_at) is read.
+        _save_project_row(a.id, "Old one", _project_zip(project_name="Old one"), updated=old)
+        _save_project_row(a.id, "York Region", _project_zip(
+            project_name="York Region", tender_extracted=doc, analysis=TenderAnalysis(project_scope="x")))
+        # b: unreadable file; c: no saved project at all.
+        _save_project_row(b.id, "Broken", b"garbage")
+        # d: analysis + a recorded free-tier download for that project -> Export.
+        _save_project_row(d.id, "Culvert", _project_zip(project_name="Culvert", analysis=TenderAnalysis(project_scope="x")))
+        with db.get_session() as s:
+            s.add(db.ArtifactEvent(user_id=d.id, project_key="culvert|tender|client|abc", artifact_type="proposal_docx"))
+            s.commit()
+        rows = {r["email"]: r for r in db.admin_stats()["recent_activity"]}
+        ra, rb, rc, rd = rows[a.email], rows[b.email], rows[c.email], rows[d.email]
+        if ra["furthest_step"] != "analysis" or ra["project_name"] != "York Region":
+            failures.append(f"test_admin_furthest: latest project not used: {ra['furthest_step']!r} / {ra['project_name']!r}")
+        if ra["last_active"] is None or (db._now().replace(tzinfo=None) - ra["last_active"].replace(tzinfo=None)).total_seconds() > 300:
+            failures.append(f"test_admin_furthest: last_active wrong: {ra['last_active']}")
+        if not rb["unreadable"] or rb["furthest_step"] != "":
+            failures.append("test_admin_furthest: a corrupt project must be flagged unreadable, not crash the table")
+        if rc["last_active"] is not None or rc["furthest_step"] != "" or rc["unreadable"]:
+            failures.append("test_admin_furthest: an account with no saved project should show nothing")
+        if rd["furthest_step"] != "export":
+            failures.append(f"test_admin_furthest: recorded download not shown as Export: {rd['furthest_step']!r}")
+    finally:
+        for u in (a, b, c, d):
+            with db.get_session() as s:
+                s.query(db.SavedProject).filter(db.SavedProject.user_id == u.id).delete()
+                s.commit()
+            _cleanup_user(u.id)
 
 
 def test_login_throttle_not_global(failures: list[str]) -> None:

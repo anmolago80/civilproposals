@@ -807,6 +807,8 @@ def _recent_activity_rows(s, users: list, signups: list[dict], usage_by_user: di
         if hashes else []
     )
 
+    progress = _latest_project_progress(s, ids)
+
     rows = []
     for u, sign in zip(users, signups):
         claim = claims.get(u.id)
@@ -828,8 +830,56 @@ def _recent_activity_rows(s, users: list, signups: list[dict], usage_by_user: di
             "drafted": u.id in drafted,
             "downloads": downloads.get(u.id, []),
             "ip_shared": ip_shared,
+            **progress.get(u.id, {"furthest_step": "", "last_active": None, "project_name": "", "unreadable": False}),
         })
     return rows
+
+
+def _latest_project_progress(s, user_ids: list[str]) -> dict[str, dict]:
+    """{user_id: {"furthest_step", "last_active", "project_name", "unreadable"}}
+    for each account's LATEST saved project (SavedProject.updated_at), derived
+    from the stored project file -- see modules/project_progress.py. Read-only,
+    no new tracking. Accounts with no saved project are simply absent.
+
+    The project zips can be several MB, so only the id/timestamp of each
+    account's newest project is fetched in bulk and the bytes are loaded one
+    project at a time (15 at most) and dropped straight after parsing."""
+    from modules import project_progress
+
+    if not user_ids:
+        return {}
+    newest: dict[str, tuple] = {}
+    for pid, uid, name, updated, created in s.query(
+        SavedProject.id, SavedProject.user_id, SavedProject.name,
+        SavedProject.updated_at, SavedProject.created_at,
+    ).filter(SavedProject.user_id.in_(user_ids)).all():
+        stamp = updated or created
+        if uid not in newest or (stamp is not None and (newest[uid][3] is None or stamp > newest[uid][3])):
+            newest[uid] = (pid, name, updated, stamp)
+
+    out: dict[str, dict] = {}
+    for uid, (pid, name, updated, stamp) in newest.items():
+        blob = s.query(SavedProject.project_bytes).filter(SavedProject.id == pid).scalar()
+        payload = project_progress.read_payload(blob) if blob else None
+        step, export_recorded = "", False
+        if payload is not None:
+            ident = project_progress.project_name_of(payload).lower()
+            if ident:
+                # Export only exists as a recorded free-tier download; match it
+                # to this project by the key's leading project-name segment.
+                export_recorded = any(
+                    (k or "").lower().startswith(ident + "|") or (k or "").lower() == ident
+                    for (k,) in s.query(ArtifactEvent.project_key).filter(ArtifactEvent.user_id == uid).all()
+                )
+            step = project_progress.furthest_step(payload, export_recorded)
+        out[uid] = {
+            "furthest_step": step,
+            "last_active": stamp,
+            "project_name": (name or ""),
+            "unreadable": payload is None,
+        }
+        del blob, payload
+    return out
 
 
 def admin_stats() -> dict:

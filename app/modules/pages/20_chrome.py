@@ -281,6 +281,15 @@ with st.sidebar:
                             ),
                             i18n.t("chrome_admin_recent_activity_col_verified"): _yes if r["verified"] else _no,
                             i18n.t("chrome_admin_recent_activity_col_tier"): r["tier"],
+                            i18n.t("chrome_admin_recent_activity_col_furthest"): (
+                                i18n.t("chrome_admin_step_unreadable") if r["unreadable"]
+                                else i18n.t(f"chrome_admin_step_{r['furthest_step']}") if r["furthest_step"]
+                                else i18n.t("chrome_admin_step_blank") if r["last_active"]
+                                else i18n.t("chrome_admin_step_none")
+                            ),
+                            i18n.t("chrome_admin_recent_activity_col_last_active"): (
+                                r["last_active"].strftime("%d %b %Y %H:%M") if r["last_active"] else ""
+                            ),
                             i18n.t("chrome_admin_recent_activity_col_projects"): r["projects_run"],
                             i18n.t("chrome_admin_recent_activity_col_ta_runs"): r["ta_runs"],
                             i18n.t("chrome_admin_recent_activity_col_drafted"): _yes if r["drafted"] else _no,
