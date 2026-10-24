@@ -174,7 +174,7 @@ def refresh_estimate_from_ai(
 
     try:
         data = call_ai_json(prompt, system_message=_AI_BENCHMARK_SYSTEM, config=config,
-                            max_tokens=2000, purpose="fee_benchmark")
+                            max_tokens=2000, purpose="fee_benchmark", thinking="off")
         raw_estimates = (data or {}).get("estimates") or []
         if not raw_estimates:
             raise ValueError("the AI returned no estimates")

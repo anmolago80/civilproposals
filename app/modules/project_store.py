@@ -102,6 +102,10 @@ PLAIN_KEYS = [
     # nothing was actually changed. Confirmed this exact false positive from
     # a user report before adding this key.
     "_sections_built_format",
+    # Saved answers to structured AI calls, keyed by a hash of the exact
+    # prompt (ai_interface.call_ai_json(cache=True)): reopening a project and
+    # re-asking an unchanged question costs nothing. JSON-safe by construction.
+    "ai_json_cache",
 ]
 
 # Keys holding a datetime.date (or None). Kept separate from PLAIN_KEYS

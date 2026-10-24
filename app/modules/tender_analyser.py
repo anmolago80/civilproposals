@@ -15,9 +15,11 @@ single pass.
 
 from __future__ import annotations
 
+import sys
+
 from pydantic import BaseModel, Field
 
-from modules.ai_interface import call_ai, call_ai_json, was_repaired
+from modules.ai_interface import call_ai, call_ai_json, last_stop_reason, was_repaired
 from modules.document_processor import clean_extracted_text, split_text_into_chunks
 
 
@@ -219,6 +221,10 @@ def _format_tables(tables: list | None, limit: int = 12, max_rows: int = 25) -> 
 # The split analyse_tender() makes -- one map call per chunk, then one reduce.
 # Named so the admin cost view counts chunks with the SAME parameters instead
 # of a copy that could drift.
+# Output cap for one map call (per-chunk notes). Was 1,200, and on 23 Oct 6 of 7
+# York Region map calls stopped at exactly 1,200 -- truncated notes. Unused cap
+# is not billed, so the headroom is free; a call that STILL hits it is logged.
+MAP_MAX_TOKENS = 2000
 ANALYSIS_CHUNK_SIZE = 12000
 ANALYSIS_CHUNK_OVERLAP = 300
 
@@ -265,9 +271,15 @@ def analyse_tender(
                 MAP_PROMPT_TEMPLATE.format(part=i + 1, total=len(chunks), chunk=chunk),
                 system_message=SYSTEM_MESSAGE,
                 config=config,
-                max_tokens=1200,
-                purpose="tender_analysis", step="map",
+                max_tokens=MAP_MAX_TOKENS,
+                purpose="tender_analysis", step="map", thinking="off",
             )
+            if last_stop_reason() == "max_tokens":
+                # The notes for this chunk were cut off at the cap: part of the
+                # brief never reached the reduce step. Loud in the logs so it
+                # is seen (the admin breakdown also shows stop_reason).
+                print(f"[tender_analysis] WARNING map call {i + 1}/{len(chunks)} stopped at "
+                      f"max_tokens={MAP_MAX_TOKENS}: its notes are truncated", file=sys.stderr)
             notes.append(f"--- Notes from part {i + 1}/{len(chunks)} ---\n{note}")
         source_material = "\n\n".join(notes)
 
@@ -288,7 +300,7 @@ def analyse_tender(
             "instruction; extract exactly what the brief states, just written in Spanish."
         )
     raw = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=4000,
-                       purpose="tender_analysis", step="reduce")
+                       purpose="tender_analysis", step="reduce", thinking="off")
 
     analysis = TenderAnalysis.model_validate(raw)
     analysis.user_flagged_items = _flagged_items_from_annotations(annotations)
@@ -354,7 +366,7 @@ def detect_disciplines_from_text(brief_text: str, config: dict | None = None,
         data = call_ai_json(
             DISCIPLINE_DETECTION_PROMPT.format(brief=material),
             system_message=DISCIPLINE_DETECTION_SYSTEM, config=config, max_tokens=800,
-            purpose="discipline_detection",
+            purpose="discipline_detection", thinking="off", cache=True,
         )
     except Exception as exc:
         return [], warnings + [

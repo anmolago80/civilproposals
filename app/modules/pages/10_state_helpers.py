@@ -96,6 +96,10 @@ def _init_state():
         "project_sales_pitch": "",
         "pitch_review": None,
         "pitch_questions": None,
+        # Saved answers to structured AI calls (ai_interface.call_ai_json(cache=True)),
+        # keyed by a hash of the exact prompt -- so asking the same thing of the
+        # same project twice costs once. Saved with the project.
+        "ai_json_cache": {},
         "tender_summary_buffer": None,
         "graphics": None,
         "weighting_chart_png": None,
@@ -846,6 +850,7 @@ def _reset_downstream_from_brief() -> None:
         "experience_intro": None,
         "pitch_review": None,
         "pitch_questions": None,
+        "ai_json_cache": {},   # derived from the old brief's prompts
         # Round 3, Part 7b: every drafted artefact above is being wiped
         # because it belonged to the brief that just got replaced -- the
         # language it was generated in belongs with it. Without this,

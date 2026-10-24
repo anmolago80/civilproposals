@@ -982,7 +982,7 @@ def suggest_proposal_inclusion(
 
     try:
         data = call_ai_json(prompt, system_message=_INCLUSION_SYSTEM_MESSAGE, config=config, max_tokens=2000,
-                        purpose="resourcing")
+                        purpose="resourcing", thinking="off", cache=True)
     except Exception:
         for slot in discipline_slots:
             result[slot] = {

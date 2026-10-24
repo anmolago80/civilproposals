@@ -126,6 +126,6 @@ def draft_experience_intro(
         )
 
     data = call_ai_json(prompt, system_message=SYSTEM_MESSAGE, config=config, max_tokens=800,
-                        purpose="experience_intro")
+                        purpose="experience_intro", thinking="off")
 
     return ExperienceIntro(paragraph=(data.get("paragraph") or "").strip())
