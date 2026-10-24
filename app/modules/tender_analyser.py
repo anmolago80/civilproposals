@@ -216,6 +216,22 @@ def _format_tables(tables: list | None, limit: int = 12, max_rows: int = 25) -> 
     )
 
 
+# The split analyse_tender() makes -- one map call per chunk, then one reduce.
+# Named so the admin cost view counts chunks with the SAME parameters instead
+# of a copy that could drift.
+ANALYSIS_CHUNK_SIZE = 12000
+ANALYSIS_CHUNK_OVERLAP = 300
+
+
+def clean_and_chunk_tender_text(document_text: str) -> tuple[str, list[str]]:
+    """(cleaned text, chunks) exactly as analyse_tender() will process the
+    brief. len(chunks) <= 1 means no map step at all (a single reduce call)."""
+    cleaned = clean_extracted_text(document_text)
+    return cleaned, split_text_into_chunks(
+        cleaned, chunk_size=ANALYSIS_CHUNK_SIZE, overlap=ANALYSIS_CHUNK_OVERLAP,
+    )
+
+
 def analyse_tender(
     document_text: str,
     annotations: list[dict] | None = None,
@@ -236,8 +252,7 @@ def analyse_tender(
     the written-out prose changes -- extracted facts, figures, and names are
     never altered on account of this setting.
     """
-    cleaned = clean_extracted_text(document_text)
-    chunks = split_text_into_chunks(cleaned, chunk_size=12000, overlap=300)
+    cleaned, chunks = clean_and_chunk_tender_text(document_text)
 
     if len(chunks) <= 1:
         source_material = cleaned

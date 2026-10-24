@@ -203,11 +203,20 @@ with tabs[1]:
                 if _docs_limit_msg:
                     _package_errors.append(_docs_limit_msg)
             per_file = [document_processor.extract_text_from_file(f) for f in _doc_uploads_kept]
+            # What was uploaded, for the admin "Uploaded (MB)" figure (db.UploadLog)
+            # -- name, size and extracted pages only; the file is never stored.
+            _upload_log_rows = [
+                (_uf.name, getattr(_uf, "size", None) or len(_uf.getvalue()), getattr(_ux, "page_count", 0) or 0)
+                for _uf, _ux in zip(_doc_uploads_kept, per_file)
+            ]
             if _files_budget is not None:
                 _files_budget = max(0, _files_budget - len(_doc_uploads_kept))
             _zip_skipped = 0
             for _zf in _zip_uploads:
                 _pkg = package_intake.process_zip(_zf.getvalue(), _zf.name)
+                _zip_pages = 0
+                _upload_log_rows.append((_zf.name, getattr(_zf, "size", None) or len(_zf.getvalue()), 0))
+                _zip_row_index = len(_upload_log_rows) - 1
                 if _pkg.fatal_error:
                     _package_errors.append(_pkg.fatal_error)
                     continue
@@ -216,6 +225,10 @@ with tabs[1]:
                         continue
                     if _files_budget is None or _files_budget > 0:
                         per_file.append(_cf.extracted)
+                        _zip_pages += getattr(_cf.extracted, "page_count", 0) or 0
+                        _upload_log_rows[_zip_row_index] = (
+                            _upload_log_rows[_zip_row_index][0], _upload_log_rows[_zip_row_index][1], _zip_pages,
+                        )
                         if _files_budget is not None:
                             _files_budget -= 1
                     else:
@@ -268,6 +281,11 @@ with tabs[1]:
             _reset_downstream_from_brief()
             st.session_state.tender_extracted = extracted
             st.session_state._tender_extract_error = None
+            if IS_SAAS_MODE and current_user:
+                try:
+                    db.log_upload(current_user.id, _current_project_key(), _upload_log_rows)
+                except Exception as _exc:
+                    print(f"[upload_log] failed (ignored): {_exc}", file=sys.stderr)
 
     if st.session_state.get("_tender_extract_error"):
         st.error(st.session_state._tender_extract_error)

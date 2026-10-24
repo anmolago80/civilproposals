@@ -213,6 +213,13 @@ with st.sidebar:
                    f"recorded, cost unknown)" if _cost["unpriced_calls"] else "")
                 + ". Prices are estimates from ai_interface.MODEL_PRICES_PER_MTOK."
             )
+            def _fmt_count(n) -> str:
+                # Thousands separators; an em dash when the figure isn't known.
+                return f"{int(n):,}" if n is not None else "\u2014"
+
+            def _fmt_mb(mb) -> str:
+                return f"{mb:.2f}" if mb is not None else i18n.t("chrome_admin_not_recorded")
+
             if _cost["per_project"]:
                 st.markdown("**Cost by project**")
                 st.dataframe(
@@ -223,11 +230,16 @@ with st.sidebar:
                             "Est. cost (USD)": round(p["cost_usd"], 2),
                             "Tokens in": p["input_tokens"],
                             "Tokens out": p["output_tokens"],
+                            i18n.t("chrome_admin_col_tender_pages"): _fmt_count(p["tender_pages"]),
+                            i18n.t("chrome_admin_col_tender_chars"): _fmt_count(p["tender_chars"]),
+                            i18n.t("chrome_admin_col_chunks"): _fmt_count(p["chunks"]),
+                            i18n.t("chrome_admin_col_uploaded_mb"): _fmt_mb(p["uploaded_mb"]),
                         }
                         for p in _cost["per_project"]
                     ],
                     use_container_width=True, hide_index=True,
                 )
+                st.caption(i18n.t("chrome_admin_size_caption"))
 
             if _stats["recent_bids"]:
                 st.markdown("#### Recent bids")
@@ -290,6 +302,10 @@ with st.sidebar:
                             i18n.t("chrome_admin_recent_activity_col_last_active"): (
                                 r["last_active"].strftime("%d %b %Y %H:%M") if r["last_active"] else ""
                             ),
+                            i18n.t("chrome_admin_col_tender_pages"): _fmt_count(r["tender_pages"]),
+                            i18n.t("chrome_admin_col_tender_chars"): _fmt_count(r["tender_chars"]),
+                            i18n.t("chrome_admin_col_chunks"): _fmt_count(r["chunks"]),
+                            i18n.t("chrome_admin_col_uploaded_mb"): _fmt_mb(r["uploaded_mb"]),
                             i18n.t("chrome_admin_recent_activity_col_projects"): r["projects_run"],
                             i18n.t("chrome_admin_recent_activity_col_ta_runs"): r["ta_runs"],
                             i18n.t("chrome_admin_recent_activity_col_drafted"): _yes if r["drafted"] else _no,

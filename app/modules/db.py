@@ -21,6 +21,7 @@ logged-in user) belongs in st.session_state, in app.py / auth.py, not here.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 import time
@@ -290,6 +291,71 @@ class ArtifactEvent(Base):
     project_key = Column(String, nullable=False)
     artifact_type = Column(String, nullable=False)
     created_at = Column(DateTime, default=_now)
+
+
+class UploadLog(Base):
+    """One row per tender file a user uploads (filename, size, pages) -- the
+    only record of the ORIGINAL upload size, which a saved project does not
+    keep (project_store stores the extracted text, never the file). Written
+    from the Upload tab; the file itself is never stored.
+
+    project_key is the same key the metering uses (name|tender|client|brief
+    hash). The admin view matches on the trailing brief hash, so a project
+    renamed after upload still finds its uploads. Rows exist only for uploads
+    made after this table was introduced -- older projects show "not
+    recorded"."""
+    __tablename__ = "upload_log"
+
+    id = Column(String, primary_key=True, default=_uid)
+    user_id = Column(String, nullable=False, index=True)
+    project_key = Column(String, nullable=False, default="")
+    filename = Column(String, default="")
+    size_bytes = Column(Integer, default=0)
+    page_count = Column(Integer, default=0)
+    uploaded_at = Column(DateTime, default=_now)
+
+
+def log_upload(user_id: str, project_key: str, files: list[tuple[str, int, int]]) -> int:
+    """Records uploaded tender files as (filename, size_bytes, page_count).
+    Best-effort for the caller (wrap in try/except -- a logging failure must
+    never fail an upload). A file already recorded for this user + project
+    (same name and size) is not recorded twice, so re-uploading the same
+    files doesn't inflate the project's "Uploaded (MB)". Returns rows added."""
+    if not user_id or not files:
+        return 0
+    project_key = (project_key or "").strip()
+    added = 0
+    with get_session() as s:
+        for filename, size_bytes, page_count in files:
+            filename = (filename or "")[:300]
+            size_bytes = int(size_bytes or 0)
+            if s.query(UploadLog.id).filter(
+                UploadLog.user_id == user_id, UploadLog.project_key == project_key,
+                UploadLog.filename == filename, UploadLog.size_bytes == size_bytes,
+            ).first() is not None:
+                continue
+            s.add(UploadLog(user_id=user_id, project_key=project_key, filename=filename,
+                            size_bytes=size_bytes, page_count=int(page_count or 0)))
+            added += 1
+        s.commit()
+    return added
+
+
+def brief_hash_of_key(project_key: str) -> str:
+    """The brief-text hash segment of a metering project key
+    ("name|tender|client|hash", or just "hash" when the names are blank)."""
+    return (project_key or "").rsplit("|", 1)[-1].strip()
+
+
+def _upload_mb_by_user_hash(s, user_ids: list[str]) -> dict[tuple[str, str], float]:
+    """{(user_id, brief_hash): MB uploaded} from upload_log -- distinct
+    (filename, size) per project so a re-upload isn't counted twice."""
+    sizes: dict[tuple[str, str], dict[tuple[str, int], int]] = {}
+    for uid, key, fname, size in s.query(
+        UploadLog.user_id, UploadLog.project_key, UploadLog.filename, UploadLog.size_bytes,
+    ).filter(UploadLog.user_id.in_(user_ids)).all():
+        sizes.setdefault((uid, brief_hash_of_key(key)), {})[(fname, int(size or 0))] = int(size or 0)
+    return {k: sum(v.values()) / (1024 * 1024) for k, v in sizes.items()}
 
 
 class ProjectPasses(Base):
@@ -702,6 +768,23 @@ def ai_cost_summary(limit_projects: int = 25) -> dict:
             .limit(limit_projects)
             .all()
         )
+        # Size of each project's brief. ONE saved project per account is
+        # loaded (its latest -- see _latest_project_progress), so a row gets
+        # pages/chars/chunks only when it IS that project (matched on the
+        # brief-text hash in its key); MB comes from upload_log whatever the
+        # project, and is None ("not recorded") for older uploads.
+        _owners = sorted({r[2] for r in rows if r[2]})
+        _latest = _latest_project_progress(s, _owners) if _owners else {}
+        _mb = _upload_mb_by_user_hash(s, _owners) if _owners else {}
+    def _size_stats(key: str, uid: str) -> dict:
+        bhash = brief_hash_of_key(key)
+        latest = _latest.get(uid)
+        stats = {"tender_pages": None, "tender_chars": None, "chunks": None,
+                 "uploaded_mb": _mb.get((uid, bhash)) if bhash else None}
+        if latest and bhash and latest["brief_hash"] == bhash:
+            stats.update(tender_pages=latest["tender_pages"], tender_chars=latest["tender_chars"],
+                         chunks=latest["chunks"])
+        return stats
     return {
         "total_cost_usd": float(total_cost),
         "total_calls": int(total_calls),
@@ -715,6 +798,7 @@ def ai_cost_summary(limit_projects: int = 25) -> dict:
                 "cost_usd": float(r[4]),
                 "input_tokens": int(r[5]),
                 "output_tokens": int(r[6]),
+                **_size_stats(r[0] or "", r[2] or ""),
             }
             for r in rows
         ],
@@ -830,9 +914,15 @@ def _recent_activity_rows(s, users: list, signups: list[dict], usage_by_user: di
             "drafted": u.id in drafted,
             "downloads": downloads.get(u.id, []),
             "ip_shared": ip_shared,
-            **progress.get(u.id, {"furthest_step": "", "last_active": None, "project_name": "", "unreadable": False}),
+            **progress.get(u.id, _NO_PROJECT_PROGRESS),
         })
     return rows
+
+
+_NO_PROJECT_PROGRESS = {
+    "furthest_step": "", "last_active": None, "project_name": "", "unreadable": False,
+    "tender_pages": None, "tender_chars": None, "chunks": None, "brief_hash": "", "uploaded_mb": None,
+}
 
 
 def _latest_project_progress(s, user_ids: list[str]) -> dict[str, dict]:
@@ -844,7 +934,7 @@ def _latest_project_progress(s, user_ids: list[str]) -> dict[str, dict]:
     The project zips can be several MB, so only the id/timestamp of each
     account's newest project is fetched in bulk and the bytes are loaded one
     project at a time (15 at most) and dropped straight after parsing."""
-    from modules import project_progress
+    from modules import project_progress, tender_analyser
 
     if not user_ids:
         return {}
@@ -872,13 +962,26 @@ def _latest_project_progress(s, user_ids: list[str]) -> dict[str, dict]:
                     for (k,) in s.query(ArtifactEvent.project_key).filter(ArtifactEvent.user_id == uid).all()
                 )
             step = project_progress.furthest_step(payload, export_recorded)
+        tender = (payload or {}).get("tender_extracted") or {}
+        text = tender.get("text") or ""
         out[uid] = {
             "furthest_step": step,
             "last_active": stamp,
             "project_name": (name or ""),
             "unreadable": payload is None,
+            # Size of the brief as STORED (the original file is not kept):
+            # extracted page count and text, and how many map chunks
+            # tender_analyser will split it into.
+            "tender_pages": (tender.get("page_count") or 0) if tender else None,
+            "tender_chars": len(text) if tender else None,
+            "chunks": len(tender_analyser.clean_and_chunk_tender_text(text)[1]) if text else (0 if tender else None),
+            "brief_hash": hashlib.sha256(text.encode("utf-8")).hexdigest()[:16] if text else "",
         }
         del blob, payload
+    # Original upload size, from upload_log (only uploads since it was introduced).
+    mb = _upload_mb_by_user_hash(s, list(out))
+    for uid, row in out.items():
+        row["uploaded_mb"] = mb.get((uid, row["brief_hash"])) if row["brief_hash"] else None
     return out
 
 
@@ -1198,6 +1301,27 @@ def _run_light_migrations() -> None:
         conn.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email_normalized ON users (email_normalized)"
         ))
+
+    # Re-price stored AI-call estimates for the models whose table entry was
+    # wrong (see ai_interface.MODEL_PRICES_PER_MTOK's note): estimated_cost_usd
+    # is written once per call, so correcting the table alone would leave
+    # every historical Sonnet 5 call 50% too high -- in the admin totals AND in
+    # limits.TRIAL_AI_SPEND_CEILING_USD, which sums these rows. Recomputed from
+    # the stored token counts; idempotent, and only rows that differ are
+    # rewritten, so it is a no-op after the first run (and safe when the web
+    # and worker services both start).
+    if "ai_call_log" in inspector.get_table_names():
+        from modules import ai_interface
+        for _model in ("claude-sonnet-5", "claude-opus-4-6", "gemini-3.1-pro-preview"):
+            _pi, _po = ai_interface.MODEL_PRICES_PER_MTOK[_model]
+            _expr = ("ROUND(CAST((COALESCE(input_tokens, 0) * :pi + COALESCE(output_tokens, 0) * :po) "
+                     "/ 1000000.0 AS NUMERIC), 6)")
+            with engine.begin() as conn:
+                conn.execute(text(
+                    f"UPDATE ai_call_log SET estimated_cost_usd = {_expr} "
+                    f"WHERE model = :m AND (input_tokens IS NOT NULL OR output_tokens IS NOT NULL) "
+                    f"AND (estimated_cost_usd IS NULL OR ABS(estimated_cost_usd - {_expr}) > 0.0000005)"
+                ), {"m": _model, "pi": _pi, "po": _po})
 
     if "jobs" in inspector.get_table_names():
         _job_columns = {c["name"] for c in inspector.get_columns("jobs")}

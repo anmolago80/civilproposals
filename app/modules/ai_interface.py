@@ -81,18 +81,46 @@ _usage_context: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
 # Approximate USD per MILLION tokens (input, output). These are estimates
 # for internal cost visibility only -- update them when provider pricing
 # changes; an unknown model logs its token counts with cost NULL rather
-# than guessing. Last reviewed: Aug 2026.
+# than guessing. Last reviewed: 25 Oct 2026.
+#
+# Anthropic rows are from https://platform.claude.com/docs/en/about-claude/pricing
+# (base input / output, no caching or batch discount -- this app uses neither).
+# claude-sonnet-5 was carried here at (3.00, 15.00), which overstated every
+# Sonnet 5 call by 50%: Anthropic's own bill for 23 Oct UTC was US$1.88, which is
+# exactly the York Region tokens (206,431 in / 146,745 out) at (2.00, 10.00);
+# the admin panel showed $2.82. claude-opus-4-6 was (15, 75) -- the retired
+# Opus 4 / 4.1 price; Opus 4.5 through 5 are (5, 25).
+# OpenAI / Google rows are NOT from the providers' own pages (third-party
+# trackers only -- re-check against platform.openai.com / ai.google.dev).
 MODEL_PRICES_PER_MTOK: dict[str, tuple[float, float]] = {
-    # Anthropic
-    "claude-sonnet-5": (3.00, 15.00),
+    # Anthropic -- Claude 5 family
+    "claude-fable-5-1": (10.00, 50.00),
+    "claude-fable-5": (10.00, 50.00),
+    "claude-opus-5-5": (4.00, 20.00),
+    "claude-opus-5": (5.00, 25.00),
+    "claude-sonnet-5-5": (2.00, 10.00),
+    "claude-sonnet-5": (2.00, 10.00),
+    "claude-haiku-5-5": (0.10, 0.50),     # prompts up to 100k tokens; see LONG_PROMPT_PRICES
+    # Anthropic -- Claude 4.x
+    "claude-opus-4-8": (5.00, 25.00),
+    "claude-opus-4-7": (5.00, 25.00),
+    "claude-opus-4-6": (5.00, 25.00),
+    "claude-opus-4-5": (5.00, 25.00),
+    "claude-sonnet-4-6": (3.00, 15.00),
     "claude-sonnet-4-5": (3.00, 15.00),
     "claude-haiku-4-5": (1.00, 5.00),
-    "claude-opus-4-6": (15.00, 75.00),
     # OpenAI
     "gpt-4o": (2.50, 10.00),
     "gpt-4o-mini": (0.15, 0.60),
-    # Google
-    "gemini-3.1-pro-preview": (1.25, 10.00),
+    # Google (standard rate, prompts up to 200k tokens)
+    "gemini-3.1-pro-preview": (2.00, 12.00),
+}
+
+# Models whose rate steps up for a long PROMPT: {model: (threshold input
+# tokens, (input, output) price once a single call's input exceeds it)}.
+# Claude Haiku 5.5 is the only one in the table above.
+LONG_PROMPT_PRICES: dict[str, tuple[int, tuple[float, float]]] = {
+    "claude-haiku-5-5": (100_000, (0.50, 2.50)),
 }
 
 
@@ -111,13 +139,26 @@ def set_usage_context(user_id: str | None = None, project_key: str = "",
         })
 
 
+def _canonical_model_id(model: str) -> str:
+    """The pricing-table key for a model id as the API reports it: trimmed,
+    lower-cased, and without a trailing date snapshot ("-20261001") so a dated
+    id prices the same as its alias."""
+    model = (model or "").strip().lower()
+    stripped = re.sub(r"-\d{8}$", "", model)
+    return stripped if stripped in MODEL_PRICES_PER_MTOK else model
+
+
 def estimate_cost_usd(model: str, input_tokens: int | None, output_tokens: int | None) -> float | None:
     """None when the model has no entry in MODEL_PRICES_PER_MTOK (unknown
     cost is a different fact from zero cost) or when neither token count is
     available."""
-    prices = MODEL_PRICES_PER_MTOK.get((model or "").strip())
+    model = _canonical_model_id(model)
+    prices = MODEL_PRICES_PER_MTOK.get(model)
     if not prices or (input_tokens is None and output_tokens is None):
         return None
+    long_rule = LONG_PROMPT_PRICES.get(model)
+    if long_rule and (input_tokens or 0) > long_rule[0]:
+        prices = long_rule[1]
     in_price, out_price = prices
     return round(
         (input_tokens or 0) / 1_000_000 * in_price
